@@ -117,6 +117,26 @@ class StickerRepositoryImplTest {
         )
     }
 
+    @Test
+    fun `the mark of the last WhatsApp import is kept in the preferences`() = runTest {
+        coEvery { preferences.whatsAppImportedUntil() } returns 200
+        coEvery { preferences.markWhatsAppImported(any()) } returns Unit
+
+        assertEquals(200L, repository.whatsAppImportedUntil())
+        repository.markWhatsAppImported(300)
+
+        coVerify(exactly = 1) { preferences.markWhatsAppImported(300) }
+    }
+
+    @Test
+    fun `a mark that cannot be read or written is no error, and every file counts as new`() = runTest {
+        coEvery { preferences.whatsAppImportedUntil() } throws IOException("disk")
+        coEvery { preferences.markWhatsAppImported(any()) } throws IOException("disk")
+
+        assertEquals(0L, repository.whatsAppImportedUntil())
+        repository.markWhatsAppImported(300)
+    }
+
     /** Makes every download answer with [body]. */
     private fun serve(body: ByteArray) {
         every { httpClient.newCall(any()) } answers {

@@ -21,13 +21,35 @@ It is not a feature gap and not tech debt — it is an unfinished check, and it 
 here because a cloud agent has no other way to learn that the work is not fully done.
 Delete an item once it has been verified (or once a fix for what the check found ships).
 
+### The sticker manager's *All stickers* tab and the new-only WhatsApp import (2026-10-10)
+
+`docs/plans/sticker-manager-and-names.md` step 4. JVM tests cover the selection, its actions, the
+search and the filter. Nothing ran on a device.
+
+1. *All stickers* shows every sticker under its pack's title, six in a row on the S24 and the
+   S25. With several hundred stickers the grid scrolls without a stutter.
+2. The search finds by an emoji, by a word for one (*cat*, *Katze*) and by a pack's name. The
+   keyboard does not cover the last row of the grid.
+3. A long press starts a selection, and a tap adds a sticker from another pack. The top bar
+   shows the count, *Move to pack*, *Delete from library* and a menu with *New pack from these*
+   and *Add to favourites*. All of it fits on a narrow phone.
+4. *Move to pack* moves stickers from two packs into a third. *New pack from these* makes the
+   pack, and the stickers are gone from their old packs.
+5. *Delete from library* asks once. The stickers leave every pack and the favourites, and a
+   WhatsApp import with *Show all* and *Select all* does not bring them back.
+6. A pack's own grid has the same bar, plus *Remove from pack* in the menu.
+7. Import from WhatsApp, then open *From WhatsApp* again: the grid says *Nothing new*. Receive
+   a sticker in WhatsApp and open it again: only that sticker is shown. *Show all* shows the
+   whole folder.
+8. Close the WhatsApp view without importing and open it again: the same new files are shown.
+9. A debug build opens both grids without a crash (`docs/GOTCHAS.md`, the dex verifier).
+
 ### The sticker manager's *Packs* tab (2026-10-10)
 
 `docs/plans/sticker-manager-and-names.md` step 3. JVM tests cover the groups, the switch, the
 selection bar and the rule a drag follows. No test drags a row, and nothing ran on a device.
 
 1. Settings → Storage → *Stickers* opens the manager with the tabs *Packs* and *All stickers*.
-   *All stickers* is empty.
 2. The **+** in the top bar offers *Create*, *From WhatsApp* and *From files*, and each works.
 3. Switch *Own thumbnail* on for a WhatsApp pack. It moves to *In the picker row*, and the
    Stickers tab of a chat shows its thumbnail. Switch it off again.

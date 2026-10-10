@@ -7,6 +7,7 @@ import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.floatPreferencesKey
 import androidx.datastore.preferences.core.intPreferencesKey
+import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
@@ -80,6 +81,9 @@ class PreferencesDataStore @Inject constructor(
 
     // Stickers deleted from the library
     private val deletedStickerIdsKey = stringSetPreferencesKey("deleted_sticker_ids")
+
+    // The WhatsApp sticker folder at the last import
+    private val whatsAppImportedUntilKey = longPreferencesKey("whatsapp_stickers_imported_until")
 
     // Klipy
     private val klipyCustomerIdKey = stringPreferencesKey("klipy_customer_id")
@@ -408,13 +412,31 @@ class PreferencesDataStore @Inject constructor(
     suspend fun addRecentSticker(stickerId: String) = pushRecent(recentStickerIdsKey, stickerId, cap = 30)
 
     /**
-     * Forgets the sticker recents and the deleted stickers. They are the
-     * signed-in user's, and the next user's library may hold the same stickers.
+     * Forgets the sticker recents, the deleted stickers and the mark of the last
+     * WhatsApp import. They are the signed-in user's, and the next user's
+     * library may hold the same stickers, or none of the folder's.
      */
     suspend fun clearStickerLists() {
         context.dataStore.edit { prefs ->
             prefs.remove(recentStickerIdsKey)
             prefs.remove(deletedStickerIdsKey)
+            prefs.remove(whatsAppImportedUntilKey)
+        }
+    }
+
+    // --- The WhatsApp sticker folder at the last import ---
+
+    /**
+     * The newest `lastModified` the WhatsApp sticker folder held when an import
+     * from it last finished, or 0 before the first one. A file newer than this
+     * is new to the user. Device-only.
+     */
+    suspend fun whatsAppImportedUntil(): Long = context.dataStore.data.first()[whatsAppImportedUntilKey] ?: 0L
+
+    /** Moves the mark forward to [lastModified]. It never moves back. */
+    suspend fun markWhatsAppImported(lastModified: Long) {
+        context.dataStore.edit { prefs ->
+            if (lastModified > (prefs[whatsAppImportedUntilKey] ?: 0L)) prefs[whatsAppImportedUntilKey] = lastModified
         }
     }
 

@@ -9,7 +9,10 @@ import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertIsOff
 import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.assertTextContains
+import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasSetTextAction
+import androidx.compose.ui.test.isDialog
+import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -192,6 +195,125 @@ class StickerLibraryScreenTest {
         composeTestRule.onNodeWithText("Packs").performClick()
 
         assertEquals(StickerManagerTab.PACKS, picked)
+    }
+
+    private fun allStickers(
+        vararg packs: StickerPack,
+        selected: Set<StickerEntry> = emptySet(),
+        query: String = "",
+    ) = StickerLibraryUiState(
+        isLoading = false,
+        packs = packs.toList(),
+        tab = StickerManagerTab.ALL_STICKERS,
+        selectedStickers = selected,
+        query = query,
+    )
+
+    @Test
+    fun `the grid of every sticker titles each pack with its count and shows a shared sticker under both`() {
+        show(allStickers(cats, dogs, birds))
+
+        composeTestRule.onNodeWithText("Cats · 2").assertIsDisplayed()
+        composeTestRule.onNodeWithText("Dogs · 2").assertIsDisplayed()
+        // An empty pack has no title.
+        composeTestRule.onNodeWithText("Birds", substring = true).assertDoesNotExist()
+        composeTestRule.onNodeWithTag(stickerEntryTag(StickerEntry("Cats", "shared"))).assertExists()
+        composeTestRule.onNodeWithTag(stickerEntryTag(StickerEntry("Dogs", "shared"))).assertExists()
+    }
+
+    @Test
+    fun `a long press in the grid of every sticker picks an entry, and a tap picks only during a selection`() {
+        val toggled = mutableListOf<StickerEntry>()
+        show(allStickers(cats, dogs), StickerLibraryActions(onToggleSticker = { toggled += it }))
+
+        composeTestRule.onNodeWithTag(stickerEntryTag(StickerEntry("Cats", "c1"))).performClick()
+        assertEquals(emptyList<StickerEntry>(), toggled)
+        composeTestRule.onNodeWithTag(stickerEntryTag(StickerEntry("Dogs", "shared"))).performTouchInput { longClick() }
+
+        assertEquals(listOf(StickerEntry("Dogs", "shared")), toggled)
+    }
+
+    @Test
+    fun `the search field hands its text over, and a search without a hit says so`() {
+        val typed = mutableListOf<String>()
+        show(allStickers(cats, query = "fox"), StickerLibraryActions(onSetQuery = { typed += it }))
+
+        composeTestRule.onNodeWithText("No stickers for “fox”").assertIsDisplayed()
+        composeTestRule.onNodeWithText("Cats · 2").assertDoesNotExist()
+        composeTestRule.onNodeWithContentDescription("Clear search").performClick()
+        composeTestRule.onNodeWithTag(STICKER_SEARCH_TAG).performTextInput("x")
+
+        assertEquals("", typed.first())
+        assertEquals(2, typed.size)
+    }
+
+    @Test
+    fun `a selection across packs offers the four actions and no removal from one pack`() {
+        val done = mutableListOf<String>()
+        val selection = setOf(StickerEntry("Cats", "shared"), StickerEntry("Dogs", "shared"), StickerEntry("Dogs", "d1"))
+        show(
+            allStickers(cats, dogs, birds, favourites, selected = selection),
+            StickerLibraryActions(
+                onMoveSelectedTo = { done += "move:$it" },
+                onNewPackFromSelected = { done += "new:$it" },
+                onFavouriteSelected = { done += "favourite" },
+                onDeleteSelectedStickers = { done += "delete" },
+                onToggleSticker = { done += "toggle:${it.stickerId}" },
+            ),
+        )
+
+        composeTestRule.onNodeWithText("3 selected").assertIsDisplayed()
+        composeTestRule.onNodeWithContentDescription("Add stickers").assertDoesNotExist()
+        // A tap picks while a selection runs.
+        composeTestRule.onNodeWithTag(stickerEntryTag(StickerEntry("Cats", "c1"))).performClick()
+
+        composeTestRule.onNodeWithContentDescription("Move to pack").performClick()
+        // Favourites is no target. The selection comes from two packs, so both of them are.
+        composeTestRule.onNodeWithText("Favourites").assertDoesNotExist()
+        composeTestRule.onNodeWithText("Birds").performClick()
+
+        composeTestRule.onNodeWithContentDescription("More for the selection").performClick()
+        composeTestRule.onNodeWithText("Remove from pack").assertDoesNotExist()
+        composeTestRule.onNodeWithText("Add to favourites").performClick()
+
+        composeTestRule.onNodeWithContentDescription("More for the selection").performClick()
+        composeTestRule.onNodeWithText("New pack from these").performClick()
+        composeTestRule.onNodeWithText("Create").assertIsNotEnabled()
+        composeTestRule.onNode(hasSetTextAction() and hasAnyAncestor(isDialog())).performTextInput("Best")
+        composeTestRule.onNodeWithText("Create").performClick()
+
+        composeTestRule.onNodeWithContentDescription("Delete from library").performClick()
+        assertEquals(false, "delete" in done)
+        // Three entries, and one sticker is picked in two packs.
+        composeTestRule.onNodeWithText("Delete 2 stickers from your library?", substring = true).assertIsDisplayed()
+        composeTestRule.onNodeWithText("WhatsApp import", substring = true).assertIsDisplayed()
+        composeTestRule.onNodeWithText("Delete").performClick()
+
+        assertEquals(listOf("toggle:c1", "move:Birds", "favourite", "new:Best", "delete"), done)
+    }
+
+    @Test
+    fun `a pack's own grid has the same bar, and can take a sticker out of that pack`() {
+        val done = mutableListOf<String>()
+        val toggled = mutableListOf<StickerEntry>()
+        show(
+            library(cats, dogs).copy(openPackId = "Cats", selectedStickers = setOf(StickerEntry("Cats", "c1"))),
+            StickerLibraryActions(onRemoveSelected = { done += "remove" }, onToggleSticker = { toggled += it }),
+        )
+
+        composeTestRule.onNodeWithText("1 selected").assertIsDisplayed()
+        composeTestRule.onNodeWithContentDescription("Delete from library").assertExists()
+        composeTestRule.onNodeWithTag(stickerCellTag("shared")).performClick()
+        composeTestRule.onNodeWithContentDescription("Move to pack").performClick()
+        // The pack the selection is in is no target.
+        composeTestRule.onNodeWithText("Dogs").assertIsDisplayed()
+        composeTestRule.onNodeWithText("Cats").assertDoesNotExist()
+        composeTestRule.onNodeWithText("Cancel").performClick()
+        composeTestRule.onNodeWithContentDescription("More for the selection").performClick()
+        composeTestRule.onNodeWithText("Remove from pack").performClick()
+
+        assertEquals(listOf("remove"), done)
+        assertEquals(listOf(StickerEntry("Cats", "shared")), toggled)
     }
 
     @Test

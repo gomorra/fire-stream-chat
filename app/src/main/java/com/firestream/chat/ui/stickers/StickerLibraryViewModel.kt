@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.firestream.chat.domain.model.AppError
 import com.firestream.chat.domain.model.StickerPack
+import com.firestream.chat.domain.model.StickerPackKind
 import com.firestream.chat.domain.model.WhatsAppStickerFile
 import com.firestream.chat.domain.repository.StickerRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -15,14 +16,32 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
-/** The WhatsApp sticker folder as it is offered for import. [selected] holds file uris. */
+/**
+ * The WhatsApp sticker folder as it is offered for import. [selected] holds file uris.
+ *
+ * [importedUntil] is the newest `lastModified` the folder held at the last
+ * finished import, or 0 before the first one. Only the files newer than that
+ * are shown, until [showAll] is switched on.
+ */
 data class WhatsAppImportState(
     val isLoading: Boolean = true,
     val files: List<WhatsAppStickerFile> = emptyList(),
     val selected: Set<String> = emptySet(),
+    val importedUntil: Long = 0,
+    val showAll: Boolean = false,
 ) {
-    val allSelected: Boolean get() = files.isNotEmpty() && selected.size == files.size
+    /** Whether there is an earlier import to tell new files from. Without one every file is shown, and there is no switch. */
+    val hasEarlierImport: Boolean get() = importedUntil > 0
+
+    /** The files the grid shows, in the folder's order. */
+    val shownFiles: List<WhatsAppStickerFile> =
+        if (showAll || importedUntil <= 0) files else files.filter { it.lastModified > importedUntil }
+
+    val allSelected: Boolean get() = shownFiles.isNotEmpty() && shownFiles.all { it.uri in selected }
 }
+
+/** One sticker in one pack. A sticker that two packs hold is two entries. */
+data class StickerEntry(val packId: String, val stickerId: String)
 
 /** The two tabs of the sticker manager. */
 enum class StickerManagerTab(val title: String) {
@@ -38,8 +57,13 @@ data class StickerLibraryUiState(
     val selectedPackIds: Set<String> = emptySet(),
     /** The pack whose grid is shown, or `null` for the list of packs. */
     val openPackId: String? = null,
-    /** The stickers picked in the open pack's grid, to move or remove. */
-    val selectedStickerIds: Set<String> = emptySet(),
+    /**
+     * The stickers picked in a grid. In the open pack's grid every entry names
+     * that pack. In the grid of every sticker a selection can span packs.
+     */
+    val selectedStickers: Set<StickerEntry> = emptySet(),
+    /** What the search field of the *All stickers* tab holds. */
+    val query: String = "",
     /** The WhatsApp folder view, shown over everything else while it is not `null`. */
     val whatsApp: WhatsAppImportState? = null,
     val isImporting: Boolean = false,
@@ -58,6 +82,19 @@ data class StickerLibraryUiState(
 
     /** The repository refuses a merge of fewer than two packs. */
     val canMerge: Boolean get() = selectedPackIds.size >= 2
+
+    /** How many stickers the selection holds. A sticker picked in two packs counts once. */
+    val selectedStickerCount: Int get() = selectedStickers.mapTo(HashSet()) { it.stickerId }.size
+
+    /**
+     * The packs the selection can move to. Not *Favourites*, which has its own
+     * action, and not the pack that all of the selection is in.
+     */
+    val moveTargets: List<StickerPack>
+        get() {
+            val only = selectedStickers.mapTo(HashSet()) { it.packId }.singleOrNull()
+            return packs.filter { it.kind != StickerPackKind.FAVOURITES && it.id != only }
+        }
 }
 
 /**
@@ -88,13 +125,12 @@ class StickerLibraryViewModel @Inject constructor(
                     observedPacks = packs
                     _uiState.update { state ->
                         val open = packs.firstOrNull { it.id == state.openPackId }
-                        val present = open?.stickers.orEmpty().mapTo(HashSet()) { it.id }
                         val selectable = packs.filter { it.kind.isNamed }.mapTo(HashSet()) { it.id }
                         state.copy(
                             isLoading = false,
                             packs = packs,
                             openPackId = open?.id,
-                            selectedStickerIds = state.selectedStickerIds.filterTo(LinkedHashSet()) { it in present },
+                            selectedStickers = state.selectedStickers.heldBy(packs),
                             selectedPackIds = state.selectedPackIds.filterTo(LinkedHashSet()) { it in selectable },
                         )
                     }
@@ -102,7 +138,11 @@ class StickerLibraryViewModel @Inject constructor(
         }
     }
 
-    fun selectTab(tab: StickerManagerTab) = _uiState.update { it.copy(tab = tab, selectedPackIds = emptySet()) }
+    /** A selection belongs to the tab it was made in, so changing the tab ends it. */
+    fun selectTab(tab: StickerManagerTab) =
+        _uiState.update { it.copy(tab = tab, selectedPackIds = emptySet(), selectedStickers = emptySet()) }
+
+    fun setQuery(query: String) = _uiState.update { it.copy(query = query) }
 
     /** Adds the pack to the selection or takes it out. *Favourites* and *Saved stickers* cannot be merged, so they are never selected. */
     fun togglePack(packId: String) = _uiState.update { state ->
@@ -125,9 +165,7 @@ class StickerLibraryViewModel @Inject constructor(
     fun deleteSelected() {
         val ids = _uiState.value.selectedPacks.map { it.id }
         if (ids.isEmpty()) return
-        edit {
-            ids.fold(Result.success(Unit)) { done, id -> if (done.isFailure) done else stickerRepository.deletePack(id) }
-        }
+        edit { ids.untilFailure { stickerRepository.deletePack(it) } }
         clearPackSelection()
     }
 
@@ -148,26 +186,58 @@ class StickerLibraryViewModel @Inject constructor(
     }
 
     fun openPack(packId: String) =
-        _uiState.update { it.copy(openPackId = packId, selectedStickerIds = emptySet(), selectedPackIds = emptySet()) }
+        _uiState.update { it.copy(openPackId = packId, selectedStickers = emptySet(), selectedPackIds = emptySet()) }
 
-    fun closePack() = _uiState.update { it.copy(openPackId = null, selectedStickerIds = emptySet()) }
+    fun closePack() = _uiState.update { it.copy(openPackId = null, selectedStickers = emptySet()) }
 
-    fun toggleSticker(stickerId: String) = _uiState.update { it.copy(selectedStickerIds = it.selectedStickerIds.toggle(stickerId)) }
+    fun toggleSticker(entry: StickerEntry) = _uiState.update { it.copy(selectedStickers = it.selectedStickers.toggle(entry)) }
 
-    fun clearSelection() = _uiState.update { it.copy(selectedStickerIds = emptySet()) }
+    fun clearSelection() = _uiState.update { it.copy(selectedStickers = emptySet()) }
 
-    fun removeSelected() = editSelection { packId, ids -> stickerRepository.removeStickers(packId, ids) }
+    /** Takes each selected sticker out of the pack it was picked in. One that is then in no pack is deleted from the library. */
+    fun removeSelected() = editSelection { byPack ->
+        byPack.entries.untilFailure { (packId, ids) -> stickerRepository.removeStickers(packId, ids) }
+    }
 
-    fun moveSelectedTo(targetPackId: String) =
-        editSelection { packId, ids -> stickerRepository.moveStickers(ids, packId, targetPackId) }
+    /** Moves each selected sticker from the pack it was picked in to [targetPackId]. One picked there stays. */
+    fun moveSelectedTo(targetPackId: String) = editSelection { byPack ->
+        byPack.entries.filter { it.key != targetPackId }
+            .untilFailure { (packId, ids) -> stickerRepository.moveStickers(ids, packId, targetPackId) }
+    }
 
-    /** Runs [block] on the open pack and its selected stickers, then clears the selection. */
-    private fun editSelection(block: suspend (packId: String, stickerIds: List<String>) -> Result<Unit>) {
-        val state = _uiState.value
-        val packId = state.openPackId ?: return
-        val ids = state.selectedStickerIds.toList()
-        if (ids.isEmpty()) return
-        edit { block(packId, ids) }
+    /**
+     * Makes a pack called [name] of the selected stickers, which then leave the
+     * packs they were picked in. The new pack comes first, so a sticker is never
+     * in no pack, where it would count as deleted.
+     */
+    fun newPackFromSelected(name: String) = editSelection { byPack ->
+        stickerRepository.createPack(name, byPack.values.flatten().distinct()).fold(
+            onSuccess = { byPack.entries.untilFailure { (packId, ids) -> stickerRepository.removeStickers(packId, ids) } },
+            onFailure = { Result.failure(it) },
+        )
+    }
+
+    /** Stars every selected sticker that is no favourite yet. They stay in their packs. */
+    fun favouriteSelected() {
+        val favourites = _uiState.value.packs.firstOrNull { it.kind == StickerPackKind.FAVOURITES }
+            ?.stickers.orEmpty().mapTo(HashSet()) { it.id }
+        editSelection { byPack ->
+            // The toggle would take the star off one that has it.
+            byPack.values.flatten().distinct().filterNot { it in favourites }
+                .untilFailure { id -> stickerRepository.toggleFavourite(id).map { } }
+        }
+    }
+
+    /** Deletes the selected stickers from the library: out of every pack, and a WhatsApp import leaves them out. */
+    fun deleteSelectedStickers() =
+        editSelection { byPack -> stickerRepository.deleteStickers(byPack.values.flatten().distinct()) }
+
+    /** Runs [block] on the selected stickers, as sticker ids by pack id, then clears the selection. */
+    private fun editSelection(block: suspend (byPack: Map<String, List<String>>) -> Result<Unit>) {
+        val selected = _uiState.value.selectedStickers
+        if (selected.isEmpty()) return
+        val byPack = selected.groupBy({ it.packId }, { it.stickerId })
+        edit { block(byPack) }
         clearSelection()
     }
 
@@ -178,17 +248,20 @@ class StickerLibraryViewModel @Inject constructor(
     /** Imports the picked files and archives. Stickers that name no pack go to the `SAVED` pack. */
     fun importFiles(uris: List<String>) {
         if (uris.isEmpty()) return
-        import(uris, loosePackName = null, skipKnown = false)
+        import(uris, loosePackName = null, skipKnown = false, folderNewest = null)
     }
 
-    /** Shows the folder the user just granted, with nothing selected. */
+    /** Shows the folder the user just granted, with nothing selected: the files that are new since the last import. */
     fun openWhatsAppFolder(treeUri: String) {
         _uiState.update { it.copy(whatsApp = WhatsAppImportState()) }
         viewModelScope.launch {
+            val importedUntil = stickerRepository.whatsAppImportedUntil()
             stickerRepository.listWhatsAppFolder(treeUri)
                 .onSuccess { files ->
                     // Closed while the listing ran: stay closed.
-                    _uiState.update { it.copy(whatsApp = it.whatsApp?.copy(isLoading = false, files = files)) }
+                    _uiState.update {
+                        it.copy(whatsApp = it.whatsApp?.copy(isLoading = false, files = files, importedUntil = importedUntil))
+                    }
                 }
                 .onFailure { e -> _uiState.update { it.copy(whatsApp = null, error = AppError.from(e)) } }
         }
@@ -199,11 +272,23 @@ class StickerLibraryViewModel @Inject constructor(
     fun toggleWhatsAppFile(uri: String) =
         _uiState.update { it.copy(whatsApp = it.whatsApp?.let { wa -> wa.copy(selected = wa.selected.toggle(uri)) }) }
 
-    /** Selects every file, or none when every file is already selected. */
+    /** Shows every file of the folder, or only the new ones again. A selected file that is hidden leaves the selection. */
+    fun setShowAllWhatsApp(showAll: Boolean) = _uiState.update { state ->
+        state.copy(
+            whatsApp = state.whatsApp?.let { wa ->
+                val next = wa.copy(showAll = showAll)
+                val shown = next.shownFiles.mapTo(HashSet()) { it.uri }
+                next.copy(selected = next.selected.filterTo(LinkedHashSet()) { it in shown })
+            }
+        )
+    }
+
+    /** Selects every file that is shown, or none of them when all are already selected. */
     fun toggleSelectAllWhatsApp() = _uiState.update { state ->
         state.copy(
             whatsApp = state.whatsApp?.let { wa ->
-                wa.copy(selected = if (wa.allSelected) emptySet() else wa.files.mapTo(HashSet()) { it.uri })
+                val shown = wa.shownFiles.mapTo(HashSet()) { it.uri }
+                wa.copy(selected = if (wa.allSelected) wa.selected - shown else wa.selected + shown)
             }
         )
     }
@@ -214,20 +299,27 @@ class StickerLibraryViewModel @Inject constructor(
         val uris = wa.files.map { it.uri }.filter { it in wa.selected }
         if (uris.isEmpty()) return
         // The folder holds every sticker ever seen, so what the library knows is left where it is.
-        import(uris, loosePackName = WHATSAPP_PACK_NAME, skipKnown = true)
+        import(uris, loosePackName = WHATSAPP_PACK_NAME, skipKnown = true, folderNewest = wa.files.maxOf { it.lastModified })
     }
 
     fun clearError() = _uiState.update { it.copy(error = null) }
 
     fun clearNotice() = _uiState.update { it.copy(notice = null) }
 
-    /** A finished import closes the WhatsApp view, the only place one can start from while it is open. */
-    private fun import(uris: List<String>, loosePackName: String?, skipKnown: Boolean) {
+    /**
+     * A finished import closes the WhatsApp view, the only place one can start from while it is open.
+     *
+     * [folderNewest] is the newest `lastModified` of the WhatsApp folder as it
+     * was listed. An import that succeeds moves the mark of what is new there.
+     * A failed import does not, and neither does closing the view.
+     */
+    private fun import(uris: List<String>, loosePackName: String?, skipKnown: Boolean, folderNewest: Long?) {
         if (_uiState.value.isImporting) return
         _uiState.update { it.copy(isImporting = true) }
         viewModelScope.launch {
             stickerRepository.importFrom(uris, loosePackName, skipKnown)
                 .onSuccess { result ->
+                    folderNewest?.let { stickerRepository.markWhatsAppImported(it) }
                     _uiState.update { it.copy(isImporting = false, notice = importSummary(result), whatsApp = null) }
                 }
                 .onFailure { e -> _uiState.update { it.copy(isImporting = false, error = AppError.from(e)) } }
@@ -240,7 +332,20 @@ class StickerLibraryViewModel @Inject constructor(
         }
     }
 
-    private fun Set<String>.toggle(value: String): Set<String> = if (value in this) this - value else this + value
+    private fun <T> Set<T>.toggle(value: T): Set<T> = if (value in this) this - value else this + value
+
+    /** The entries whose pack still holds their sticker. */
+    private fun Set<StickerEntry>.heldBy(packs: List<StickerPack>): Set<StickerEntry> {
+        if (isEmpty()) return this
+        val held = packs.associate { pack -> pack.id to pack.stickers.mapTo(HashSet()) { it.id } }
+        return filterTo(LinkedHashSet()) { held[it.packId]?.contains(it.stickerId) == true }
+    }
+
+    /** Runs [step] on each item in turn. Stops at the first failure and returns it. */
+    private suspend fun <T> Iterable<T>.untilFailure(step: suspend (T) -> Result<Unit>): Result<Unit> {
+        for (item in this) step(item).onFailure { return Result.failure(it) }
+        return Result.success(Unit)
+    }
 
     companion object {
         /**

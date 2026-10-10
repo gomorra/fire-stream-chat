@@ -140,6 +140,22 @@ class StickerRepositoryImpl @Inject constructor(
     override suspend fun listWhatsAppFolder(treeUri: String): Result<List<WhatsAppStickerFile>> =
         resultOf { whatsAppFolder.list(treeUri) }
 
+    // Neither throws. Without the mark every file of the folder is shown, which is the screen before the first import.
+    override suspend fun whatsAppImportedUntil(): Long = try {
+        preferences.whatsAppImportedUntil()
+    } catch (e: Exception) {
+        e.rethrowIfCancellation()
+        0L
+    }
+
+    override suspend fun markWhatsAppImported(lastModified: Long) {
+        try {
+            preferences.markWhatsAppImported(lastModified)
+        } catch (e: Exception) {
+            e.rethrowIfCancellation()
+        }
+    }
+
     override suspend fun importFrom(
         uris: List<String>,
         loosePackName: String?,

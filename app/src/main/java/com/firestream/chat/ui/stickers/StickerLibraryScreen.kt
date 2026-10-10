@@ -75,13 +75,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.firestream.chat.ui.components.LibraryStickerImage
 import com.firestream.chat.ui.components.StickerImage
 import com.firestream.chat.domain.model.Sticker
 import com.firestream.chat.domain.model.StickerPack
-import com.firestream.chat.domain.model.StickerPackKind
 import sh.calvin.reorderable.ReorderableItem
 import sh.calvin.reorderable.rememberReorderableLazyListState
 
@@ -113,10 +113,14 @@ internal data class StickerLibraryActions(
     val onClearPackSelection: () -> Unit = {},
     val onMergeSelected: (name: String) -> Unit = {},
     val onDeleteSelected: () -> Unit = {},
-    val onToggleSticker: (String) -> Unit = {},
+    val onSetQuery: (String) -> Unit = {},
+    val onToggleSticker: (StickerEntry) -> Unit = {},
     val onClearSelection: () -> Unit = {},
     val onRemoveSelected: () -> Unit = {},
     val onMoveSelectedTo: (String) -> Unit = {},
+    val onNewPackFromSelected: (name: String) -> Unit = {},
+    val onFavouriteSelected: () -> Unit = {},
+    val onDeleteSelectedStickers: () -> Unit = {},
 )
 
 @Composable
@@ -157,10 +161,13 @@ fun StickerLibraryScreen(
     }
 
     val whatsApp = uiState.whatsApp
-    BackHandler(enabled = whatsApp != null || uiState.openPackId != null || uiState.selectedPackIds.isNotEmpty()) {
+    BackHandler(
+        enabled = whatsApp != null || uiState.openPackId != null ||
+            uiState.selectedPackIds.isNotEmpty() || uiState.selectedStickers.isNotEmpty(),
+    ) {
         when {
             whatsApp != null -> viewModel.closeWhatsApp()
-            uiState.selectedStickerIds.isNotEmpty() -> viewModel.clearSelection()
+            uiState.selectedStickers.isNotEmpty() -> viewModel.clearSelection()
             uiState.selectedPackIds.isNotEmpty() -> viewModel.clearPackSelection()
             else -> viewModel.closePack()
         }
@@ -174,6 +181,7 @@ fun StickerLibraryScreen(
             onClose = viewModel::closeWhatsApp,
             onToggleFile = viewModel::toggleWhatsAppFile,
             onToggleSelectAll = viewModel::toggleSelectAllWhatsApp,
+            onSetShowAll = viewModel::setShowAllWhatsApp,
             onImport = viewModel::importSelectedWhatsApp,
         )
     } else {
@@ -195,10 +203,14 @@ fun StickerLibraryScreen(
                 onClearPackSelection = viewModel::clearPackSelection,
                 onMergeSelected = viewModel::mergeSelected,
                 onDeleteSelected = viewModel::deleteSelected,
+                onSetQuery = viewModel::setQuery,
                 onToggleSticker = viewModel::toggleSticker,
                 onClearSelection = viewModel::clearSelection,
                 onRemoveSelected = viewModel::removeSelected,
                 onMoveSelectedTo = viewModel::moveSelectedTo,
+                onNewPackFromSelected = viewModel::newPackFromSelected,
+                onFavouriteSelected = viewModel::favouriteSelected,
+                onDeleteSelectedStickers = viewModel::deleteSelectedStickers,
             )
         }
         StickerLibraryContent(uiState = uiState, actions = actions, snackbarHostState = snackbarHostState)
@@ -213,11 +225,9 @@ internal fun StickerLibraryContent(
     snackbarHostState: SnackbarHostState = remember { SnackbarHostState() },
 ) {
     val openPack = uiState.openPack
-    val selectedCount = uiState.selectedStickerIds.size
+    val selectedCount = uiState.selectedStickers.size
     val selectedPacks = uiState.selectedPacks
-    var showMoveDialog by remember { mutableStateOf(false) }
-    var showMergeDialog by remember { mutableStateOf(false) }
-    var showDeleteDialog by remember { mutableStateOf(false) }
+    var dialog by remember { mutableStateOf<SelectionDialog?>(null) }
 
     Scaffold(
         topBar = {
@@ -242,19 +252,17 @@ internal fun StickerLibraryContent(
                 },
                 actions = {
                     when {
-                        selectedCount > 0 -> {
-                            IconButton(onClick = { showMoveDialog = true }) {
-                                Icon(Icons.AutoMirrored.Filled.DriveFileMove, contentDescription = "Move to another pack")
-                            }
-                            IconButton(onClick = actions.onRemoveSelected) {
-                                Icon(Icons.Default.Delete, contentDescription = "Remove from pack")
-                            }
-                        }
+                        selectedCount > 0 -> StickerSelectionActions(
+                            // Only a pack's own grid can take a sticker out of that pack alone.
+                            canRemoveFromPack = openPack != null,
+                            actions = actions,
+                            onAsk = { dialog = it },
+                        )
                         selectedPacks.isNotEmpty() -> {
-                            IconButton(onClick = { showMergeDialog = true }, enabled = uiState.canMerge) {
+                            IconButton(onClick = { dialog = SelectionDialog.MERGE_PACKS }, enabled = uiState.canMerge) {
                                 Icon(Icons.AutoMirrored.Filled.CallMerge, contentDescription = "Merge")
                             }
-                            IconButton(onClick = { showDeleteDialog = true }) {
+                            IconButton(onClick = { dialog = SelectionDialog.DELETE_PACKS }) {
                                 Icon(Icons.Default.Delete, contentDescription = "Delete")
                             }
                         }
@@ -268,7 +276,7 @@ internal fun StickerLibraryContent(
         if (openPack != null) {
             PackGrid(
                 pack = openPack,
-                selected = uiState.selectedStickerIds,
+                selected = uiState.selectedStickers,
                 onToggleSticker = actions.onToggleSticker,
                 contentPadding = padding,
             )
@@ -288,45 +296,120 @@ internal fun StickerLibraryContent(
                 }
                 when (uiState.tab) {
                     StickerManagerTab.PACKS -> PackList(uiState = uiState, actions = actions)
-                    // The grid of every sticker is not built yet.
-                    StickerManagerTab.ALL_STICKERS -> Box(modifier = Modifier.fillMaxSize().testTag(ALL_STICKERS_TAB_TAG))
+                    StickerManagerTab.ALL_STICKERS -> AllStickersTab(uiState = uiState, actions = actions)
                 }
             }
         }
     }
 
-    if (showMergeDialog && uiState.canMerge) {
-        PackNameDialog(
-            title = "Merge ${selectedPacks.size} packs",
-            confirmLabel = "Merge",
-            currentName = selectedPacks.first().name,
-            onConfirm = { name ->
-                showMergeDialog = false
-                actions.onMergeSelected(name)
-            },
-            onDismiss = { showMergeDialog = false },
-        )
+    dialog?.let { asked ->
+        SelectionDialogs(asked = asked, uiState = uiState, actions = actions, onClose = { dialog = null })
     }
-    if (showDeleteDialog && selectedPacks.isNotEmpty()) {
-        DeletePacksDialog(
-            packs = selectedPacks,
-            onConfirm = {
-                showDeleteDialog = false
-                actions.onDeleteSelected()
-            },
-            onDismiss = { showDeleteDialog = false },
-        )
-    }
+}
 
-    if (showMoveDialog && openPack != null) {
-        MoveToPackDialog(
-            targets = uiState.packs.filter { it.id != openPack.id && it.kind != StickerPackKind.FAVOURITES },
-            onPick = { packId ->
-                showMoveDialog = false
-                actions.onMoveSelectedTo(packId)
-            },
-            onDismiss = { showMoveDialog = false },
-        )
+/** A question the top bar of a selection asks before it acts. */
+internal enum class SelectionDialog { MERGE_PACKS, DELETE_PACKS, MOVE_STICKERS, NEW_PACK, DELETE_STICKERS }
+
+/** The top bar's actions for a selection of stickers, the same in a pack's grid and in the grid of every sticker. */
+@Composable
+private fun StickerSelectionActions(
+    canRemoveFromPack: Boolean,
+    actions: StickerLibraryActions,
+    onAsk: (SelectionDialog) -> Unit,
+) {
+    var menuOpen by remember { mutableStateOf(false) }
+    IconButton(onClick = { onAsk(SelectionDialog.MOVE_STICKERS) }) {
+        Icon(Icons.AutoMirrored.Filled.DriveFileMove, contentDescription = "Move to pack")
+    }
+    IconButton(onClick = { onAsk(SelectionDialog.DELETE_STICKERS) }) {
+        Icon(Icons.Default.Delete, contentDescription = "Delete from library")
+    }
+    Box {
+        IconButton(onClick = { menuOpen = true }) {
+            Icon(Icons.Default.MoreVert, contentDescription = "More for the selection")
+        }
+        DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+            DropdownMenuItem(
+                text = { Text("New pack from these") },
+                onClick = { menuOpen = false; onAsk(SelectionDialog.NEW_PACK) },
+            )
+            DropdownMenuItem(
+                text = { Text("Add to favourites") },
+                onClick = { menuOpen = false; actions.onFavouriteSelected() },
+            )
+            if (canRemoveFromPack) {
+                DropdownMenuItem(
+                    text = { Text("Remove from pack") },
+                    onClick = { menuOpen = false; actions.onRemoveSelected() },
+                )
+            }
+        }
+    }
+}
+
+/** Draws [asked]. A question whose selection is gone draws nothing. */
+@Composable
+private fun SelectionDialogs(
+    asked: SelectionDialog,
+    uiState: StickerLibraryUiState,
+    actions: StickerLibraryActions,
+    onClose: () -> Unit,
+) {
+    val selectedPacks = uiState.selectedPacks
+    val hasStickers = uiState.selectedStickers.isNotEmpty()
+    when (asked) {
+        SelectionDialog.MERGE_PACKS -> if (uiState.canMerge) {
+            PackNameDialog(
+                title = "Merge ${selectedPacks.size} packs",
+                confirmLabel = "Merge",
+                currentName = selectedPacks.first().name,
+                onConfirm = { name -> onClose(); actions.onMergeSelected(name) },
+                onDismiss = onClose,
+            )
+        }
+        SelectionDialog.DELETE_PACKS -> if (selectedPacks.isNotEmpty()) {
+            DeletePacksDialog(
+                packs = selectedPacks,
+                onConfirm = { onClose(); actions.onDeleteSelected() },
+                onDismiss = onClose,
+            )
+        }
+        SelectionDialog.MOVE_STICKERS -> if (hasStickers) {
+            MoveToPackDialog(
+                targets = uiState.moveTargets,
+                onPick = { packId -> onClose(); actions.onMoveSelectedTo(packId) },
+                onDismiss = onClose,
+            )
+        }
+        SelectionDialog.NEW_PACK -> if (hasStickers) {
+            PackNameDialog(
+                title = "New pack",
+                confirmLabel = "Create",
+                currentName = "",
+                onConfirm = { name -> onClose(); actions.onNewPackFromSelected(name) },
+                onDismiss = onClose,
+            )
+        }
+        SelectionDialog.DELETE_STICKERS -> if (hasStickers) {
+            val count = uiState.selectedStickerCount
+            AlertDialog(
+                onDismissRequest = onClose,
+                title = { Text("Delete from library") },
+                text = {
+                    Text(
+                        "Delete $count ${stickers(count)} from your library? " +
+                            "${if (count == 1) "It leaves" else "They leave"} every pack, " +
+                            "and a WhatsApp import will not bring ${if (count == 1) "it" else "them"} back."
+                    )
+                },
+                confirmButton = {
+                    TextButton(onClick = { onClose(); actions.onDeleteSelectedStickers() }) {
+                        Text("Delete", color = MaterialTheme.colorScheme.error)
+                    }
+                },
+                dismissButton = { TextButton(onClick = onClose) { Text("Cancel") } },
+            )
+        }
     }
 }
 
@@ -362,7 +445,6 @@ private fun AddStickersMenu(isImporting: Boolean, actions: StickerLibraryActions
 
 internal const val ROW_GROUP_TITLE = "In the picker row"
 internal const val GROUPED_GROUP_TITLE = "Behind the WhatsApp thumbnail"
-internal const val ALL_STICKERS_TAB_TAG = "all-stickers-tab"
 
 /** The test tag of a pack's *Own thumbnail* switch. */
 internal fun ownThumbnailSwitchTag(packId: String): String = "own-thumbnail:$packId"
@@ -601,10 +683,11 @@ private fun PackRow(
 @Composable
 private fun PackGrid(
     pack: StickerPack,
-    selected: Set<String>,
-    onToggleSticker: (String) -> Unit,
+    selected: Set<StickerEntry>,
+    onToggleSticker: (StickerEntry) -> Unit,
     contentPadding: PaddingValues,
 ) {
+    val onToggle = rememberEntryToggle(pack.id, onToggleSticker)
     if (pack.stickers.isEmpty()) {
         Box(modifier = Modifier.fillMaxSize().padding(contentPadding), contentAlignment = Alignment.Center) {
             Text("This pack is empty", style = MaterialTheme.typography.titleMedium)
@@ -619,18 +702,28 @@ private fun PackGrid(
         items(pack.stickers, key = { it.id }) { sticker ->
             StickerCell(
                 sticker = sticker,
-                isSelected = sticker.id in selected,
+                isSelected = StickerEntry(pack.id, sticker.id) in selected,
                 // A tap picks only once a long press has started a selection.
-                onClick = if (selected.isNotEmpty()) onToggleSticker else NO_TAP,
-                onLongClick = onToggleSticker,
+                onClick = if (selected.isNotEmpty()) onToggle else NO_TAP,
+                onLongClick = onToggle,
             )
         }
     }
 }
 
-private val NO_TAP: (String) -> Unit = {}
+/** What a tap on a cell does while no selection runs. */
+internal val NO_TAP: (String) -> Unit = {}
 
-/** Asks for a pack's name, for a rename and for a merge. */
+/**
+ * The toggle of a cell in the pack [packId]. A cell hands its sticker's id
+ * back, and a selection holds entries. The function stays the same across
+ * recompositions, so a toggle recomposes only the cell it changed.
+ */
+@Composable
+internal fun rememberEntryToggle(packId: String, onToggleSticker: (StickerEntry) -> Unit): (String) -> Unit =
+    remember(packId, onToggleSticker) { { stickerId -> onToggleSticker(StickerEntry(packId, stickerId)) } }
+
+/** Asks for a pack's name: for a rename, for a merge, and for a new pack of the selected stickers. */
 @Composable
 private fun PackNameDialog(
     title: String,
@@ -702,7 +795,7 @@ internal fun StickerCell(
     onLongClick: ((String) -> Unit)? = null,
     hasStill: Boolean = true,
 ) {
-    StickerCellFrame(id, isSelected, onClick, modifier, enabled, onLongClick) {
+    StickerCellFrame(id, stickerCellTag(id), isSelected, onClick, modifier, enabled, onLongClick) {
         if (hasStill) {
             StickerThumbnail(model = model, modifier = Modifier.fillMaxSize().padding(6.dp))
         } else {
@@ -716,7 +809,13 @@ internal fun StickerCell(
     }
 }
 
-/** A library sticker in a grid. Its file is fetched when the cell is first shown without one. */
+/**
+ * A library sticker in a grid. Its file is fetched when the cell is first shown without one.
+ *
+ * [tag] is the cell's test tag, for a grid that shows a sticker more than once.
+ * [isSmall] is for the cells of the grid of every sticker, which give less of
+ * their width to the gap around the picture.
+ */
 @Composable
 internal fun StickerCell(
     sticker: Sticker,
@@ -725,9 +824,11 @@ internal fun StickerCell(
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
     onLongClick: ((String) -> Unit)? = null,
+    tag: String = stickerCellTag(sticker.id),
+    isSmall: Boolean = false,
 ) {
-    StickerCellFrame(sticker.id, isSelected, onClick, modifier, enabled, onLongClick) {
-        LibraryStickerImage(sticker = sticker, modifier = Modifier.fillMaxSize().padding(6.dp))
+    StickerCellFrame(sticker.id, tag, isSelected, onClick, modifier, enabled, onLongClick, gap = if (isSmall) 2.dp else 4.dp) {
+        LibraryStickerImage(sticker = sticker, modifier = Modifier.fillMaxSize().padding(if (isSmall) 3.dp else 6.dp))
     }
 }
 
@@ -735,17 +836,19 @@ internal fun StickerCell(
 @Composable
 private fun StickerCellFrame(
     id: String,
+    tag: String,
     isSelected: Boolean,
     onClick: (String) -> Unit,
     modifier: Modifier,
     enabled: Boolean,
     onLongClick: ((String) -> Unit)?,
+    gap: Dp = 4.dp,
     image: @Composable BoxScope.() -> Unit,
 ) {
     Box(
         modifier = modifier
-            .testTag(stickerCellTag(id))
-            .padding(4.dp)
+            .testTag(tag)
+            .padding(gap)
             .aspectRatio(1f)
             .clip(MaterialTheme.shapes.medium)
             .background(if (isSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface)

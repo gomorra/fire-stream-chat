@@ -28,6 +28,16 @@ interface StickerRepository {
     suspend fun listWhatsAppFolder(treeUri: String): Result<List<WhatsAppStickerFile>>
 
     /**
+     * The newest `lastModified` the WhatsApp folder held when an import from it
+     * last finished, or 0 before the first one. A file newer than this is new
+     * since then. Device-only.
+     */
+    suspend fun whatsAppImportedUntil(): Long
+
+    /** Records that an import from a folder whose newest file is of [lastModified] finished. The mark never moves back. */
+    suspend fun markWhatsAppImported(lastModified: Long)
+
+    /**
      * Imports the sticker files and pack archives at [uris].
      *
      * A sticker that names its pack joins that pack, and an archive with a title

@@ -351,6 +351,16 @@ Known refactors and code smells that have been consciously deferred or declined.
 
 ---
 
+### A sticker selection across packs is several repository calls
+
+**The smell.** `StickerLibraryViewModel` runs a selection's action as one call per pack. `moveSelectedTo` calls `moveStickers` per source pack, and `removeSelected` calls `removeStickers` per pack. `newPackFromSelected` calls `createPack` and then `removeStickers` per old pack. Each stops at the first failure, so a failure in the middle leaves the library half changed: a new pack whose stickers are still in some of their old packs. `favouriteSelected` reads the favourites from the screen's state and calls `toggleFavourite` per sticker that has no star, because the repository has no "add" that is safe to repeat. The ViewModel also moves the mark of the last WhatsApp import (`markWhatsAppImported`) after `importFrom` succeeds, so a second caller of the WhatsApp import could forget it.
+
+**Why we haven't fixed it.** It came out of `/simplify` on step 4 of `docs/plans/sticker-manager-and-names.md`, a UI step. One transaction per action is a `StickerRepository` and `StickerDao` change. No state it can leave loses a sticker: the new pack is made first, and a move adds before it removes.
+
+**When to revisit.** With the next change to `StickerDao`'s pack edits, or when a half-done action is seen on a phone. Then add `moveEntries`, `createPackFrom` and `addFavourites` as one transaction each, and let the WhatsApp import move its own mark.
+
+---
+
 ### Calls — the known limits
 
 **The smell.**
