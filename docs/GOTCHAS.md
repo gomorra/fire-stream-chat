@@ -592,14 +592,23 @@ verification*.
   terminal on a minimal container needs it in the shell profile. Confirmed 2026-09-09.
 
 - **`./gradlew lint` crashes on this AGP/AndroidX combination — it is not your diff.**
-  Two AndroidX detectors (`NonNullableMutableLiveDataDetector` on
-  `AppLifecycleObserver.kt`, `RememberInCompositionDetector` on `ArchitectureTest.kt`)
-  die with `IncompatibleClassChangeError`, which fails the whole `lint` task. It
-  reproduces on a clean checkout of `main` with no local changes, so a crash naming a
-  file you never touched is version skew between the lint jars and the detector APIs, not
-  a regression. Confirmed 2026-09-08. **`lint` is deliberately not in the gate** — the
-  project gate is `./gradlew test assembleDebug` (CLAUDE.md, `.github/workflows/ci.yml`),
-  so don't add `lint` to CI or block a commit on it until the toolchain is bumped.
+  AndroidX detectors die with `IncompatibleClassChangeError`. That fails the
+  `lintAnalyze*` tasks, and with them the whole `lint` task. `abortOnError = false` does
+  not help, because the analysis task itself fails. The first two to crash are
+  `NonNullableMutableLiveDataDetector` on `AppLifecycleObserver.kt` and
+  `RememberInCompositionDetector` on `ArchitectureTest.kt`. It reproduces on a clean
+  checkout of `main`, so a crash naming a file you never touched is version skew between
+  the AndroidX lint jars and AGP's lint, not a regression.
+  **Don't switch the crashing checks off one by one.** Another detector from the same
+  jars crashes behind each one. With `NullSafeMutableLiveData`, `RememberInComposition`
+  and `FrequentlyChangingValue` disabled, `AutoboxingStateCreationDetector` crashes on
+  `MainActivity.kt`. The `disable.add("NonNullableMutableLiveData")` line in
+  `app/build.gradle.kts` has no effect: it names the detector class, and the issue id is
+  `NullSafeMutableLiveData`.
+  **`lint` is deliberately not in the gate.** The project gate is
+  `./gradlew test assembleDebug` (CLAUDE.md, `.github/workflows/ci.yml`). Don't add
+  `lint` to CI or block a commit on it until the toolchain is bumped. Confirmed
+  2026-09-08 and 2026-10-10.
 
 - **Reference numbers bundled with a skill can be older than the live page they came from.**
   The `claude-api` skill ships a cached copy of Anthropic's cost guide (`shared/cost-optimization.md`,
