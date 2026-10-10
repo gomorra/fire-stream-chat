@@ -21,6 +21,23 @@ It is not a feature gap and not tech debt — it is an unfinished check, and it 
 here because a cloud agent has no other way to learn that the work is not fully done.
 Delete an item once it has been verified (or once a fix for what the check found ships).
 
+### The *WhatsApp* entry of the sticker row (2026-10-10)
+
+`docs/plans/sticker-manager-and-names.md` step 2. JVM tests cover the row's order, the sections and
+the pack id a pick carries. Nothing ran on a device. Install over the build before it, so the
+library restores from the backup:
+
+1. The Stickers tab's row shows Recents, the favourites, one *WhatsApp* entry with a chat-bubble
+   icon, then the packs that were not imported from WhatsApp.
+2. *WhatsApp* opens a grid with a title for every pack of four or more stickers and a *More*
+   section last. It scrolls smoothly with several hundred stickers.
+3. Send a sticker from a titled section and one from *More*. *View pack* on each message shows the
+   sticker's own pack.
+4. A long press on a sticker there adds it to the favourites.
+5. The gear at the end of the row opens the sticker library. Back returns to the chat.
+6. A debug build opens the Stickers tab without a crash. Only a device runs the dex verifier
+   (`docs/GOTCHAS.md`).
+
 ### The prompt for full-screen notifications (2026-10-09)
 
 `docs/plans/video-calls.md` step 5b. JVM tests cover the rule, the access check against a mocked
@@ -436,7 +453,7 @@ run fails, and the packs stay pending.
 and the panel's logic. Nothing ran on a device, and no test draws a real sticker file.
 1. The emoji button opens the panel with an island: *Emoji* and *Stickers*. The search button, the
    island and the backspace key sit left-aligned in that order.
-2. *Stickers* shows Recents, the favourites, then each pack. A tap sends the sticker and it appears
+2. *Stickers* shows Recents, the favourites, the *WhatsApp* entry, then each pack with its own thumbnail. A tap sends the sticker and it appears
    at once, with a clock while offline. An empty library shows *Import stickers*, which opens the library.
 3. Between two accounts: a static and an animated sticker arrive with transparency and animation.
    The chat list and the notification say *Sticker*. Forwarding one works. Nothing new is in the gallery.

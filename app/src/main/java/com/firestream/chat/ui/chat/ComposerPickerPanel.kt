@@ -43,7 +43,7 @@ internal data class ComposerPickerCallbacks(
     val onRecentEmojiUsed: (String) -> Unit,
     val onSticker: (PickerSelection.Sticker) -> Unit,
     val onToggleStickerFavourite: (stickerId: String) -> Unit,
-    val onImportStickers: () -> Unit,
+    val onManageStickers: () -> Unit,
     val onCreateSticker: () -> Unit,
 )
 
@@ -90,7 +90,7 @@ internal fun ComposerPickerPanel(
                 recents = recentStickers,
                 onSelection = callbacks.onSticker,
                 onToggleFavourite = callbacks.onToggleStickerFavourite,
-                onImport = callbacks.onImportStickers,
+                onManage = callbacks.onManageStickers,
                 onCreate = callbacks.onCreateSticker,
                 online = online,
                 onlineCallbacks = onlineCallbacks,

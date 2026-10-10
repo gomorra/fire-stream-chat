@@ -557,7 +557,7 @@ fun FireStreamNavGraph(
                         launchSingleTop = true
                     }
                 },
-                onImportStickersClick = { navController.navigate(Routes.STICKERS) },
+                onManageStickersClick = { navController.navigate(Routes.STICKERS) },
                 onCreateStickerClick = { navController.navigate(Routes.STICKER_CREATE) },
                 fromNotification = fromNotification
             )
