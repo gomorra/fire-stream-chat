@@ -872,6 +872,75 @@ previews or another feature adds a second kind of sender-chosen url.
 
 ---
 
+### Leaving the sticker manager mid-edit can split a delete from its "deleted" mark
+
+**The smell.** `StickerLibraryViewModel.edit` and `import` launch on `viewModelScope`.
+`StickerRepositoryImpl.deletePack` and `removeStickers` write Room first and then remember the
+orphaned ids in `PreferencesDataStore`. Leaving the screen between the two cancels the second
+write. The stickers are gone from their packs and not on the deleted list, so a later full
+WhatsApp import brings them back. `markWhatsAppImported` after an import has the same gap.
+`docs/PATTERNS.md#datastore-writes-need-applicationscope` names the rule. `deleteStickers`
+already orders its two writes so that a stop between them is harmless.
+
+**Why we haven't fixed it.** The window is the few milliseconds of one DataStore write, and
+nothing is lost: the sticker returns and can be deleted again. The pre-release review of
+v1.42.0 found it, and a fix on the day of a release would have shipped untested on a device.
+
+**When to revisit.** Step 8 of `docs/plans/sticker-manager-and-names.md`, the bug hunt over the
+sticker manager. Either the repository finishes the pair under `NonCancellable`, or the view
+model runs its edits on the application scope as `OnlineMediaViewModel` does.
+
+---
+
+### A WhatsApp import that reads no file still moves the "new files" mark
+
+**The smell.** `StickerRepositoryImpl.importFrom` counts an unreadable file as rejected and
+returns success. `StickerLibraryViewModel.import` then calls `markWhatsAppImported`. When the
+folder grant is lost or every read fails, files that were never imported count as seen, and
+*From WhatsApp* shows them only behind *Show all*.
+
+**Why we haven't fixed it.** *Show all* still reaches every file, and the import's summary says
+how many files were rejected. Found by the pre-release review of v1.42.0.
+
+**When to revisit.** Step 8 of `docs/plans/sticker-manager-and-names.md`. The mark should move
+only as far as the newest file that was read.
+
+---
+
+### A WhatsApp import before the library restore has landed can undo tidying
+
+**The smell.** `StickerRepositoryImpl.importFrom` with `skipKnown` asks Room which stickers are
+in a pack. After a destructive `AppDatabase` bump or a fresh sign-in, Room is empty until the
+restore from the backup arrives. An import in that gap rebuilds a WhatsApp pack with a sticker
+that the owner had moved elsewhere, and `StickerDao.applyRemotePack` then merges that twin into
+the restored pack. The sticker sits in both packs again. This is read from the code and not
+reproduced.
+
+**Why we haven't fixed it.** No released build before v1.42.0 could tidy, so the upgrade to it
+cannot hit this. The next bump can: step 5 of the sticker plan.
+
+**When to revisit.** Before step 5 of `docs/plans/sticker-manager-and-names.md` ships, or in
+its step 8. The WhatsApp import could wait for the first restore, or refuse while one is due.
+
+---
+
+### A message sync cursor can sit in the future after the phone's clock was wrong
+
+**The smell.** `MessageSyncPlan` clamps a chat's cursor to this phone's clock when it writes
+it, and `fetchFor` uses the stored cursor as it is. A phone whose date ran weeks ahead while it
+synced a message it had sent itself keeps that cursor after the clock is corrected.
+`MessageRepositoryImpl.syncAllChatMessages` then asks for `timestamp > cursor − 3 days`, and
+the start sync skips that chat's new messages until real time catches up. They still arrive by
+push and when the chat is opened.
+
+**Why we haven't fixed it.** It needs a wrong clock at the moment of a sync, and no message is
+lost. Found by the pre-release review of v1.42.0.
+
+**When to revisit.** Step 3 of `docs/plans/message-sync.md`, which changes what the sync asks
+by. Until then `fetchFor` could treat a cursor ahead of the clock as the clock.
+
+---
+
 ## How to use this file
 
 - **Add entries** when you consciously decide not to fix something you noticed. Record the file paths, the reason, and the trigger condition.
