@@ -24,9 +24,18 @@ data class WhatsAppImportState(
     val allSelected: Boolean get() = files.isNotEmpty() && selected.size == files.size
 }
 
+/** The two tabs of the sticker manager. */
+enum class StickerManagerTab(val title: String) {
+    PACKS("Packs"),
+    ALL_STICKERS("All stickers"),
+}
+
 data class StickerLibraryUiState(
     val isLoading: Boolean = true,
     val packs: List<StickerPack> = emptyList(),
+    val tab: StickerManagerTab = StickerManagerTab.PACKS,
+    /** The packs picked in the list, to merge or delete. Only packs with a name of their own. */
+    val selectedPackIds: Set<String> = emptySet(),
     /** The pack whose grid is shown, or `null` for the list of packs. */
     val openPackId: String? = null,
     /** The stickers picked in the open pack's grid, to move or remove. */
@@ -39,6 +48,16 @@ data class StickerLibraryUiState(
     val error: AppError? = null,
 ) {
     val openPack: StickerPack? get() = packs.firstOrNull { it.id == openPackId }
+
+    /**
+     * The selected packs in the order the list shows them: those with their own
+     * thumbnail first, each group in the user's order. A merge keeps the first.
+     */
+    val selectedPacks: List<StickerPack>
+        get() = packs.filter { it.id in selectedPackIds }.sortedBy { !it.hasOwnThumbnail }
+
+    /** The repository refuses a merge of fewer than two packs. */
+    val canMerge: Boolean get() = selectedPackIds.size >= 2
 }
 
 /**
@@ -54,27 +73,82 @@ class StickerLibraryViewModel @Inject constructor(
     private val _uiState = MutableStateFlow(StickerLibraryUiState())
     val uiState: StateFlow<StickerLibraryUiState> = _uiState.asStateFlow()
 
+    /**
+     * The library as the repository last sent it. A dropped order that could not
+     * be saved goes back to it. Declared above `init`, whose collector can run at once.
+     */
+    private var observedPacks: List<StickerPack> = emptyList()
+
     init {
         // The one collector of the library: every emission maps all of it.
         viewModelScope.launch {
             stickerRepository.observePacks()
                 .catch { e -> _uiState.update { it.copy(isLoading = false, error = AppError.from(e)) } }
                 .collect { packs ->
+                    observedPacks = packs
                     _uiState.update { state ->
                         val open = packs.firstOrNull { it.id == state.openPackId }
                         val present = open?.stickers.orEmpty().mapTo(HashSet()) { it.id }
+                        val selectable = packs.filter { it.kind.isNamed }.mapTo(HashSet()) { it.id }
                         state.copy(
                             isLoading = false,
                             packs = packs,
                             openPackId = open?.id,
                             selectedStickerIds = state.selectedStickerIds.filterTo(LinkedHashSet()) { it in present },
+                            selectedPackIds = state.selectedPackIds.filterTo(LinkedHashSet()) { it in selectable },
                         )
                     }
                 }
         }
     }
 
-    fun openPack(packId: String) = _uiState.update { it.copy(openPackId = packId, selectedStickerIds = emptySet()) }
+    fun selectTab(tab: StickerManagerTab) = _uiState.update { it.copy(tab = tab, selectedPackIds = emptySet()) }
+
+    /** Adds the pack to the selection or takes it out. *Favourites* and *Saved stickers* cannot be merged, so they are never selected. */
+    fun togglePack(packId: String) = _uiState.update { state ->
+        val pack = state.packs.firstOrNull { it.id == packId }
+        if (pack == null || !pack.kind.isNamed) state else state.copy(selectedPackIds = state.selectedPackIds.toggle(packId))
+    }
+
+    fun clearPackSelection() = _uiState.update { it.copy(selectedPackIds = emptySet()) }
+
+    /** Makes one pack called [name] of the selected packs. The first one in the list keeps its place. */
+    fun mergeSelected(name: String) {
+        val state = _uiState.value
+        if (!state.canMerge) return
+        val ids = state.selectedPacks.map { it.id }
+        edit { stickerRepository.mergePacks(ids, name) }
+        clearPackSelection()
+    }
+
+    /** Deletes the selected packs one after the other, and stops at the first that fails. */
+    fun deleteSelected() {
+        val ids = _uiState.value.selectedPacks.map { it.id }
+        if (ids.isEmpty()) return
+        edit {
+            ids.fold(Result.success(Unit)) { done, id -> if (done.isFailure) done else stickerRepository.deletePack(id) }
+        }
+        clearPackSelection()
+    }
+
+    fun setPackShownInRow(packId: String, shown: Boolean) = edit { stickerRepository.setPackShownInRow(packId, shown) }
+
+    /**
+     * Saves the order a drag left the packs in. The list shows it at once, so the
+     * dropped row does not jump back while the write runs.
+     */
+    fun reorderPacks(packIds: List<String>) {
+        if (_uiState.value.packs.map { it.id } == packIds) return
+        val place = packIds.withIndex().associate { (index, id) -> id to index }
+        _uiState.update { state -> state.copy(packs = state.packs.sortedBy { place[it.id] ?: Int.MAX_VALUE }) }
+        viewModelScope.launch {
+            stickerRepository.reorderPacks(packIds)
+                .onFailure { e -> _uiState.update { it.copy(packs = observedPacks, error = AppError.from(e)) } }
+        }
+    }
+
+    fun openPack(packId: String) =
+        _uiState.update { it.copy(openPackId = packId, selectedStickerIds = emptySet(), selectedPackIds = emptySet()) }
 
     fun closePack() = _uiState.update { it.copy(openPackId = null, selectedStickerIds = emptySet()) }
 
@@ -100,17 +174,6 @@ class StickerLibraryViewModel @Inject constructor(
     fun renamePack(packId: String, name: String) = edit { stickerRepository.renamePack(packId, name) }
 
     fun deletePack(packId: String) = edit { stickerRepository.deletePack(packId) }
-
-    /** Swaps the pack with its neighbour above or below. Does nothing at either end of the list. */
-    fun movePack(packId: String, up: Boolean) {
-        val ids = _uiState.value.packs.map { it.id }.toMutableList()
-        val from = ids.indexOf(packId)
-        val to = if (up) from - 1 else from + 1
-        if (from < 0 || to !in ids.indices) return
-        ids[from] = ids[to]
-        ids[to] = packId
-        edit { stickerRepository.reorderPacks(ids) }
-    }
 
     /** Imports the picked files and archives. Stickers that name no pack go to the `SAVED` pack. */
     fun importFiles(uris: List<String>) {

@@ -145,8 +145,7 @@ private fun whatsAppShelf(grouped: List<StickerPack>): StickerShelf? {
  */
 internal fun stickerShelves(packs: List<StickerPack>, recents: List<Sticker>): List<StickerShelf> = buildList {
     if (recents.isNotEmpty()) add(singleShelf(RECENTS_SHELF_KEY, "Recents", null, null, recents))
-    // The two unnamed packs are always in the row, whatever a stored flag says.
-    val (grouped, inRow) = packs.partition { it.kind.isNamed && !it.shownInRow }
+    val (inRow, grouped) = packs.partition { it.hasOwnThumbnail }
     val (favourites, others) = inRow.partition { it.kind == StickerPackKind.FAVOURITES }
     fun addPacks(list: List<StickerPack>) = list.forEach { pack ->
         if (pack.stickers.isNotEmpty()) add(singleShelf(pack.id, pack.label(), pack.id, pack.kind, pack.stickers))

@@ -8,12 +8,12 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -25,15 +25,18 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.lazy.items as listItems
-import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.CallMerge
 import androidx.compose.material.icons.automirrored.filled.DriveFileMove
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AddPhotoAlternate
 import androidx.compose.material.icons.filled.Animation
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.DragHandle
 import androidx.compose.material.icons.filled.EmojiEmotions
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.MoreVert
@@ -46,11 +49,15 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.ListItem
+import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Switch
+import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -75,6 +82,8 @@ import com.firestream.chat.ui.components.StickerImage
 import com.firestream.chat.domain.model.Sticker
 import com.firestream.chat.domain.model.StickerPack
 import com.firestream.chat.domain.model.StickerPackKind
+import sh.calvin.reorderable.ReorderableItem
+import sh.calvin.reorderable.rememberReorderableLazyListState
 
 /**
  * Where the system folder picker opens for the WhatsApp route: the folder
@@ -96,7 +105,14 @@ internal data class StickerLibraryActions(
     val onClosePack: () -> Unit = {},
     val onRenamePack: (packId: String, name: String) -> Unit = { _, _ -> },
     val onDeletePack: (String) -> Unit = {},
-    val onMovePack: (packId: String, up: Boolean) -> Unit = { _, _ -> },
+    val onSelectTab: (StickerManagerTab) -> Unit = {},
+    val onSetShownInRow: (packId: String, shown: Boolean) -> Unit = { _, _ -> },
+    /** Every pack id, in the order a drag left the list in. */
+    val onReorderPacks: (List<String>) -> Unit = {},
+    val onTogglePack: (String) -> Unit = {},
+    val onClearPackSelection: () -> Unit = {},
+    val onMergeSelected: (name: String) -> Unit = {},
+    val onDeleteSelected: () -> Unit = {},
     val onToggleSticker: (String) -> Unit = {},
     val onClearSelection: () -> Unit = {},
     val onRemoveSelected: () -> Unit = {},
@@ -141,10 +157,11 @@ fun StickerLibraryScreen(
     }
 
     val whatsApp = uiState.whatsApp
-    BackHandler(enabled = whatsApp != null || uiState.openPackId != null) {
+    BackHandler(enabled = whatsApp != null || uiState.openPackId != null || uiState.selectedPackIds.isNotEmpty()) {
         when {
             whatsApp != null -> viewModel.closeWhatsApp()
             uiState.selectedStickerIds.isNotEmpty() -> viewModel.clearSelection()
+            uiState.selectedPackIds.isNotEmpty() -> viewModel.clearPackSelection()
             else -> viewModel.closePack()
         }
     }
@@ -171,7 +188,13 @@ fun StickerLibraryScreen(
                 onClosePack = viewModel::closePack,
                 onRenamePack = viewModel::renamePack,
                 onDeletePack = viewModel::deletePack,
-                onMovePack = viewModel::movePack,
+                onSelectTab = viewModel::selectTab,
+                onSetShownInRow = viewModel::setPackShownInRow,
+                onReorderPacks = viewModel::reorderPacks,
+                onTogglePack = viewModel::togglePack,
+                onClearPackSelection = viewModel::clearPackSelection,
+                onMergeSelected = viewModel::mergeSelected,
+                onDeleteSelected = viewModel::deleteSelected,
                 onToggleSticker = viewModel::toggleSticker,
                 onClearSelection = viewModel::clearSelection,
                 onRemoveSelected = viewModel::removeSelected,
@@ -191,20 +214,24 @@ internal fun StickerLibraryContent(
 ) {
     val openPack = uiState.openPack
     val selectedCount = uiState.selectedStickerIds.size
+    val selectedPacks = uiState.selectedPacks
     var showMoveDialog by remember { mutableStateOf(false) }
+    var showMergeDialog by remember { mutableStateOf(false) }
+    var showDeleteDialog by remember { mutableStateOf(false) }
 
     Scaffold(
         topBar = {
             StickerTopBar(
                 title = when {
                     selectedCount > 0 -> "$selectedCount selected"
+                    selectedPacks.isNotEmpty() -> "${selectedPacks.size} selected"
                     openPack != null -> openPack.label()
                     else -> "Stickers"
                 },
                 isImporting = uiState.isImporting,
                 navigationIcon = {
-                    if (selectedCount > 0) {
-                        IconButton(onClick = actions.onClearSelection) {
+                    if (selectedCount > 0 || selectedPacks.isNotEmpty()) {
+                        IconButton(onClick = if (selectedCount > 0) actions.onClearSelection else actions.onClearPackSelection) {
                             Icon(Icons.Default.Close, contentDescription = "Clear selection")
                         }
                     } else {
@@ -214,13 +241,24 @@ internal fun StickerLibraryContent(
                     }
                 },
                 actions = {
-                    if (selectedCount > 0) {
-                        IconButton(onClick = { showMoveDialog = true }) {
-                            Icon(Icons.AutoMirrored.Filled.DriveFileMove, contentDescription = "Move to another pack")
+                    when {
+                        selectedCount > 0 -> {
+                            IconButton(onClick = { showMoveDialog = true }) {
+                                Icon(Icons.AutoMirrored.Filled.DriveFileMove, contentDescription = "Move to another pack")
+                            }
+                            IconButton(onClick = actions.onRemoveSelected) {
+                                Icon(Icons.Default.Delete, contentDescription = "Remove from pack")
+                            }
                         }
-                        IconButton(onClick = actions.onRemoveSelected) {
-                            Icon(Icons.Default.Delete, contentDescription = "Remove from pack")
+                        selectedPacks.isNotEmpty() -> {
+                            IconButton(onClick = { showMergeDialog = true }, enabled = uiState.canMerge) {
+                                Icon(Icons.AutoMirrored.Filled.CallMerge, contentDescription = "Merge")
+                            }
+                            IconButton(onClick = { showDeleteDialog = true }) {
+                                Icon(Icons.Default.Delete, contentDescription = "Delete")
+                            }
                         }
+                        openPack == null -> AddStickersMenu(isImporting = uiState.isImporting, actions = actions)
                     }
                 },
             )
@@ -235,8 +273,49 @@ internal fun StickerLibraryContent(
                 contentPadding = padding,
             )
         } else {
-            PackList(uiState = uiState, actions = actions, contentPadding = padding)
+            Column(modifier = Modifier.fillMaxSize().padding(padding)) {
+                PrimaryTabRow(
+                    selectedTabIndex = uiState.tab.ordinal,
+                    containerColor = MaterialTheme.colorScheme.background,
+                ) {
+                    StickerManagerTab.entries.forEach { tab ->
+                        Tab(
+                            selected = uiState.tab == tab,
+                            onClick = { actions.onSelectTab(tab) },
+                            text = { Text(tab.title) },
+                        )
+                    }
+                }
+                when (uiState.tab) {
+                    StickerManagerTab.PACKS -> PackList(uiState = uiState, actions = actions)
+                    // The grid of every sticker is not built yet.
+                    StickerManagerTab.ALL_STICKERS -> Box(modifier = Modifier.fillMaxSize().testTag(ALL_STICKERS_TAB_TAG))
+                }
+            }
         }
+    }
+
+    if (showMergeDialog && uiState.canMerge) {
+        PackNameDialog(
+            title = "Merge ${selectedPacks.size} packs",
+            confirmLabel = "Merge",
+            currentName = selectedPacks.first().name,
+            onConfirm = { name ->
+                showMergeDialog = false
+                actions.onMergeSelected(name)
+            },
+            onDismiss = { showMergeDialog = false },
+        )
+    }
+    if (showDeleteDialog && selectedPacks.isNotEmpty()) {
+        DeletePacksDialog(
+            packs = selectedPacks,
+            onConfirm = {
+                showDeleteDialog = false
+                actions.onDeleteSelected()
+            },
+            onDismiss = { showDeleteDialog = false },
+        )
     }
 
     if (showMoveDialog && openPack != null) {
@@ -251,80 +330,134 @@ internal fun StickerLibraryContent(
     }
 }
 
+/** The **+** of the top bar: the sticker maker and the two import routes. */
 @Composable
-private fun PackList(
-    uiState: StickerLibraryUiState,
-    actions: StickerLibraryActions,
-    contentPadding: PaddingValues,
-) {
+private fun AddStickersMenu(isImporting: Boolean, actions: StickerLibraryActions) {
+    var open by remember { mutableStateOf(false) }
+    Box {
+        IconButton(onClick = { open = true }) {
+            Icon(Icons.Default.Add, contentDescription = "Add stickers")
+        }
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            DropdownMenuItem(
+                text = { Text("Create") },
+                leadingIcon = { Icon(Icons.Default.AddPhotoAlternate, contentDescription = null) },
+                onClick = { open = false; actions.onCreate() },
+            )
+            DropdownMenuItem(
+                text = { Text("From WhatsApp") },
+                leadingIcon = { Icon(Icons.Default.FolderOpen, contentDescription = null) },
+                enabled = !isImporting,
+                onClick = { open = false; actions.onImportFromWhatsApp() },
+            )
+            DropdownMenuItem(
+                text = { Text("From files") },
+                leadingIcon = { Icon(Icons.Default.UploadFile, contentDescription = null) },
+                enabled = !isImporting,
+                onClick = { open = false; actions.onImportFromFiles() },
+            )
+        }
+    }
+}
+
+internal const val ROW_GROUP_TITLE = "In the picker row"
+internal const val GROUPED_GROUP_TITLE = "Behind the WhatsApp thumbnail"
+internal const val ALL_STICKERS_TAB_TAG = "all-stickers-tab"
+
+/** The test tag of a pack's *Own thumbnail* switch. */
+internal fun ownThumbnailSwitchTag(packId: String): String = "own-thumbnail:$packId"
+
+/**
+ * The list with the pack [fromKey] moved to the place of the pack [toKey].
+ * `null` when a key is no pack, or when the two packs are in different groups:
+ * a drag reorders inside a group, and only the switch moves a pack between them.
+ */
+internal fun List<StickerPack>.movedWithinGroup(fromKey: Any?, toKey: Any?): List<StickerPack>? {
+    val from = indexOfFirst { it.id == fromKey }
+    val to = indexOfFirst { it.id == toKey }
+    if (from < 0 || to < 0 || this[from].hasOwnThumbnail != this[to].hasOwnThumbnail) return null
+    return toMutableList().apply { add(to, removeAt(from)) }
+}
+
+@Composable
+private fun PackList(uiState: StickerLibraryUiState, actions: StickerLibraryActions) {
+    if (uiState.packs.isEmpty()) {
+        if (!uiState.isLoading) {
+            EmptyHint(
+                title = "No stickers yet",
+                body = "Tap + to make one from a photo, or to import some from WhatsApp or from files",
+                modifier = Modifier.fillMaxWidth().padding(vertical = 48.dp),
+            )
+        }
+        return
+    }
+
     var renaming by remember { mutableStateOf<StickerPack?>(null) }
     var deleting by remember { mutableStateOf<StickerPack?>(null) }
 
-    LazyColumn(modifier = Modifier.fillMaxSize(), contentPadding = contentPadding) {
-        item(key = "create") {
-            ListItem(
-                headlineContent = { Text("Create") },
-                supportingContent = {
-                    Text("Make a sticker from one of your photos", style = MaterialTheme.typography.bodySmall)
-                },
-                leadingContent = { Icon(Icons.Default.AddPhotoAlternate, contentDescription = null) },
-                modifier = Modifier.clickable(onClick = actions.onCreate),
-            )
+    // The packs as the list shows them. A drag reorders this copy, and the drop saves its order.
+    var shown by remember { mutableStateOf(uiState.packs) }
+    var dragged by remember { mutableStateOf(false) }
+    val listState = rememberLazyListState()
+    val reorderState = rememberReorderableLazyListState(listState) { from, to ->
+        shown.movedWithinGroup(from.key, to.key)?.let {
+            shown = it
+            dragged = true
         }
-        item(key = "import-whatsapp") {
-            ListItem(
-                headlineContent = { Text("From WhatsApp") },
-                supportingContent = {
-                    Text("Choose from the stickers you have sent or received there", style = MaterialTheme.typography.bodySmall)
-                },
-                leadingContent = { Icon(Icons.Default.FolderOpen, contentDescription = null) },
-                modifier = Modifier.clickable(enabled = !uiState.isImporting, onClick = actions.onImportFromWhatsApp),
-            )
-        }
-        item(key = "import-files") {
-            ListItem(
-                headlineContent = { Text("From files") },
-                supportingContent = {
-                    Text("WebP, .was and .tgs stickers, and .wastickers packs", style = MaterialTheme.typography.bodySmall)
-                },
-                leadingContent = { Icon(Icons.Default.UploadFile, contentDescription = null) },
-                modifier = Modifier.clickable(enabled = !uiState.isImporting, onClick = actions.onImportFromFiles),
-            )
-        }
-        if (uiState.packs.isEmpty()) {
-            if (!uiState.isLoading) {
-                item(key = "empty") {
-                    EmptyHint(
-                        title = "No stickers yet",
-                        body = "Make one from a photo, or import some from WhatsApp or from files",
-                        modifier = Modifier.fillMaxWidth().padding(vertical = 48.dp),
-                    )
-                }
+    }
+    val isDragging = reorderState.isAnyItemDragging
+    LaunchedEffect(uiState.packs, isDragging) {
+        // Packs that arrive during a drag are taken over when it ends.
+        if (isDragging) return@LaunchedEffect
+        val order = shown.map { it.id }
+        if (dragged) {
+            dragged = false
+            if (order != uiState.packs.map { it.id }) {
+                // The state answers with the packs in this order, which runs this effect again.
+                actions.onReorderPacks(order)
+                return@LaunchedEffect
             }
-        } else {
-            item(key = "packs-header") {
+        }
+        shown = uiState.packs
+    }
+
+    val selecting = uiState.selectedPackIds.isNotEmpty()
+    val groups = listOf(
+        ROW_GROUP_TITLE to shown.filter { it.hasOwnThumbnail },
+        GROUPED_GROUP_TITLE to shown.filterNot { it.hasOwnThumbnail },
+    )
+    LazyColumn(state = listState, modifier = Modifier.fillMaxSize()) {
+        groups.forEach { (title, packs) ->
+            if (packs.isEmpty()) return@forEach
+            item(key = "header:$title") {
                 Text(
-                    text = "Packs",
+                    text = title,
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 4.dp),
                 )
             }
-            itemsIndexed(uiState.packs, key = { _, pack -> pack.id }) { index, pack ->
-                PackRow(
-                    pack = pack,
-                    canMoveUp = index > 0,
-                    canMoveDown = index < uiState.packs.lastIndex,
-                    actions = actions,
-                    onRename = { renaming = pack },
-                    onDelete = { deleting = pack },
-                )
+            listItems(packs, key = { it.id }) { pack ->
+                ReorderableItem(reorderState, key = pack.id) { isRowDragging ->
+                    PackRow(
+                        pack = pack,
+                        isSelected = pack.id in uiState.selectedPackIds,
+                        isSelecting = selecting,
+                        isDragging = isRowDragging,
+                        actions = actions,
+                        dragHandleModifier = Modifier.draggableHandle(),
+                        onRename = { renaming = pack },
+                        onDelete = { deleting = pack },
+                    )
+                }
             }
         }
     }
 
     renaming?.let { pack ->
-        RenamePackDialog(
+        PackNameDialog(
+            title = "Rename pack",
+            confirmLabel = "Rename",
             currentName = pack.name,
             onConfirm = { name ->
                 renaming = null
@@ -334,27 +467,49 @@ private fun PackList(
         )
     }
     deleting?.let { pack ->
-        AlertDialog(
-            onDismissRequest = { deleting = null },
-            title = { Text("Delete pack") },
-            text = { Text("Delete ${pack.label()} and take its ${pack.stickers.size} ${stickers(pack.stickers.size)} out of your library?") },
-            confirmButton = {
-                TextButton(onClick = {
-                    deleting = null
-                    actions.onDeletePack(pack.id)
-                }) { Text("Delete", color = MaterialTheme.colorScheme.error) }
+        DeletePacksDialog(
+            packs = listOf(pack),
+            onConfirm = {
+                deleting = null
+                actions.onDeletePack(pack.id)
             },
-            dismissButton = { TextButton(onClick = { deleting = null }) { Text("Cancel") } },
+            onDismiss = { deleting = null },
         )
     }
 }
 
+/** Asks once before one pack or a selection of packs is deleted, and says how many stickers go with them. */
+@Composable
+private fun DeletePacksDialog(packs: List<StickerPack>, onConfirm: () -> Unit, onDismiss: () -> Unit) {
+    val single = packs.singleOrNull()
+    val count = packs.flatMap { it.stickers }.distinctBy { it.id }.size
+    val what = single?.label() ?: "${packs.size} packs"
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(if (single != null) "Delete pack" else "Delete packs") },
+        text = {
+            Text(
+                "Delete $what and take ${if (single != null) "its" else "their"} $count ${stickers(count)} out of your library? " +
+                    "A sticker that is in no other pack will not come back with a WhatsApp import."
+            )
+        },
+        confirmButton = {
+            TextButton(onClick = onConfirm) { Text("Delete", color = MaterialTheme.colorScheme.error) }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
+}
+
+/** One pack. While packs are selected ([isSelecting]) a tap picks, and the menu and the handle make way for the mark. */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun PackRow(
     pack: StickerPack,
-    canMoveUp: Boolean,
-    canMoveDown: Boolean,
+    isSelected: Boolean,
+    isSelecting: Boolean,
+    isDragging: Boolean,
     actions: StickerLibraryActions,
+    dragHandleModifier: Modifier,
     onRename: () -> Unit,
     onDelete: () -> Unit,
 ) {
@@ -363,10 +518,26 @@ private fun PackRow(
     ListItem(
         headlineContent = { Text(pack.label()) },
         supportingContent = {
-            Text(
-                text = pack.publisher?.let { "$count · $it" } ?: count,
-                style = MaterialTheme.typography.bodySmall,
-            )
+            val countLine = pack.publisher?.let { "$count · $it" } ?: count
+            // The repository refuses the switch for the two unnamed packs, which are always in the row.
+            if (pack.kind.isNamed) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(countLine, style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
+                    Text(
+                        "Own thumbnail",
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.padding(end = 8.dp),
+                    )
+                    Switch(
+                        checked = pack.shownInRow,
+                        onCheckedChange = { actions.onSetShownInRow(pack.id, it) },
+                        enabled = !isSelecting,
+                        modifier = Modifier.testTag(ownThumbnailSwitchTag(pack.id)),
+                    )
+                }
+            } else {
+                Text(countLine, style = MaterialTheme.typography.bodySmall)
+            }
         },
         leadingContent = {
             val first = pack.stickers.firstOrNull()
@@ -377,31 +548,53 @@ private fun PackRow(
             }
         },
         trailingContent = {
-            Box {
-                IconButton(onClick = { menuOpen = true }) {
-                    Icon(Icons.Default.MoreVert, contentDescription = "Options for ${pack.label()}")
-                }
-                DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-                    if (pack.canRename) {
-                        DropdownMenuItem(text = { Text("Rename") }, onClick = { menuOpen = false; onRename() })
-                    }
-                    if (canMoveUp) {
-                        DropdownMenuItem(
-                            text = { Text("Move up") },
-                            onClick = { menuOpen = false; actions.onMovePack(pack.id, true) },
+            // One size in both modes, so a row does not change its height when a selection starts.
+            Box(modifier = Modifier.size(width = 96.dp, height = 48.dp), contentAlignment = Alignment.CenterEnd) {
+                if (isSelecting) {
+                    if (isSelected) {
+                        Icon(
+                            Icons.Default.CheckCircle,
+                            contentDescription = "Selected",
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.padding(end = 12.dp),
                         )
                     }
-                    if (canMoveDown) {
-                        DropdownMenuItem(
-                            text = { Text("Move down") },
-                            onClick = { menuOpen = false; actions.onMovePack(pack.id, false) },
-                        )
+                } else {
+                    Row {
+                        Box {
+                            IconButton(onClick = { menuOpen = true }) {
+                                Icon(Icons.Default.MoreVert, contentDescription = "Options for ${pack.label()}")
+                            }
+                            DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                                if (pack.canRename) {
+                                    DropdownMenuItem(text = { Text("Rename") }, onClick = { menuOpen = false; onRename() })
+                                }
+                                DropdownMenuItem(text = { Text("Delete") }, onClick = { menuOpen = false; onDelete() })
+                            }
+                        }
+                        Box(modifier = Modifier.size(48.dp).then(dragHandleModifier), contentAlignment = Alignment.Center) {
+                            Icon(
+                                Icons.Default.DragHandle,
+                                contentDescription = "Drag ${pack.label()} to reorder",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
                     }
-                    DropdownMenuItem(text = { Text("Delete") }, onClick = { menuOpen = false; onDelete() })
                 }
             }
         },
-        modifier = Modifier.clickable { actions.onOpenPack(pack.id) },
+        colors = ListItemDefaults.colors(
+            containerColor = when {
+                isDragging -> MaterialTheme.colorScheme.surfaceContainerHighest
+                isSelected -> MaterialTheme.colorScheme.primaryContainer
+                else -> ListItemDefaults.containerColor
+            },
+        ),
+        modifier = Modifier.combinedClickable(
+            // A tap picks once a long press has started a selection. Only a pack with a name can be merged.
+            onClick = { if (isSelecting) actions.onTogglePack(pack.id) else actions.onOpenPack(pack.id) },
+            onLongClick = if (pack.kind.isNamed) ({ actions.onTogglePack(pack.id) }) else null,
+        ),
     )
 }
 
@@ -437,17 +630,24 @@ private fun PackGrid(
 
 private val NO_TAP: (String) -> Unit = {}
 
+/** Asks for a pack's name, for a rename and for a merge. */
 @Composable
-private fun RenamePackDialog(currentName: String, onConfirm: (String) -> Unit, onDismiss: () -> Unit) {
+private fun PackNameDialog(
+    title: String,
+    confirmLabel: String,
+    currentName: String,
+    onConfirm: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
     var name by remember { mutableStateOf(currentName) }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Rename pack") },
+        title = { Text(title) },
         text = {
             OutlinedTextField(value = name, onValueChange = { name = it }, singleLine = true, label = { Text("Name") })
         },
         confirmButton = {
-            TextButton(onClick = { onConfirm(name) }, enabled = name.isNotBlank()) { Text("Rename") }
+            TextButton(onClick = { onConfirm(name) }, enabled = name.isNotBlank()) { Text(confirmLabel) }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )

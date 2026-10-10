@@ -21,6 +21,27 @@ It is not a feature gap and not tech debt — it is an unfinished check, and it 
 here because a cloud agent has no other way to learn that the work is not fully done.
 Delete an item once it has been verified (or once a fix for what the check found ships).
 
+### The sticker manager's *Packs* tab (2026-10-10)
+
+`docs/plans/sticker-manager-and-names.md` step 3. JVM tests cover the groups, the switch, the
+selection bar and the rule a drag follows. No test drags a row, and nothing ran on a device.
+
+1. Settings → Storage → *Stickers* opens the manager with the tabs *Packs* and *All stickers*.
+   *All stickers* is empty.
+2. The **+** in the top bar offers *Create*, *From WhatsApp* and *From files*, and each works.
+3. Switch *Own thumbnail* on for a WhatsApp pack. It moves to *In the picker row*, and the
+   Stickers tab of a chat shows its thumbnail. Switch it off again.
+4. Drag a pack by its handle inside its group. The row stays where it was dropped, also after
+   leaving the screen and coming back. A row cannot be dropped into the other group.
+5. With several dozen packs, drag one to the edge of the list: the list scrolls.
+6. A long press selects a pack, and a tap adds another. *Merge* asks for a name and makes one
+   pack with the stickers of both. *Delete* names the count of stickers and asks once.
+7. *Favourites* and *Saved stickers* have no switch and cannot be selected.
+8. On a narrow phone a pack's name, its switch, the menu and the handle fit in one row, and a
+   tap beside the switch opens the pack.
+9. A debug build opens the manager without a crash. Only a device runs the dex verifier
+   (`docs/GOTCHAS.md`).
+
 ### The *WhatsApp* entry of the sticker row (2026-10-10)
 
 `docs/plans/sticker-manager-and-names.md` step 2. JVM tests cover the row's order, the sections and

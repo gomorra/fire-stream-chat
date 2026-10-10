@@ -40,11 +40,19 @@ class StickerLibraryViewModelTest {
         coEvery { repository.reorderPacks(any()) } returns Result.success(Unit)
         coEvery { repository.renamePack(any(), any()) } returns Result.success(Unit)
         coEvery { repository.deletePack(any()) } returns Result.success(Unit)
+        coEvery { repository.mergePacks(any(), any()) } returns Result.success(Unit)
+        coEvery { repository.setPackShownInRow(any(), any()) } returns Result.success(Unit)
     }
 
     private fun sticker(id: String) = Sticker(id, StickerFormat.WEBP, 512, 512, false, emptyList(), "/stickers/$id.webp")
 
-    private fun pack(id: String, vararg stickerIds: String, kind: StickerPackKind = StickerPackKind.USER) = StickerPack(
+    private fun pack(
+        id: String,
+        vararg stickerIds: String,
+        kind: StickerPackKind = StickerPackKind.USER,
+        shownInRow: Boolean = true,
+    ) = StickerPack(
+        shownInRow = shownInRow,
         id = id,
         name = if (kind == StickerPackKind.USER) "Pack $id" else "",
         publisher = null,
@@ -131,35 +139,145 @@ class StickerLibraryViewModelTest {
     }
 
     @Test
-    fun `moving a pack up swaps it with the pack above`() {
+    fun `a dropped order is shown at once and saved`() = runTest {
+        val write = CompletableDeferred<Result<Unit>>()
+        coEvery { repository.reorderPacks(any()) } coAnswers { write.await() }
         packs.value = listOf(pack("a"), pack("b"), pack("c"))
         val viewModel = StickerLibraryViewModel(repository)
 
-        viewModel.movePack("c", up = true)
+        viewModel.reorderPacks(listOf("c", "a", "b"))
 
-        coVerify(exactly = 1) { repository.reorderPacks(listOf("a", "c", "b")) }
+        assertEquals(listOf("c", "a", "b"), viewModel.uiState.value.packs.map { it.id })
+        coVerify(exactly = 1) { repository.reorderPacks(listOf("c", "a", "b")) }
+        write.complete(Result.success(Unit))
     }
 
     @Test
-    fun `moving a pack down swaps it with the pack below`() {
-        packs.value = listOf(pack("a"), pack("b"), pack("c"))
-        val viewModel = StickerLibraryViewModel(repository)
-
-        viewModel.movePack("a", up = false)
-
-        coVerify(exactly = 1) { repository.reorderPacks(listOf("b", "a", "c")) }
-    }
-
-    @Test
-    fun `moving the first pack up or the last pack down writes nothing`() {
+    fun `a dropped order that cannot be saved goes back to the library's order`() {
+        coEvery { repository.reorderPacks(any()) } returns Result.failure(IllegalStateException("boom"))
         packs.value = listOf(pack("a"), pack("b"))
         val viewModel = StickerLibraryViewModel(repository)
 
-        viewModel.movePack("a", up = true)
-        viewModel.movePack("b", up = false)
-        viewModel.movePack("gone", up = true)
+        viewModel.reorderPacks(listOf("b", "a"))
+
+        assertEquals(listOf("a", "b"), viewModel.uiState.value.packs.map { it.id })
+        assertEquals("boom", viewModel.uiState.value.error?.message)
+    }
+
+    @Test
+    fun `a drop that changes nothing writes nothing`() {
+        packs.value = listOf(pack("a"), pack("b"))
+        val viewModel = StickerLibraryViewModel(repository)
+
+        viewModel.reorderPacks(listOf("a", "b"))
 
         coVerify(exactly = 0) { repository.reorderPacks(any()) }
+    }
+
+    @Test
+    fun `an unnamed pack has its own thumbnail whatever its stored flag says`() {
+        assertTrue(pack("own").hasOwnThumbnail)
+        assertFalse(pack("wa", shownInRow = false).hasOwnThumbnail)
+        assertTrue(pack("f", kind = StickerPackKind.FAVOURITES, shownInRow = false).hasOwnThumbnail)
+        assertTrue(pack("s", kind = StickerPackKind.SAVED, shownInRow = false).hasOwnThumbnail)
+    }
+
+    @Test
+    fun `the switch writes the pack's row flag`() {
+        packs.value = listOf(pack("a", shownInRow = false))
+        val viewModel = StickerLibraryViewModel(repository)
+
+        viewModel.setPackShownInRow("a", true)
+
+        coVerify(exactly = 1) { repository.setPackShownInRow("a", true) }
+    }
+
+    @Test
+    fun `a merge names the selected packs in the order the list shows them and clears the selection`() {
+        packs.value = listOf(pack("wa", shownInRow = false), pack("own"), pack("other"))
+        val viewModel = StickerLibraryViewModel(repository)
+        // Picked last to first. The list shows the packs with a thumbnail before the others.
+        viewModel.togglePack("wa")
+        viewModel.togglePack("other")
+        viewModel.togglePack("own")
+
+        viewModel.mergeSelected("All of them")
+
+        coVerify(exactly = 1) { repository.mergePacks(listOf("own", "other", "wa"), "All of them") }
+        assertTrue(viewModel.uiState.value.selectedPackIds.isEmpty())
+    }
+
+    @Test
+    fun `a merge of one pack does not start`() {
+        packs.value = listOf(pack("a"), pack("b"))
+        val viewModel = StickerLibraryViewModel(repository)
+        viewModel.togglePack("a")
+
+        viewModel.mergeSelected("One")
+
+        coVerify(exactly = 0) { repository.mergePacks(any(), any()) }
+        assertEquals(setOf("a"), viewModel.uiState.value.selectedPackIds)
+    }
+
+    @Test
+    fun `the unnamed packs cannot be selected`() {
+        packs.value = listOf(pack("f", kind = StickerPackKind.FAVOURITES), pack("s", kind = StickerPackKind.SAVED), pack("a"))
+        val viewModel = StickerLibraryViewModel(repository)
+
+        viewModel.togglePack("f")
+        viewModel.togglePack("s")
+        viewModel.togglePack("gone")
+        viewModel.togglePack("a")
+
+        assertEquals(setOf("a"), viewModel.uiState.value.selectedPackIds)
+    }
+
+    @Test
+    fun `a selected pack that leaves the library leaves the selection`() {
+        packs.value = listOf(pack("a"), pack("b"), pack("c"))
+        val viewModel = StickerLibraryViewModel(repository)
+        viewModel.togglePack("a")
+        viewModel.togglePack("b")
+
+        packs.value = listOf(pack("b"), pack("c"))
+
+        assertEquals(setOf("b"), viewModel.uiState.value.selectedPackIds)
+        // One pack is left, so a merge has nothing to merge.
+        viewModel.mergeSelected("Two")
+        coVerify(exactly = 0) { repository.mergePacks(any(), any()) }
+    }
+
+    @Test
+    fun `deleting the selection deletes each pack and stops at the first failure`() {
+        coEvery { repository.deletePack("b") } returns Result.failure(IllegalStateException("boom"))
+        packs.value = listOf(pack("a"), pack("b"), pack("c"))
+        val viewModel = StickerLibraryViewModel(repository)
+        viewModel.togglePack("a")
+        viewModel.togglePack("b")
+        viewModel.togglePack("c")
+
+        viewModel.deleteSelected()
+
+        coVerify(exactly = 1) { repository.deletePack("a") }
+        coVerify(exactly = 1) { repository.deletePack("b") }
+        coVerify(exactly = 0) { repository.deletePack("c") }
+        assertEquals("boom", viewModel.uiState.value.error?.message)
+        assertTrue(viewModel.uiState.value.selectedPackIds.isEmpty())
+    }
+
+    @Test
+    fun `changing the tab or opening a pack ends a pack selection`() {
+        packs.value = listOf(pack("a"), pack("b"))
+        val viewModel = StickerLibraryViewModel(repository)
+
+        viewModel.togglePack("a")
+        viewModel.selectTab(StickerManagerTab.ALL_STICKERS)
+        assertEquals(StickerManagerTab.ALL_STICKERS, viewModel.uiState.value.tab)
+        assertTrue(viewModel.uiState.value.selectedPackIds.isEmpty())
+
+        viewModel.togglePack("a")
+        viewModel.openPack("b")
+        assertTrue(viewModel.uiState.value.selectedPackIds.isEmpty())
     }
 
     @Test

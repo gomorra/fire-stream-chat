@@ -44,7 +44,15 @@ data class StickerPack(
     val createdAt: Long,
     val updatedAt: Long,
     val shownInRow: Boolean = true,
-)
+) {
+    /**
+     * Whether the pack has a thumbnail of its own in the picker's row. The two
+     * unnamed packs always have one, whatever their stored [shownInRow] says.
+     * A pack without one shares the *WhatsApp* thumbnail.
+     */
+    val hasOwnThumbnail: Boolean
+        get() = !kind.isNamed || shownInRow
+}
 
 /**
  * A pack someone else may own, as it is offered for adding to the library.

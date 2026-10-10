@@ -341,6 +341,16 @@ Known refactors and code smells that have been consciously deferred or declined.
 
 ---
 
+### The sticker manager deletes a selection one pack at a time
+
+**The smell.** `StickerLibraryViewModel.deleteSelected` calls `StickerRepository.deletePack` once per selected pack. Each call is its own transaction, and each makes `observePacks()` emit the whole library. A selection of thirty packs is thirty emissions, and the list redraws after each. A failure in the middle leaves the earlier packs deleted. The same screen keeps the dropped order of a drag twice: in `PackList`'s local copy, and in the ViewModel's optimistic sort with `observedPacks` for the way back.
+
+**Why we haven't fixed it.** Both came out of `/simplify` on step 3 of `docs/plans/sticker-manager-and-names.md`. A `deletePacks(ids)` is a repository and DAO change, which that UI step did not own. The two copies of the order each cover one case: the local copy the drag itself, the sort the time until Room answers.
+
+**When to revisit.** When a delete of many packs is seen to flicker on a phone, or with the next change to `StickerDao`'s pack deletes. Then add `deletePacks(ids)` as one transaction.
+
+---
+
 ### Calls — the known limits
 
 **The smell.**
