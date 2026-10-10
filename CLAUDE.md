@@ -116,7 +116,7 @@ Do not reimplement either with a custom review prompt.
    - Invoke them with `Skill(skill: "simplify")` / `Skill(skill: "code-review")`. `/simplify` spawns three parallel reviewers; choose each one's `model` by judgment, never above the step's tier.
    - **If `/simplify` changed anything, re-run steps 2–3.** Its fixes are production code and must not be committed unverified.
 5. `git commit` — **commit immediately once green; do not wait for user instruction.** One commit, carrying the code *and* its tests. Never split logic into one commit and its tests into the next: every commit must stand on its own as green.
-6. Update MEMORY.md — record what was done, key patterns established, remove stale entries. Interactive sessions only: a runner step session has no memory store and routes facts to the tracked docs instead (`docs/GOTCHAS.md`, `docs/PATTERNS.md`, `docs/BACKLOG.md`, `TECH_DEBT.md`).
+6. **Record what the next session needs, in a tracked doc.** A trap, a convention, a behaviour not yet checked on a device and a cleanup you decided against each have a home: see *Where learnings go* under Discovery & maintenance. "Nothing to record" is a fine answer. What the step did is already in git, `CHANGELOG.md` and the plan's `**Shipped**` block.
 
 ### Token efficiency
 
@@ -203,14 +203,15 @@ Each pattern below is a one-line pointer; for the rule's *example, trap, and whe
 - **Cross-cutting work** — for any feature spanning 4+ packages, [`docs/FEATURE-MAP.md`](docs/FEATURE-MAP.md) lists every file involved. Check there before grepping.
 - **Maintaining FEATURE-MAP** — when you add, move, rename, or delete a file in `app/src/main/java/`, check whether it appears in `docs/FEATURE-MAP.md` and update if so. Refresh the `last-verified` HTML comment quarterly.
 - **Gotchas** — hard-won, host-independent traps (Compose VerifyError ceiling, MockK relaxed-nullable, Media3 pins/looper contract, …) are catalogued in [`docs/GOTCHAS.md`](docs/GOTCHAS.md). Check it before debugging something that smells platform-shaped; add entries there (not to local session memory) when the lesson is machine-independent — cloud sessions only see what's in git.
-- **Local memory vs. tracked docs** — the Claude Code auto-memory store (`~/.claude/projects/<slug>/memory/`) is invisible to cloud sessions and to every other machine, and this repo is public, so it is never synced into git. Route each fact instead, at the moment you write it:
+- **Where learnings go** — a fact the next session needs goes into a tracked doc, at the moment you learn it. The local memory store (`~/.claude/projects/<slug>/memory/`) is out of reach for cloud sessions, plan-runner steps and every other machine, and it is never synced into git. Route each fact:
   - host-independent trap → [`docs/GOTCHAS.md`](docs/GOTCHAS.md)
   - named, reusable convention → [`docs/PATTERNS.md`](docs/PATTERNS.md) + a one-line pointer in Key Conventions above
   - shipped but not yet checked on hardware → [`docs/BACKLOG.md`](docs/BACKLOG.md) § *Pending on-device verification*
-  - host-specific (JDK path, emulator flag, device serial, keystore location) → local memory **only** — committing it would mislead a cloud sandbox.
+  - refactor or fix you noticed and decided against → `TECH_DEBT.md`
+  - host-specific (JDK path, emulator flag, device serial, keystore location) → local memory **only**. This repo is public, and the fact would mislead a cloud sandbox.
 
-  The `.claude/hooks/promote-memory.sh` PostToolUse hook raises this question automatically on any write into the store; it is a reminder, not a gate.
-- **Plans** — in-flight plans live in `docs/plans/`; shipped plans archive to `docs/plans/done/` (or are deleted if `MEMORY.md` already captures the outcome). Keep plans at this repo path, not `~/.claude/plans/` — the home directory is invisible to cloud sessions, so a plan a cloud agent must execute has to be committed here first.
+  The `.claude/hooks/promote-memory.sh` PostToolUse hook raises this question on any write into the local store. It is a reminder, not a gate.
+- **Plans** — in-flight plans live in `docs/plans/`. A shipped plan moves to `docs/plans/done/`, or is deleted when `CHANGELOG.md` and the tracked docs already hold its outcome. Keep plans at this repo path, not `~/.claude/plans/`. The home directory is invisible to cloud sessions, so a plan a cloud agent must execute has to be committed here first.
 - **Anchor headers** — managers, repository impls, Firestore sources, both Room databases, and `NavGraph.kt` open with a `// region: AGENT-NOTE` block above the package declaration. Cite the relevant pattern by name in the `Don't put here:` line. New anchor files should follow the same shape.
 
 ### Writing docs

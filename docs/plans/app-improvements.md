@@ -69,7 +69,7 @@ Why this order: Step 1 comes first because every later step relies on `/code-rev
 
 ### Step 1 — Review and gate tooling tell the truth — skills: writing-for-agents; model: strong
 
-Findings: MD-1, MD-2, MD-3, MD-4, MD-7, MD-10, DOC-7, PROC-8 (hook). Decisions D-1, D-14.
+Findings: MD-1, MD-2, MD-3, MD-7, MD-10, DOC-7, PROC-8 (hook). Decisions D-1, D-14.
 
 - Replace the symlink `.claude/skills/code-review` with a project-owned `.claude/skills/code-review/SKILL.md`. It reviews the diff from a base it computes itself: the step's start commit when given, else `git merge-base main HEAD`. It never asks for a base. It runs parallel reviewers for logic and edge cases, coroutine scoping and cancellation, security and privacy (crypto included), and data and sync invariants (outbox, Room migrations, Firestore rules). Each finding needs a concrete failure path and a verification pass before it is reported. The caller fixes what it can and stops on what needs the owner. Remove the imported skill from `skills-lock.json`.
 - `scripts/plan-runner/selfcheck.sh` asserts that `.claude/skills/code-review` is a real directory in this repo, not a symlink.
@@ -81,7 +81,7 @@ Findings: MD-1, MD-2, MD-3, MD-4, MD-7, MD-10, DOC-7, PROC-8 (hook). Decisions D
   5. **No sub-agents.** Stop early when there are no seam files and the checklist holds.
   6. **Record** a `**Phase check**` block above the Shipped line: the seams examined, each finding and its outcome, or "clean". With no fix, the Shipped line names the HEAD the check reviewed; the runner accepts any commit on the branch there.
 - CLAUDE.md: name one local gate, `./gradlew :app:testFirebaseDebugUnitTest :app:assembleFirebaseDebug`, and say CI runs `./gradlew test assembleDebug`. Use the gate in the post-step items. Correct the `assembleDebug` comment. Replace the missing `ArchiveChatUseCaseTest` example with `CheckGroupPermissionUseCaseTest`. Mark `lint` as outside the gate (it crashes; GOTCHAS). Describe `/code-review` as the new skill does. Say `/simplify` runs four reviewers. Review tools then name three tools: `/simplify` (quality), `/code-review` (correctness of one step's diff) and the phase check (bugs between steps; a plan puts one before each code phase's checkpoint).
-- CLAUDE.md: add a "Branches and PRs" rule per D-14. Replace post-step item 6 with routing to tracked docs, because cloud sessions have no memory store. Add under Change Safety: "A bug you cannot reproduce in a test or an emulator needs evidence first: logcat, a recording or a diagnostic build (`diagnosing-bugs` skill). Until the owner confirms, the CHANGELOG describes the change, not the symptom as gone."
+- CLAUDE.md: add a "Branches and PRs" rule per D-14. Add under Change Safety: "A bug you cannot reproduce in a test or an emulator needs evidence first: logcat, a recording or a diagnostic build (`diagnosing-bugs` skill). Until the owner confirms, the CHANGELOG describes the change, not the symptom as gone."
 - Register `ask-simplify.sh` as a `PreToolUse` hook on Bash in `.claude/settings.json`. Check its headless guard first; if the guard is missing, delete the CLAUDE.md claim instead and say so in the Shipped block.
 - `block-heredoc-commit.sh`: point its message at a new CLAUDE.md commit rule ("commit with chained `-m` flags; no HEREDOC, no pipe"), and drop the local memory path and the model name in its example trailer.
 - `.github/workflows/ci.yml:3-5`: the comment matches D-14.

@@ -206,7 +206,7 @@ The "Ruled out" verdict on `CallViewModel` no longer holds: it is now 125 lines 
 - **MD-1** ✔ High · S — CLAUDE.md makes `/code-review` the mandatory correctness review for Signal/crypto, coroutine-scoping and sync-path diffs. `.claude/skills/code-review` is a symlink to an imported skill that reviews "Standards" and "Spec", looks for no bugs, expects a missing `docs/agents/issue-tracker.md`, and asks for a base commit a headless step cannot give. Every mandatory correctness review since the import has been a smell-and-spec review. → Step 1
 - **MD-2** ✔ High · S — CLAUDE.md's commands are wrong or contradict each other: `assembleDebug` "defaults to firebase" (it builds both flavors), the example test class `ArchiveChatUseCaseTest` doesn't exist, `./gradlew lint` is listed though it crashes, and the post-step gate differs from the cloud block's firebase-only advice. → Step 1
 - **MD-3** Medium · S — Change Safety says "this repo pushes directly to main"; since September about 45% of commits arrived through merges of `ccr-*`, `claude/*` and `plan/*` branches. Nothing says when to open a PR. → Step 1
-- **MD-4** Medium · S — Post-step item 6 says to update MEMORY.md; 72% of recent commits come from cloud sessions, which have no memory store. → Step 1
+- **MD-4** Medium · S — Post-step item 6 says to update MEMORY.md. About a third of recent commits come from cloud sessions, which cannot reach the memory store, and plan-runner steps cannot either. → fixed outside the plan: item 6 routes learnings to tracked docs
 - **MD-5** Medium · M — About 10.6 KB of CLAUDE.md's 28 KB serves only some sessions (plan-runner options, the cloud setup block, changelog rules the skill repeats, the full Key Conventions text). → Step 36
 - **MD-6** Low · S — CLAUDE.md breaks its own writing rules: dates inside rules, 81 em dashes chaining clauses. → Step 36
 - **MD-7** High · S — No rule for bugs that only reproduce on a device. Two avatar releases (v1.39.1, v1.40.1) shipped guessed fixes that did not help (`docs/plans/handoff-android17-avatars.md`); their CHANGELOG entries still claim the fix. → Step 1
@@ -231,6 +231,7 @@ The "Ruled out" verdict on `CallViewModel` no longer holds: it is now 125 lines 
 - **SEC-12:** the reviewer said the rules let anyone add themselves to a group through an invite link. They don't: chat `read` and `update` both require existing membership, and `willBeParticipant()` is defined but never used. Restated as L-3.
 - **L-3** ✔ High (part of UX-2) — Invite links cannot work end to end. `joinGroupViaLink` has no UI caller and no deep link reaches it, and under the committed rules a non-member can neither read the chat nor add themselves (`firestore.rules:40-45`). Either the feature is unfinished or the deployed rules differ from the repo (SEC-10). → Step 16, F-7
 - **BLD-3:** the reviewer recommended a lint gate now; lint crashes on the current toolchain, so the gate waits for F-5.
+- **MD-4:** the reviewer said 72% of recent commits come from cloud sessions. That share counts every commit a Claude session wrote, local sessions included. Cloud containers commit as `Claude`, and by that measure cloud sessions made 32% of the 348 non-merge commits in the 30 days before the review. Local Claude sessions made 39%, and they can write memory. Restated.
 
 ## 11. Existing records this review changes
 
