@@ -272,6 +272,39 @@ layout decision. No test runs a real keyboard, so nothing about the insets has b
    back in the keyboard's place.
 8. Rotate during each search, and repeat once in split screen.
 
+### The GIFs tab and the online stickers (2026-10-05)
+
+`docs/plans/stickers-and-gifs.md` steps 10 and 11. JVM and Robolectric tests cover the
+ViewModel, the tabs with stand-in results, the send and Klipy's API against a mock server.
+Nothing ran against Klipy, on a device or an emulator. A build needs `klipyApiKey` in
+`local.properties`.
+1. A build without a key: the emoji panel has two tabs, and the Stickers tab's pack row has
+   no *Online* entry.
+2. With a key, the first open of the GIFs tab shows the notice and the app contacts no Klipy
+   host before *Continue*. The notice does not come back after a restart, and the Stickers
+   tab's *Online* entry does not show it again.
+3. The GIFs tab shows trending GIFs that play, in two columns, and loads more at the end of
+   the grid. Its search button slides the picker up to just below the top bar, as a sticker
+   search does (*Picker search above the keyboard*). The field reads *Search KLIPY*, and a
+   search replaces the grid after a short pause in typing.
+4. A tap sends the GIF. It plays in the bubble on both phones. Nothing new is in Storage or
+   under `filesDir`, and the app contacts only `api.klipy.com` and Klipy's three media hosts.
+5. Stickers tab → *Online*: Klipy's stickers show with a transparent background, and a tap
+   sends one. A long press does nothing. The sent sticker's bubble opens no sheet, and the
+   sticker is not under Recents.
+6. A sticker search shows the library's results first and *More online* under them. With no
+   match in the library the section is still there.
+7. A GIF or an online sticker picked from a search is sent, and the picker and the keyboard
+   close. A pick made without a search leaves the picker open.
+8. Without a connection the tab says so and offers *Try again*, which loads once the
+   connection is back.
+9. Klipy's share report: with the real key, check in the Partner Panel that a sent pick is
+   counted. The body's encoding is unverified.
+10. A testing key allows 100 requests an hour. Type a long query and check that one request
+   goes out per pause, not per letter.
+11. A debug build opens a chat and the emoji panel without a `VerifyError`. The dex register
+    check for `ChatScreen` reads 180 after the merge into main (`docs/GOTCHAS.md`).
+
 ### GIFs and stickers from the keyboard (2026-10-04)
 
 `docs/plans/stickers-and-gifs.md` step 9. Checked on the emulator (API 36, Gboard with a
@@ -1064,7 +1097,9 @@ caller or callee of a ringing call document. Not planned. Watch the Cloudflare u
 Stickers are imported or made from a photo, sent from the composer's Stickers tab and shown
 in a chat. Lottie stickers (`.was`, `.tgs`) are among them. Packs and favourites are saved
 under the account, and a received sticker's pack can be viewed and added. A GIF and a
-sticker can be inserted from the keyboard. The plan is `docs/plans/stickers-and-gifs.md`, and these parts of it are open:
+sticker can be inserted from the keyboard. In a build with a Klipy key (`klipyApiKey` in
+`local.properties`, or `KLIPY_API_KEY` in the environment) the picker has a GIFs tab and
+Klipy's stickers. The plan is `docs/plans/stickers-and-gifs.md`, and these parts of it are open:
 
 - **Drawing on a made sticker, and placing emoji, text and shapes on it.** The sticker maker
   has the cutout, the outline and the crop. The image editor's Draw and Overlay screens are
@@ -1077,15 +1112,37 @@ sticker can be inserted from the keyboard. The plan is `docs/plans/stickers-and-
   of constant width would be drawn after the crop.
 - **A Lottie sticker sent to an older build shows as a broken image.** That build stores
   WebP only, and its bubble hands the url to an image decoder.
-- **A GIFs tab and an online sticker catalogue.** A GIF is sent from the keyboard, the
-  gallery or the share sheet. The in-app GIFs tab and the online catalogue are steps 10–11.
+- **The Stickers tab's search field does not say *Search KLIPY*.** Klipy's attribution rules
+  ask for that placeholder on a field that searches Klipy. The GIFs tab has it. The Stickers
+  tab's field searches the library first and shows Klipy's matches in *More online*, under a
+  *Powered by KLIPY* mark, and keeps *Search stickers…*. If Klipy's review asks for the
+  wording there too, `PickerTab.searchHint` needs a per-host value.
+- **Klipy's requests set no content filter and no locale.** Klipy's defaults apply.
+  `KlipyMediaSource.fetchPage` is where `content_filter` and `locale` would go, and a
+  setting would have to choose them.
+- **The GIFs tab and the online stickers are sent as picked.** There is no preview before
+  the send and no caption, as for a sticker from the library.
+- **A Klipy pick on the released `v1.38.0`.** That build knows `STICKER` and `GIF`, and not
+  the no-copy rule. A `STICKER` without a `stickerId` gets no local file there and plays
+  from Klipy's url. A tap on it opens the sticker sheet, whose *Add to favourites* does
+  nothing. A `GIF` whose url is Klipy's is downloaded into `filesDir/documents/` under the
+  auto-download preference, so that build keeps a copy, which Klipy's rules do not allow.
+  Builds before `v1.38.0` show either as an empty text bubble.
+- **Coil's disk cache holds what it loads from Klipy.** A pick is not copied into the app's
+  files, and the image loader still caches the bytes it fetched, like any picture loaded
+  from a url. Klipy's rules ask for written approval for caching. Either ask for it, or
+  load Klipy's urls with the disk cache switched off for that request.
+- **Klipy's share report is unverified.** `KlipyMediaSource.reportShare` posts
+  `{"customer_id": …}` as JSON to `gifs/share/{slug}`. Klipy's docs name the endpoint and
+  the field. The body's encoding was not checked against a real key.
 - **A picture pasted from the keyboard's clipboard becomes a sticker.** Every keyboard
   picture that is not a GIF is sent as a sticker, at most 512 px on its long edge. A
   screenshot pasted from Gboard's clipboard row is such a picture. A rule that tells a
   photo from a sticker, by its size or its lack of transparency, would send it as a photo.
-- **The provider-privacy rule for GIFs is decided.** The recipient fetches from Storage
-  only. Search and media go through a Cloud Function, so the provider never sees a user's
-  IP. The pocketbase flavor gets no GIFs tab.
+- **The provider-privacy rule for GIFs is decided.** The app calls Klipy itself, because
+  Klipy forbids a proxy. Klipy sees the IP and the searches of a user of the GIFs tab or
+  the online stickers, and the IP of everyone whose device shows a pick. Everything else is
+  fetched from Storage only.
 - **A GIF on a photo stays impossible.** The editor's pipeline ends at JPEG, and a
   flattened animation is one frame (`docs/plans/image-editor.md` §2.8).
 - **A tap on a GIF opens nothing.** The fullscreen viewer has no animated decoder.

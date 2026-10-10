@@ -7,6 +7,7 @@ import android.net.Uri
 import android.provider.MediaStore
 import androidx.test.core.app.ApplicationProvider
 import io.mockk.coEvery
+import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.slot
@@ -157,6 +158,32 @@ class MediaFileManagerTest {
 
         assertEquals(sticker, kept)
         assertNull(refused)
+        verify(exactly = 0) { httpClient.newCall(any()) }
+        verify(exactly = 0) { resolver.insert(any(), any()) }
+    }
+
+    // ── Klipy: shown from its url, never copied ───────────────────────────
+
+    @Test
+    fun `a Klipy url gets no local file, whatever the message type`() = runTest {
+        val url = "https://static.klipy.com/ii/abc/cat.webp"
+
+        val files = listOf(MessageType.GIF, MessageType.STICKER, MessageType.IMAGE, MessageType.DOCUMENT).map { type ->
+            manager.downloadFor("chat1", "m-$type", type, url, null, "image/webp", "a".repeat(64))
+        }
+
+        assertEquals(listOf(null, null, null, null), files)
+        verify(exactly = 0) { httpClient.newCall(any()) }
+        verify(exactly = 0) { resolver.insert(any(), any()) }
+        coVerify(exactly = 0) { stickerDownloads.ensureLocal(any(), any()) }
+    }
+
+    // The viewer's Save and Edit call downloadAndSave with a url straight from the screen.
+    @Test
+    fun `a direct download of a Klipy url is refused before any request`() = runTest {
+        val result = runCatching { manager.downloadAndSave("chat1", "m1", "https://static1.klipy.com/ii/abc/cat.gif") }
+
+        assertTrue(result.exceptionOrNull() is IllegalStateException)
         verify(exactly = 0) { httpClient.newCall(any()) }
         verify(exactly = 0) { resolver.insert(any(), any()) }
     }

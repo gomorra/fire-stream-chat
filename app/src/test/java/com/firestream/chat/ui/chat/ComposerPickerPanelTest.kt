@@ -203,6 +203,30 @@ class ComposerPickerPanelTest {
     }
 
     @Test
+    fun `the pack the tab opened on stays open when a first send adds Recents in front`() {
+        var recents by mutableStateOf(emptyList<Sticker>())
+        composeTestRule.setContent {
+            MaterialTheme {
+                ComposerPickerPanel(
+                    recentEmojis = emptyList(),
+                    stickerPacks = listOf(pack("animals", StickerPackKind.USER, cat, dog)),
+                    recentStickers = recents,
+                    callbacks = ComposerPickerCallbacks({ _, _ -> }, {}, {}, {}, {}, {}, {}),
+                    modifier = Modifier.height(360.dp),
+                )
+            }
+        }
+        openStickers()
+        composeTestRule.onNodeWithText("animals · 2").assertIsDisplayed()
+
+        recents = listOf(dog)
+        composeTestRule.waitForIdle()
+
+        composeTestRule.onNodeWithContentDescription("Recents").assertIsDisplayed()
+        composeTestRule.onNodeWithText("animals · 2").assertIsDisplayed()
+    }
+
+    @Test
     fun `one emoji in the composer offers its stickers, and a pick names the pack`() {
         var text by mutableStateOf("hello")
         composeTestRule.setContent {

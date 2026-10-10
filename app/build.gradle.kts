@@ -68,6 +68,13 @@ val releaseKeyPassword = secret("RELEASE_KEY_PASSWORD", "releaseKeyPassword")
 val hasReleaseSigning = listOf(releaseStoreFile, releaseStorePassword, releaseKeyAlias, releaseKeyPassword)
     .all { !it.isNullOrEmpty() }
 
+// The Klipy key for the GIFs tab and the online stickers, read like the signing
+// values above. Without one the feature is off. It goes into no tracked file.
+val klipyApiKey = secret("KLIPY_API_KEY", "klipyApiKey").orEmpty().trim()
+require(klipyApiKey.all { it.isLetterOrDigit() || it == '-' || it == '_' }) {
+    "The Klipy key holds a character that cannot be part of one"
+}
+
 // GitHub repo slug "owner/repo" for the latest-release alias URL embedded in
 // BuildConfig.UPDATE_MANIFEST_URL. Override via -PgithubReleaseRepo=foo/bar.
 val githubReleaseRepo: String =
@@ -95,6 +102,7 @@ android {
 
         buildConfigField("String", "GIT_SHA", "\"$gitShortSha\"")
         buildConfigField("String", "COMMIT_TIMESTAMP", "\"$commitTimestamp\"")
+        buildConfigField("String", "KLIPY_API_KEY", "\"$klipyApiKey\"")
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 

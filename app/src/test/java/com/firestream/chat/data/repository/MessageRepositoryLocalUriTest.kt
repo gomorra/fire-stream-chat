@@ -188,6 +188,32 @@ class MessageRepositoryLocalUriTest {
         coVerify { messageDao.updateLocalUri("msgA", savedFile.absolutePath) }
     }
 
+    // A Klipy pick plays from its url. The download is not even asked for, so
+    // "Wi-Fi only" queues no retry for it (the scan's side is MessageDaoOutboxQueueTest).
+    @Test
+    fun `a received Klipy pick starts no download`() = runTest {
+        every { preferencesDataStore.autoDownloadFlow } returns flowOf(AutoDownloadOption.ALWAYS)
+        coEvery { messageDao.getMessageById("klipy2") } returns null
+        val raw = RawMessage(
+            id = "klipy2", chatId = "chat1", senderId = "sender1",
+            content = "", ciphertext = null, signalType = null,
+            type = "STICKER", mediaUrl = "https://static2.klipy.com/ii/abc/wave.webp",
+            mediaThumbnailUrl = null, status = "SENT", replyToId = null,
+            timestamp = 2000L, editedAt = null
+        )
+
+        val job = launch(UnconfinedTestDispatcher(testDispatcher.scheduler)) {
+            repository.getMessages("chat1").collect { }
+        }
+        firestoreFlow.emit(listOf(raw))
+        advanceUntilIdle()
+
+        assertEquals("klipy2", upsertSlot.captured.id)
+        coVerify(exactly = 0) { mediaFileManager.downloadFor(any(), any(), any(), any(), any(), any(), any()) }
+
+        job.cancel()
+    }
+
     @Test
     fun `ensureLocalCopiesForChat continues past a failed download`() = runTest {
         val failing = MessageEntity(MessageRecord(

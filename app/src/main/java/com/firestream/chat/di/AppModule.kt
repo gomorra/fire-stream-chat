@@ -11,6 +11,7 @@ import com.firestream.chat.data.repository.ChatRepositoryImpl
 import com.firestream.chat.data.repository.ContactRepositoryImpl
 import com.firestream.chat.data.repository.ListRepositoryImpl
 import com.firestream.chat.data.repository.MessageRepositoryImpl
+import com.firestream.chat.data.repository.OnlineMediaRepositoryImpl
 import com.firestream.chat.data.repository.PollRepositoryImpl
 import com.firestream.chat.data.repository.StickerRepositoryImpl
 import com.firestream.chat.data.repository.UserRepositoryImpl
@@ -28,6 +29,7 @@ import com.firestream.chat.domain.repository.ChatRepository
 import com.firestream.chat.domain.repository.ContactRepository
 import com.firestream.chat.domain.repository.ListRepository
 import com.firestream.chat.domain.repository.MessageRepository
+import com.firestream.chat.domain.repository.OnlineMediaRepository
 import com.firestream.chat.domain.repository.PollRepository
 import com.firestream.chat.domain.repository.ReminderRepository
 import com.firestream.chat.domain.repository.StickerRepository
@@ -95,6 +97,10 @@ abstract class AppModule {
     @Binds
     @Singleton
     abstract fun bindStickerRepository(impl: StickerRepositoryImpl): StickerRepository
+
+    @Binds
+    @Singleton
+    abstract fun bindOnlineMediaRepository(impl: OnlineMediaRepositoryImpl): OnlineMediaRepository
 
     @Binds
     @Singleton

@@ -172,6 +172,9 @@ import androidx.compose.ui.window.Popup
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.firestream.chat.ui.chat.gif.OnlineMediaUiState
+import com.firestream.chat.ui.chat.gif.OnlineMediaViewModel
+import com.firestream.chat.ui.chat.picker.OnlineMediaCallbacks
 import com.firestream.chat.R
 import com.firestream.chat.data.remote.LinkPreview
 import com.firestream.chat.domain.model.Message
@@ -357,6 +360,36 @@ fun ChatScreen(
         if (showEmojiPanel) composerSearchLayout(pickerState.searchingTab, imeVisible)
         else ComposerSearchLayout.PANEL
     val pickerMounted = showEmojiPanel || animatedPanelPx > 0
+    // A pick that is sent at once ends a running search. The picker and the
+    // keyboard close so the pick is seen landing in the chat.
+    val endPickerSearch = {
+        if (pickerState.searchOpen) {
+            pickerState.closeSearch()
+            showEmojiPanel = false
+            keyboardController?.hide()
+        }
+    }
+    // The GIFs tab and the online stickers. Made when the panel first opens,
+    // and read here because the panel is mounted in two places.
+    val onlineMedia: OnlineMediaViewModel? = if (pickerMounted) hiltViewModel() else null
+    val onlineState = onlineMedia?.uiState?.collectAsState()?.value ?: OnlineMediaUiState()
+    val onlineCallbacks = remember(onlineMedia, viewModel, keyboardController) {
+        if (onlineMedia == null) {
+            OnlineMediaCallbacks()
+        } else {
+            OnlineMediaCallbacks(
+                onQuery = onlineMedia::onQuery,
+                onLoadMore = onlineMedia::loadMore,
+                onRetry = onlineMedia::retry,
+                onAcceptNotice = onlineMedia::acceptNotice,
+                // KLIPY is told about a pick once it is sent.
+                onPick = { media ->
+                    viewModel.sendOnlineMedia(media) { onlineMedia.onSent(media) }
+                    endPickerSearch()
+                },
+            )
+        }
+    }
     // Each open starts on the first tab with the search closed, as it did when
     // the panel owned this state and was disposed on close.
     LaunchedEffect(pickerMounted) {
@@ -382,13 +415,7 @@ fun ChatScreen(
         onRecentEmojiUsed = { viewModel.addRecentEmoji(it) },
         onSticker = {
             viewModel.sendSticker(it.stickerId, it.packId)
-            // A sticker picked from a search ends the search. The picker and
-            // the keyboard close so the sticker is seen landing in the chat.
-            if (pickerState.searchOpen) {
-                pickerState.closeSearch()
-                showEmojiPanel = false
-                keyboardController?.hide()
-            }
+            endPickerSearch()
         },
         onToggleStickerFavourite = { viewModel.toggleStickerFavourite(it) },
         onImportStickers = onImportStickersClick,
@@ -1501,7 +1528,9 @@ fun ChatScreen(
                                                 onPreviewImageClick = { url ->
                                                     viewModel.showFullscreenImage(FullscreenImage(imageUrl = url))
                                                 },
-                                                onStickerClick = { stickerSheetMessage = message },
+                                                // A sticker picked online names no library sticker: it
+                                                // cannot be kept, so there is nothing to offer.
+                                                onStickerClick = { if (message.stickerId != null) stickerSheetMessage = message },
                                                 onOpenFile = { viewModel.openFile(message) },
                                                 filePreviews = viewModel.filePreviews,
                                                 onVideoClick = { source ->
@@ -2163,7 +2192,9 @@ fun ChatScreen(
                         modifier = Modifier
                             .align(Alignment.TopCenter)
                             .fillMaxWidth()
-                            .then(if (strip) Modifier else Modifier.height(panelContentDp))
+                            .then(if (strip) Modifier else Modifier.height(panelContentDp)),
+                        online = onlineState,
+                        onlineCallbacks = onlineCallbacks,
                     )
                 }
             }
@@ -2184,6 +2215,8 @@ fun ChatScreen(
                 recentStickers = uiState.overlays.recentStickers,
                 callbacks = composerPickerCallbacks,
                 state = pickerState,
+                online = onlineState,
+                onlineCallbacks = onlineCallbacks,
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(padding)

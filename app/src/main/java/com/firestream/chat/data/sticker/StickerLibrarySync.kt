@@ -90,8 +90,8 @@ class StickerLibrarySync @Inject constructor(
 
     /**
      * Runs [signOut], which clears the library, with no restore writing during
-     * it or after it. The sync work is cancelled and the recents are cleared:
-     * both belong to the user who is leaving.
+     * it or after it. The sync work is cancelled, and the recents and the Klipy
+     * id are cleared: they belong to the user who is leaving.
      *
      * It runs to its end once called. The settings screen leaves in the click
      * that signs out, which cancels the caller's scope. Without this, a sign-out
@@ -103,6 +103,7 @@ class StickerLibrarySync @Inject constructor(
             scheduler.cancel()
             signOut()
             preferences.clearRecentStickers()
+            preferences.clearKlipyCustomerId()
         }
     }
 

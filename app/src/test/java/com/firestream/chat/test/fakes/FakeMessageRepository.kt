@@ -8,6 +8,8 @@ import com.firestream.chat.domain.model.MessageSearchFilter
 import com.firestream.chat.domain.model.MessageSearchResults
 import com.firestream.chat.domain.model.MessageStatus
 import com.firestream.chat.domain.model.MessageType
+import com.firestream.chat.domain.model.OnlineMedia
+import com.firestream.chat.domain.model.OnlineMediaKind
 import com.firestream.chat.domain.repository.MessageRepository
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -195,6 +197,17 @@ internal class FakeMessageRepository : MessageRepository {
         val msg = Message(
             id = UUID.randomUUID().toString(), chatId = chatId, type = MessageType.STICKER,
             stickerId = stickerId, stickerPackId = packId,
+        )
+        lastSentMessage = msg
+        return Result.success(msg)
+    }
+
+    override suspend fun sendOnlineMedia(chatId: String, media: OnlineMedia): Result<Message> {
+        consumeFailure()?.let { return it }
+        val msg = Message(
+            id = UUID.randomUUID().toString(), chatId = chatId, content = "",
+            type = if (media.kind == OnlineMediaKind.GIF) MessageType.GIF else MessageType.STICKER,
+            mediaUrl = media.send.url, mimeType = media.send.mimeType,
         )
         lastSentMessage = msg
         return Result.success(msg)

@@ -22,8 +22,11 @@ import androidx.compose.ui.unit.dp
 import com.firestream.chat.domain.model.Sticker
 import com.firestream.chat.domain.model.StickerPack
 import com.firestream.chat.domain.util.StickerSearch
+import com.firestream.chat.ui.chat.gif.OnlineMediaUiState
 import com.firestream.chat.ui.chat.picker.EmojiSearchStrip
 import com.firestream.chat.ui.chat.picker.EmojiTab
+import com.firestream.chat.ui.chat.picker.GifTab
+import com.firestream.chat.ui.chat.picker.OnlineMediaCallbacks
 import com.firestream.chat.ui.chat.picker.PickerPanel
 import com.firestream.chat.ui.chat.picker.PickerPanelState
 import com.firestream.chat.ui.chat.picker.PickerSelection
@@ -46,7 +49,8 @@ internal data class ComposerPickerCallbacks(
 
 /**
  * The picker the composer mounts in the keyboard's place: an island with the
- * emoji grid and the sticker library.
+ * emoji grid and the sticker library. When [online] is available, a GIFs tab
+ * sits between them and the sticker library shows its online parts.
  *
  * The reaction sheet and the caption bar stay on [EmojiHandlerPanel]. A
  * reaction and a caption are text, and a sticker is a message of its own.
@@ -68,9 +72,11 @@ internal fun ComposerPickerPanel(
     modifier: Modifier = Modifier,
     state: PickerPanelState = rememberPickerPanelState(COMPOSER_PICKER_TABS),
     compact: Boolean = false,
+    online: OnlineMediaUiState = OnlineMediaUiState(),
+    onlineCallbacks: OnlineMediaCallbacks = OnlineMediaCallbacks(),
 ) {
     PickerPanel(
-        tabs = COMPOSER_PICKER_TABS,
+        tabs = if (online.isAvailable) COMPOSER_TABS_ONLINE else COMPOSER_PICKER_TABS,
         modifier = modifier,
         state = state,
         compact = compact,
@@ -86,7 +92,11 @@ internal fun ComposerPickerPanel(
                 onToggleFavourite = callbacks.onToggleStickerFavourite,
                 onImport = callbacks.onImportStickers,
                 onCreate = callbacks.onCreateSticker,
+                online = online,
+                onlineCallbacks = onlineCallbacks,
             )
+
+            PickerTab.GIF -> GifTab(query = query, online = online, callbacks = onlineCallbacks)
 
             PickerTab.EMOJI -> {
                 val onSelection: (PickerSelection.Emoji) -> Unit = { pick ->
@@ -102,11 +112,12 @@ internal fun ComposerPickerPanel(
 
             // Not declared by the composer. Named rather than swept into an
             // `else`, so a tab added to the enum fails to compile here.
-            PickerTab.STICKER, PickerTab.GIF, PickerTab.TEXT, PickerTab.SHAPE -> Unit
+            PickerTab.STICKER, PickerTab.TEXT, PickerTab.SHAPE -> Unit
         }
     }
 }
 
+/** The tabs of a build without a KLIPY key. Both lists open on the emoji tab. */
 internal val COMPOSER_PICKER_TABS = listOf(PickerTab.EMOJI, PickerTab.STICKER_LIBRARY)
 
 /** Where the composer puts its picker. */
@@ -130,7 +141,7 @@ internal enum class ComposerSearchLayout {
  *   the panel is back in its place and the results are the full grid.
  * - **Sticker search fills the screen.** Stickers are large, so they need the
  *   room, and each pick is sent at once, so the composer is not needed.
- *   GIF search will work the same way once the composer offers it.
+ *   GIF search works the same way.
  */
 internal fun composerSearchLayout(searchingTab: PickerTab?, imeVisible: Boolean): ComposerSearchLayout =
     when (searchingTab) {
@@ -138,6 +149,9 @@ internal fun composerSearchLayout(searchingTab: PickerTab?, imeVisible: Boolean)
         PickerTab.STICKER_LIBRARY, PickerTab.GIF -> ComposerSearchLayout.FULL
         PickerTab.STICKER, PickerTab.TEXT, PickerTab.SHAPE, null -> ComposerSearchLayout.PANEL
     }
+
+/** The tabs of a build with a KLIPY key. A build without one has no GIFs tab. */
+private val COMPOSER_TABS_ONLINE = listOf(PickerTab.EMOJI, PickerTab.GIF, PickerTab.STICKER_LIBRARY)
 
 /** How many stickers the strip offers. More than a few screens of them is a search, which the tab does. */
 private const val MAX_SUGGESTIONS = 24

@@ -11,9 +11,13 @@ import com.firestream.chat.data.remote.source.AuthSource
 import com.firestream.chat.data.sticker.StickerFiles
 import com.firestream.chat.data.util.DocumentFiles
 import com.firestream.chat.data.util.DocumentInfo
+import com.firestream.chat.domain.model.AppError
 import com.firestream.chat.domain.model.MediaLimitException
 import com.firestream.chat.domain.model.MessageStatus
 import com.firestream.chat.domain.model.MessageType
+import com.firestream.chat.domain.model.OnlineMedia
+import com.firestream.chat.domain.model.OnlineMediaKind
+import com.firestream.chat.domain.model.OnlineMediaRendition
 import com.firestream.chat.domain.model.StickerFormat
 import com.firestream.chat.domain.model.StickerPackKind
 import com.firestream.chat.domain.util.MAX_GIF_BYTES
@@ -262,7 +266,93 @@ class MessageRepositoryStickerGifSendTest {
         assertTrue(inserted.isEmpty())
     }
 
+    // ── picks from Klipy ────────────────────────────────────────────────────
+
+    private fun klipyPick(kind: OnlineMediaKind, url: String = KLIPY_URL, mimeType: String = "image/webp") = OnlineMedia(
+        kind = kind,
+        slug = "cat-wave",
+        title = "Cat",
+        preview = OnlineMediaRendition("https://static.klipy.com/ii/abc/sm.webp", 120, 90, "image/webp"),
+        send = OnlineMediaRendition(url, 320, 240, mimeType),
+    )
+
+    @Test
+    fun `a GIF picked from Klipy is queued pointing at Klipy, with no file and no upload`() = runTest {
+        val result = repository.sendOnlineMedia("chat1", klipyPick(OnlineMediaKind.GIF))
+
+        assertTrue("queued: ${result.exceptionOrNull()}", result.isSuccess)
+        val row = inserted.single().toDomain()
+        assertEquals(MessageType.GIF, row.type)
+        assertEquals(MessageStatus.SENDING, row.status)
+        assertEquals(KLIPY_URL, row.mediaUrl)
+        assertEquals("image/webp", row.mimeType)
+        assertEquals(320, row.mediaWidth)
+        assertEquals(240, row.mediaHeight)
+        assertNull(row.localUri)
+        assertEquals("", row.content)
+        coVerify(exactly = 0) { outboxFiles.stage(any(), any(), any()) }
+        coVerify(exactly = 0) { documentFiles.describe(any()) }
+        coVerify(exactly = 1) { outboxScheduler.enqueue(row.id, false) }
+    }
+
+    @Test
+    fun `a sticker picked from Klipy is queued as a sticker that names no library sticker and no pack`() = runTest {
+        val result = repository.sendOnlineMedia("chat1", klipyPick(OnlineMediaKind.STICKER))
+
+        assertTrue("queued: ${result.exceptionOrNull()}", result.isSuccess)
+        val row = inserted.single().toDomain()
+        assertEquals(MessageType.STICKER, row.type)
+        assertEquals(KLIPY_URL, row.mediaUrl)
+        assertNull(row.stickerId)
+        assertNull(row.stickerPackId)
+        assertNull(row.localUri)
+        coVerify(exactly = 0) { stickerDao.getSticker(any()) }
+        coVerify(exactly = 1) { outboxScheduler.enqueue(row.id, false) }
+    }
+
+    @Test
+    fun `a pick whose url is not on a Klipy media host is refused before any row is written`() = runTest {
+        val refused = listOf(
+            "https://evil.example/cat.webp",
+            "http://static.klipy.com/ii/abc/cat.webp",
+            "https://static.klipy.com.evil.example/cat.webp",
+            "https://api.klipy.com/api/v1/key/gifs/trending",
+        ).map { repository.sendOnlineMedia("chat1", klipyPick(OnlineMediaKind.GIF, url = it)) }
+
+        refused.forEach { result ->
+            val error = result.exceptionOrNull()
+            assertTrue("$error", AppError.from(error!!) is AppError.Validation)
+            assertTrue("the refusal names no url", "http" !in error.message.orEmpty())
+        }
+        assertTrue(inserted.isEmpty())
+    }
+
+    @Test
+    fun `a pick that is not a picture is refused`() = runTest {
+        val result = repository.sendOnlineMedia("chat1", klipyPick(OnlineMediaKind.GIF, mimeType = "video/mp4"))
+
+        assertTrue(result.isFailure)
+        assertTrue(inserted.isEmpty())
+    }
+
+    @Test
+    fun `a forwarded Klipy sticker keeps Klipy's url and still names no file`() = runTest {
+        val received = repository.sendOnlineMedia("chat1", klipyPick(OnlineMediaKind.STICKER)).getOrThrow()
+        inserted.clear()
+
+        val result = repository.forwardMessage(received.copy(status = MessageStatus.SENT), "chat1")
+
+        assertTrue("queued: ${result.exceptionOrNull()}", result.isSuccess)
+        val row = inserted.single().toDomain()
+        assertEquals(KLIPY_URL, row.mediaUrl)
+        assertNull(row.localUri)
+        assertNull(row.stickerId)
+        coVerify(exactly = 0) { outboxFiles.stage(any(), any(), any()) }
+        coVerify(exactly = 1) { outboxScheduler.enqueue(row.id, false) }
+    }
+
     private companion object {
         val STICKER_ID = "c".repeat(64)
+        const val KLIPY_URL = "https://static.klipy.com/ii/abc/cat.webp"
     }
 }

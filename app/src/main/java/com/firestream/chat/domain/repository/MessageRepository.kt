@@ -3,6 +3,7 @@ package com.firestream.chat.domain.repository
 import com.firestream.chat.domain.model.ListDiff
 import com.firestream.chat.domain.model.Message
 import com.firestream.chat.domain.model.MessageAvailability
+import com.firestream.chat.domain.model.OnlineMedia
 import com.firestream.chat.domain.model.MessageSearchFilter
 import com.firestream.chat.domain.model.MessageSearchResults
 import com.firestream.chat.domain.model.TimerAlarmSound
@@ -52,6 +53,14 @@ interface MessageRepository {
      * Refused when the file is over `MAX_GIF_BYTES`.
      */
     suspend fun sendGifMessage(chatId: String, uri: String, mimeType: String, caption: String = ""): Result<Message>
+
+    /**
+     * Sends a pick from the online catalogue. The message points at the
+     * provider's url: nothing is uploaded, and no device keeps a copy of the
+     * file. The recipient's device loads it from the provider. Refused when the
+     * url is not on one of the provider's media hosts.
+     */
+    suspend fun sendOnlineMedia(chatId: String, media: OnlineMedia): Result<Message>
 
     /**
      * Re-drive the send pipeline for a previously-failed message, mutating the
