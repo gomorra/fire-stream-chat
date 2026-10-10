@@ -395,6 +395,35 @@ A retryable send — text, photo, video, document, voice note, location, forward
 
 ---
 
+## Message sync
+
+The start of the app and pull to refresh ask each chat for what Room lacks. A chat is fetched whole once per install. After that the sync asks for the messages newer than the chat's cursor less three days. Design and decisions: `docs/plans/message-sync.md`. The convention: [PATTERNS.md#a-sync-cursor-lives-beside-the-rows-it-describes](PATTERNS.md#a-sync-cursor-lives-beside-the-rows-it-describes). The three readers: [ARCHITECTURE.md §6 "Message sync"](ARCHITECTURE.md#message-sync).
+
+| File | Role |
+|---|---|
+| `app/src/main/java/com/firestream/chat/domain/util/MessageSyncPlan.kt` | Pure. From a chat's state it answers *everything* or *after T* (`fetchFor`), and from a fetch's timestamps the cursor it earns (`cursorFrom`). Holds `RESTORE_GENERATION` and `TAIL_OVERLAP_MS` |
+| `app/src/main/java/com/firestream/chat/data/local/entity/MessageSyncStateEntity.kt` | `message_sync_state`: one row per restored chat, with its generation and cursor |
+| `app/src/main/java/com/firestream/chat/data/local/dao/MessageSyncStateDao.kt` | Read a row, `writeRestored`, `raiseCursor` (never lowers), `deleteAll` |
+| `app/src/main/java/com/firestream/chat/data/local/dao/MessageDao.kt` | `deleteChatMessages`: a chat's messages and its state row in one transaction |
+| `app/src/main/java/com/firestream/chat/data/local/AppDatabase.kt` | Lists the entity. Its version bump empties both tables together |
+| `app/src/main/java/com/firestream/chat/di/DatabaseModule.kt` | Provides `MessageSyncStateDao` |
+| `app/src/main/java/com/firestream/chat/data/remote/source/MessageSource.kt` | `fetchMessages` and `fetchMessagesAfter`: from the server, or they throw |
+| `app/src/firebase/java/com/firestream/chat/data/remote/firebase/FirestoreMessageSource.kt` | Both fetches as `get(Source.SERVER)`, ordered by `timestamp` |
+| `app/src/pocketbase/java/com/firestream/chat/data/remote/pocketbase/PocketBaseMessageSource.kt` | The bound as a filter on `timestamp`. One page of 200 records |
+| `app/src/main/java/com/firestream/chat/data/repository/MessageRepositoryImpl.kt` | `syncAllChatMessages` (three chats at a time, the log line), `syncChatMessages` (plan → fetch → reconcile → state row) |
+| `app/src/main/java/com/firestream/chat/data/repository/ChatRepositoryImpl.kt` | `deleteChat` and `leaveGroup` call `MessageDao.deleteChatMessages` |
+| `app/src/main/java/com/firestream/chat/ui/chatlist/ChatListViewModel.kt` | Starts the sync once per start and on pull to refresh |
+| `app/src/test/java/com/firestream/chat/domain/util/MessageSyncPlanTest.kt` | The plan's table |
+| `app/src/test/java/com/firestream/chat/data/local/dao/MessageSyncStateDaoTest.kt` | A raise never lowers and never creates a row. The row leaves with the chat's messages |
+| `app/src/test/java/com/firestream/chat/data/repository/MessageRepositorySyncTest.kt` | The restore, the tail question, and every case that must not move the cursor |
+| `app/src/test/java/com/firestream/chat/data/repository/MessageRepositorySyncDecryptTest.kt` | A sync cancelled during a decrypt still writes the plaintext |
+| `app/src/test/java/com/firestream/chat/data/repository/ChatRepositoryImplDeleteTest.kt` | Deleting a chat and leaving a group go through `deleteChatMessages` |
+| `app/src/testFirebase/java/com/firestream/chat/data/remote/firebase/FirestoreMessageSourceTest.kt` | The bound, the order and the source of both fetches |
+
+**Entry point:** `ChatListViewModel` → `MessageRepositoryImpl.syncAllChatMessages` → per chat `MessageSyncStateDao.getState` → `MessageSyncPlan.fetchFor` → `MessageSource.fetchMessages` or `fetchMessagesAfter` → the reconcile loop → `writeRestored` or `raiseCursor`.
+
+---
+
 ## E2E Encryption (with release-mode opt-out)
 
 Signal Protocol message encryption. Disabled in debug builds; release users can opt out via Settings → Privacy.

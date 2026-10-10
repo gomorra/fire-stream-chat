@@ -36,6 +36,7 @@ import com.google.firebase.firestore.FirebaseFirestoreException
 import com.google.firebase.firestore.ListenerRegistration
 import com.google.firebase.firestore.MetadataChanges
 import com.google.firebase.firestore.Query
+import com.google.firebase.firestore.Source
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
@@ -164,17 +165,26 @@ class FirestoreMessageSource @Inject constructor(
         awaitClose { listener.remove() }
     }
 
-    override suspend fun fetchMessages(chatId: String): List<RawMessage> {
-        val snapshot = firestore
-            .collection("chats").document(chatId)
-            .collection("messages")
-            .orderBy("timestamp", Query.Direction.ASCENDING)
-            .get()
-            .await()
-        return snapshot.documents.mapNotNull { doc ->
+    override suspend fun fetchMessages(chatId: String): List<RawMessage> =
+        fetchFromServer(chatId, messagesByTimestamp(chatId))
+
+    override suspend fun fetchMessagesAfter(chatId: String, afterTimestamp: Long): List<RawMessage> =
+        fetchFromServer(chatId, messagesByTimestamp(chatId).whereGreaterThan("timestamp", afterTimestamp))
+
+    private fun messagesByTimestamp(chatId: String): Query = firestore
+        .collection("chats").document(chatId)
+        .collection("messages")
+        .orderBy("timestamp", Query.Direction.ASCENDING)
+
+    /**
+     * Source.SERVER: a plain `get()` answers from the SDK's cache when the phone
+     * is offline. The sync moves a chat's cursor on what this returns, and a
+     * cursor moved on a cache answer skips messages for good. Offline this throws.
+     */
+    private suspend fun fetchFromServer(chatId: String, query: Query): List<RawMessage> =
+        query.get(Source.SERVER).await().documents.mapNotNull { doc ->
             doc.data?.let { mapToRaw(doc.id, chatId, it, doc.metadata.hasPendingWrites()) }
         }
-    }
 
     override suspend fun fetchMessage(chatId: String, messageId: String): RawMessage? {
         val doc = messageRef(chatId, messageId).get().await()

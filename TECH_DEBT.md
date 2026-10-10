@@ -454,6 +454,26 @@ The `pocketbase` flavor that landed 2026-04-28 is intentionally a thin slice. Th
 
 ---
 
+### PocketBase: a message fetch is one page of 200
+
+**The smell.** `PocketBaseMessageSource.fetchMessages` and `fetchMessagesAfter` read one page of 200 records, oldest first. `MessageSource.fetchMessages` promises the whole chat, and the message sync writes a chat's state row on that answer. A chat with more than 200 messages is marked restored at its 200th message. Each later sync then asks after that cursor less three days and moves on by at most 200.
+
+**Why we haven't fixed it.** The pocketbase flavor is not maintained yet, and its open chat still loads through `observeMessages`. The sync catches up over several starts unless a chat gets more than 200 messages in three days.
+
+**When to revisit.** When the pocketbase flavor gets real users, or in step 7 of `docs/plans/message-sync.md`, which lists it as a lead. Page until a short page comes back.
+
+---
+
+### Unblocking a user does not bring back what the sync skipped
+
+**The smell.** `MessageRepositoryImpl.reconcileSynced` skips a blocked sender's messages, and the chat's cursor still moves past them. After an unblock, the sync asks only for the last three days. An older message of that sender reaches Room when its chat is opened, because the open chat still listens to the whole chat.
+
+**Why we haven't fixed it.** Holding the cursor back for a blocked sender would fetch that chat whole on every start. The right fix is to delete the state rows on an unblock, so the next sync restores the chats.
+
+**When to revisit.** Before step 4 of `docs/plans/message-sync.md` ships. From then on the open chat asks for changes only, and the skipped messages would stay missing.
+
+---
+
 ### APK self-updater: parallel chunked downloads
 
 **The smell.** `ApkDownloader` uses a single HTTP stream for the ~96 MB release APK. On high-bandwidth, high-latency links 2–4 parallel `Range:` requests would shave ~30 % off transfer time.

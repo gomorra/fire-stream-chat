@@ -23,7 +23,8 @@ import kotlinx.coroutines.flow.Flow
  *
  * The PocketBase impl in v0 only honours the walking-skeleton subset:
  * [observeMessages], [sendPlainMessage], [lastContentFor], [markDelivered],
- * [markRead], [getUndeliveredMessageIds], [fetchMessages]. The other methods
+ * [markRead], [getUndeliveredMessageIds], [fetchMessages], [fetchMessagesAfter].
+ * The other methods
  * throw [NotImplementedError] there until the follow-up plans land.
  */
 interface MessageSource {
@@ -32,7 +33,19 @@ interface MessageSource {
     fun lastContentFor(type: MessageType, plain: String = ""): String
 
     fun observeMessages(chatId: String): Flow<List<RawMessage>>
+
+    /**
+     * Every message of the chat, oldest first. It answers from the server or
+     * throws, never from a local cache: the sync moves a chat's cursor on the
+     * answer.
+     */
     suspend fun fetchMessages(chatId: String): List<RawMessage>
+
+    /**
+     * The messages with a `timestamp` above [afterTimestamp], oldest first. From
+     * the server or it throws, like [fetchMessages].
+     */
+    suspend fun fetchMessagesAfter(chatId: String, afterTimestamp: Long): List<RawMessage>
 
     /**
      * One message by id, or `null` when the backend does not hold it. A push

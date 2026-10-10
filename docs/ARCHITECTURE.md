@@ -262,6 +262,24 @@ classDiagram
     ViewModel --|> UI : 6. Render UI
 ```
 
+### Message sync
+
+Three readers bring message documents into Room.
+
+| Reader | When | What it asks the backend for |
+|---|---|---|
+| The chat-list sync, `MessageRepositoryImpl.syncAllChatMessages` | Every start of the app and every pull to refresh | Per chat: the whole chat once per install, then the messages newer than the chat's cursor less three days |
+| The open chat's listener, `MessageRepositoryImpl.getMessages` | While a chat is open | The whole chat |
+| The push reconcile, `MessageRepositoryImpl.reconcileFromPush` | A push names a message of a closed chat | That one message |
+
+The sync keeps one row per chat in `message_sync_state`. `MessageSyncPlan.fetchFor` reads the row and answers *everything* or *after T*. A chat without a row of the current `RESTORE_GENERATION` is fetched whole, which is a restore. Any other chat is asked for the messages whose `timestamp` is above its cursor less `TAIL_OVERLAP_MS`.
+
+The cursor is the highest `timestamp` among the documents a sync fetched. It is written after the fetched messages reached Room, so a sync that fails or is cancelled repeats its fetch. It never comes from Room, and a document that still waits for this phone's own write does not count. It stops at this phone's clock, so a sender whose clock runs ahead cannot push it into the future. Sync fetches read from the server only (`Source.SERVER`), and offline they throw.
+
+A message's `timestamp` is its sender's clock, and a queued message lands later than that clock says. The three days of overlap cover that. Until the sync asks by a server stamp, two things reach a closed chat only when it is opened: a change to a message older than three days, and a message that lands more than three days late with its push lost.
+
+Each sync logs one line under the tag `MessageRepo`: the chats, how many failed, how many were restored whole, and the documents fetched.
+
 ---
 
 ## 7. Real-Time Status & Read Receipts Algorithm
@@ -430,8 +448,8 @@ com.firestream.chat/
 │   │   ├── SignalManager.kt
 │   │   └── SignalProtocolStoreImpl.kt
 │   ├── local/
-│   │   ├── dao/                 # ChatDao, ContactDao, ListDao, MessageDao, ReminderDao, SignalDao, StickerDao, UserDao
-│   │   ├── entity/              # Chat, Contact, List, Message + its embedded MessageRecord, Reminder, User,
+│   │   ├── dao/                 # ChatDao, ContactDao, ListDao, MessageDao, MessageSyncStateDao, ReminderDao, SignalDao, StickerDao, UserDao
+│   │   ├── entity/              # Chat, Contact, List, Message + its embedded MessageRecord, MessageSyncState, Reminder, User,
 │   │   │                        # Sticker + StickerPack + StickerPackItem, 6 Signal entities + SignalTrustedIdentity
 │   │   ├── AppDatabase.kt       # fire_stream_chat.db — application data
 │   │   ├── SignalDatabase.kt    # signal.db — Signal Protocol key material (split from AppDatabase)

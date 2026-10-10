@@ -21,6 +21,23 @@ It is not a feature gap and not tech debt — it is an unfinished check, and it 
 here because a cloud agent has no other way to learn that the work is not fully done.
 Delete an item once it has been verified (or once a fix for what the check found ships).
 
+### The message sync asks for the tail (2026-10-10)
+
+`docs/plans/message-sync.md` step 1. JVM tests cover the plan, the state table, the sync and the
+Firestore questions. Nothing ran on a device. Check it by upgrading over an install, with
+`adb logcat -s MessageRepo` open:
+
+1. The first start after the update restores every chat. The line `syncAllChatMessages:` shows
+   `restored` equal to `chats`, and `documents` is the whole history.
+2. The second start shows `restored=0` and a small `documents`.
+3. A message sent to the phone while the app is closed is there after the next start, without
+   opening its chat.
+4. Start once in flight mode. The line shows `failed` equal to `chats`, and nothing is lost. The
+   next start with a network catches up.
+5. Search finds an old message.
+6. Delete a chat that the other person then writes into again. Its history comes back whole.
+7. Read the reads per day in the Firebase console before and after the update.
+
 ### The prompt for full-screen notifications (2026-10-09)
 
 `docs/plans/video-calls.md` step 5b. JVM tests cover the rule, the access check against a mocked
@@ -1221,7 +1238,11 @@ in 1.37.0 (`docs/plans/file-handling.md`). Ideas for the next round, none decide
 ### Performance & pagination (6.4)
 - Paginated message loading (Paging 3)
 - Lazy image loading with thumbnail placeholders
-- Database query optimisation with proper indices
+- Database query optimisation with proper indices. `messages` has one on `(chatId, timestamp)`.
+- The message sync asks by `timestamp` until step 3 of `docs/plans/message-sync.md` ships. Two
+  things then reach a chat only when it is opened:
+  - An edit, a delete, a reaction or a receipt on a message older than three days.
+  - A message that lands more than three days after it was written, when its push is lost.
 - Files: `data/local/dao/MessageDao.kt`, `ui/chat/ChatViewModel.kt`
 
 ### Notifications enhancement (6.5)

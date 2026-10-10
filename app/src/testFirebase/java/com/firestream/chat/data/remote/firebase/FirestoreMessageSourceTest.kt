@@ -9,6 +9,9 @@ import com.google.firebase.firestore.DocumentReference
 import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.FirebaseFirestoreException
+import com.google.firebase.firestore.Query
+import com.google.firebase.firestore.QuerySnapshot
+import com.google.firebase.firestore.Source
 import com.google.firebase.firestore.Transaction
 import io.mockk.every
 import io.mockk.mockk
@@ -563,5 +566,52 @@ class FirestoreMessageSourceTest {
         every { messageRef.get() } returns getTask
 
         assertEquals(null, source.fetchMessage("chat1", "msg1"))
+    }
+
+    /** A query whose answer from the server is [docs]. A plain `get()`, which may answer from the cache, is not stubbed. */
+    private fun serverQuery(vararg docs: DocumentSnapshot): Query {
+        val snapshot = mockk<QuerySnapshot>()
+        every { snapshot.documents } returns docs.toList()
+        val getTask = mockk<Task<QuerySnapshot>>(relaxed = true)
+        completeImmediately(getTask)
+        every { getTask.result } returns snapshot
+        val query = mockk<Query>()
+        every { query.get(Source.SERVER) } returns getTask
+        return query
+    }
+
+    private fun textDoc(id: String, timestamp: Long): DocumentSnapshot {
+        val doc = mockk<DocumentSnapshot>(relaxed = true)
+        every { doc.id } returns id
+        every { doc.data } returns mapOf("senderId" to "peer1", "type" to "TEXT", "content" to id, "timestamp" to timestamp)
+        every { doc.metadata.hasPendingWrites() } returns false
+        return doc
+    }
+
+    // A plain get() answers from the SDK's cache when the phone is offline, and
+    // the sync would move a chat's cursor on that answer.
+    @Test
+    fun `fetchMessages asks the server for the whole chat, oldest first`() = runTest {
+        val byTimestamp = serverQuery(textDoc("m1", 5L), textDoc("m2", 6L))
+        every { messages.orderBy("timestamp", Query.Direction.ASCENDING) } returns byTimestamp
+
+        val fetched = source.fetchMessages("chat1")
+
+        assertEquals(listOf("m1", "m2"), fetched.map { it.id })
+        assertEquals(listOf(5L, 6L), fetched.map { it.timestamp })
+        verify(exactly = 1) { byTimestamp.get(Source.SERVER) }
+    }
+
+    @Test
+    fun `fetchMessagesAfter asks the server for the messages above the bound, oldest first`() = runTest {
+        val byTimestamp = mockk<Query>()
+        val bounded = serverQuery(textDoc("m2", 6L))
+        every { messages.orderBy("timestamp", Query.Direction.ASCENDING) } returns byTimestamp
+        every { byTimestamp.whereGreaterThan("timestamp", 5L) } returns bounded
+
+        val fetched = source.fetchMessagesAfter("chat1", afterTimestamp = 5L)
+
+        assertEquals(listOf("m2"), fetched.map { it.id })
+        verify(exactly = 1) { bounded.get(Source.SERVER) }
     }
 }

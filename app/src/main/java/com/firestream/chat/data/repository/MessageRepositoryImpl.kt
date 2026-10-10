@@ -9,8 +9,12 @@
 //   by OutboxWorker"). Also media download with in-flight dedup,
 //   per-chat backfill scan, block-state filtering and Signal decryption on
 //   receive — over three receive paths: the open chat's listener, the chat-list
-//   sync, and the one message a push names (reconcileFromPush).
-// Owns: MessageEntity rows; the one read that addresses a send
+//   sync, and the one message a push names (reconcileFromPush). The chat-list
+//   sync asks each chat for what Room lacks (MessageSyncPlan): the whole chat
+//   once, then the tail after the chat's cursor.
+// Owns: MessageEntity rows. The message_sync_state rows: only the chat-list
+//   sync writes them, after a server answer reached Room (docs/PATTERNS.md
+//   "A sync cursor lives beside the rows it describes"). The one read that addresses a send
 //   (sendTargetFor); FAILED marking of what fails before the enqueue
 //   (failSendOnError); the split between a definite block (refused) and an
 //   unanswerable block check (queued — the worker asks again online); the
@@ -53,6 +57,7 @@ import com.firestream.chat.data.local.AutoDownloadOption
 import com.firestream.chat.data.local.PreferencesDataStore
 import com.firestream.chat.data.local.dao.ChatDao
 import com.firestream.chat.data.local.dao.MessageDao
+import com.firestream.chat.data.local.dao.MessageSyncStateDao
 import com.firestream.chat.data.local.dao.StickerDao
 import com.firestream.chat.data.local.entity.MessageEntity
 import com.firestream.chat.data.local.entity.MessageRecord
@@ -109,6 +114,7 @@ import com.firestream.chat.domain.util.MAX_DOCUMENT_BYTES
 import com.firestream.chat.domain.util.GIF_MIME_TYPE
 import com.firestream.chat.domain.util.KlipyUrls
 import com.firestream.chat.domain.util.MAX_GIF_BYTES
+import com.firestream.chat.domain.util.MessageSyncPlan
 import com.firestream.chat.domain.util.formatFileSize
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -118,7 +124,9 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withLock
@@ -219,6 +227,7 @@ class MessageRepositoryImpl @Inject constructor(
     private val documentFiles: DocumentFiles,
     private val stickerDao: StickerDao,
     private val stickerFiles: StickerFiles,
+    private val syncStateDao: MessageSyncStateDao,
 ) : MessageRepository {
 
     private val downloadScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -1384,7 +1393,7 @@ class MessageRepositoryImpl @Inject constructor(
         }
 
         val semaphore = Semaphore(3)
-        coroutineScope {
+        val synced = coroutineScope {
             chatIds.map { chatId ->
                 async(Dispatchers.IO) {
                     semaphore.withPermit {
@@ -1393,19 +1402,69 @@ class MessageRepositoryImpl @Inject constructor(
                         } catch (t: Throwable) {
                             t.rethrowIfCancellation()
                             Log.w(TAG, "syncAllChatMessages: sync failed for chat=$chatId", t)
+                            null
                         }
                     }
                 }
             }.awaitAll()
-        }
+        }.filterNotNull()
+        Log.i(
+            TAG,
+            "syncAllChatMessages: chats=${chatIds.size} failed=${chatIds.size - synced.size} " +
+                "restored=${synced.count { it.restored }} documents=${synced.sumOf { it.documents }}"
+        )
     }
 
+    /** What one chat's sync did: whether it fetched the chat whole, and how many documents came back. */
+    private data class ChatSyncResult(val restored: Boolean, val documents: Int)
+
+    /**
+     * One chat's sync: the fetch [MessageSyncPlan] names, the reconcile of what
+     * came back, then the chat's state row. The row is written last, so a sync
+     * that throws or is cancelled on the way leaves it as it was and the next
+     * one repeats the fetch.
+     *
+     * The cursor comes only from the fetched documents, never from Room. A
+     * message this phone queued is the newest row in Room, and a cursor read
+     * there would pass a message of the other person that landed before it. A
+     * document still waiting for this phone's own write is left out for the same
+     * reason: the server does not hold it yet.
+     */
     private suspend fun syncChatMessages(
         chatId: String,
         currentUid: String,
         blockedUserIds: Set<String>
+    ): ChatSyncResult {
+        val state = syncStateDao.getState(chatId)
+        val fetch = MessageSyncPlan.fetchFor(state?.restoreGeneration, state?.cursorMs)
+        val rawList = when (fetch) {
+            MessageSyncPlan.Fetch.Everything -> messageSource.fetchMessages(chatId)
+            is MessageSyncPlan.Fetch.After -> messageSource.fetchMessagesAfter(chatId, fetch.timestamp)
+        }
+        reconcileSynced(chatId, rawList, currentUid, blockedUserIds)
+        // The last message's insert runs under NonCancellable and returns even
+        // when the sync was cancelled meanwhile.
+        currentCoroutineContext().ensureActive()
+
+        val newest = MessageSyncPlan.cursorFrom(
+            timestamps = rawList.filterNot { it.hasPendingWrites }.map { it.timestamp },
+            nowMs = System.currentTimeMillis(),
+        )
+        val restored = fetch is MessageSyncPlan.Fetch.Everything
+        if (restored) {
+            syncStateDao.writeRestored(chatId, MessageSyncPlan.RESTORE_GENERATION, newest ?: 0L)
+        } else if (newest != null) {
+            syncStateDao.raiseCursor(chatId, MessageSyncPlan.RESTORE_GENERATION, newest)
+        }
+        return ChatSyncResult(restored, rawList.size)
+    }
+
+    private suspend fun reconcileSynced(
+        chatId: String,
+        rawList: List<RawMessage>,
+        currentUid: String,
+        blockedUserIds: Set<String>
     ) {
-        val rawList = messageSource.fetchMessages(chatId)
         for (raw in rawList) {
             if (raw.senderId != currentUid && raw.senderId in blockedUserIds) {
                 Log.d(TAG, "syncChatMessages: filtered blocked sender=${raw.senderId} msg=${raw.id} chat=$chatId")

@@ -1,7 +1,7 @@
 # Message sync: ask for what changed, not for everything
 
 Status: approved by the owner on 2026-10-10, with step 1 built first. Two decisions for steps 2
-and 4 are open and marked in the table. No step has run.
+and 4 are open and marked in the table. Step 1 is shipped.
 
 ## Context
 
@@ -225,6 +225,40 @@ skill. User-visible steps get a CHANGELOG entry and a bump through the `changelo
 Done when: the gate is green, and in `MessageRepositorySyncTest` the second sync asks for the tail
 only.
 
+**Approach**
+- Order: `MessageSyncStateEntity` and `MessageSyncStateDao`, the index on `MessageEntity`,
+  `AppDatabase` 32 → 33, `DatabaseModule`. Then `MessageSyncPlan`. Then
+  `MessageSource.fetchMessagesAfter` in both flavors. Then `MessageRepositoryImpl`, then
+  `ChatRepositoryImpl`. Docs last.
+- `MessageSyncPlan` lives in `domain/` and cannot see the entity. It takes the row's generation
+  and cursor as two nullable numbers.
+- The delete of a chat's messages and its state row is one `@Transaction` on `MessageDao`
+  (`deleteChatMessages`). `MessageDao` owns the messages, and a Room DAO may write any table.
+  `MessageSyncStateDao` therefore gets no delete for one row.
+- Writing a restored chat's row is one SQLite upsert. It keeps the higher cursor when a row of the
+  same generation is already there, so two syncs of one chat cannot move a cursor back.
+- A fetched document that still waits for its own write (`RawMessage.hasPendingWrites`) does not
+  count for the cursor. A server `get()` still lays this phone's pending writes over its answer.
+- The test factory's `MessageSyncStateDao` answers "no row", because a relaxed mock would answer
+  with a mock row. Every existing sync test then takes the restore path it has today.
+- Tests: `MessageSyncPlanTest`, `MessageSyncStateDaoTest` (Robolectric, also the chat delete),
+  `MessageRepositorySyncTest`, new cases in `FirestoreMessageSourceTest`, and one case in a new
+  `ChatRepositoryImplDeleteTest`.
+- Nothing found contradicts a decision or a design point.
+
+**Shipped** `6e24eb78` (2026-10-10) — tier: strong. skills: changelog-release, code-review, simplify. Reviewer models: code-review: opus, opus; simplify: sonnet, opus, sonnet, opus. CHANGELOG entry: `6e24eb78`.
+Departures (for sign-off):
+- `AppDatabase` is at version 33.
+- The delete of a chat's messages and its state row is `MessageDao.deleteChatMessages`. `MessageSyncStateDao` has no delete for one row. Its read is `getState`, because `get` collides with MockK inside a stub block.
+- `MessageSyncStateDao.writeRestored` is one upsert. It keeps the higher cursor within a generation. It writes nothing for a chat without a row in `chats` (/code-review: a restore that outlived a chat delete or a sign-out left a state row over no messages). `ChatRepositoryImpl.deleteChat` and `leaveGroup` now delete the chat row first, then the messages and the state.
+- The cursor stops at this phone's clock, in `MessageSyncPlan.cursorFrom` (/code-review: one sender with a clock weeks ahead put the cursor past everyone else's messages).
+- A fetched document with `hasPendingWrites` does not count for the cursor.
+- The sync checks for cancellation before it writes the state. The last insert runs under `NonCancellable` and returns normally.
+- The log line also counts the chats that failed.
+- "Deleting a chat removes its row" is tested in `MessageSyncStateDaoTest` on Room and in `ChatRepositoryImplDeleteTest`, not in `MessageRepositorySyncTest`.
+- Not fixed, in `TECH_DEBT.md`: the sync's cursor passes a blocked sender's messages, and PocketBase fetches one page of 200.
+- Nothing ran on a device. The checklist is in `docs/BACKLOG.md` § *The message sync asks for the tail*.
+
 ### Step 2 — Every write to a message stamps `changedAt` — skills: code-review; model: strong; effort: high
 
 Nothing reads the stamp in this step.
@@ -281,6 +315,19 @@ Done when: the gate is green and both Node suites are written.
   `FirestoreMessageSourceTest`: the question and the mapping.
 - Docs: `ARCHITECTURE.md`, `FEATURE-MAP.md`. `BACKLOG.md` loses the two open points of step 1.
   CHANGELOG `Changed`.
+- **(step-1)** The code as it stands:
+  - The plan's answer type is `MessageSyncPlan.Fetch` (`Everything`, `After`), from
+    `fetchFor(restoreGeneration, cursorMs)`. The DAO's read is `MessageSyncStateDao.getState`.
+  - `MessageSyncPlan.cursorFrom(timestamps, nowMs)` makes the cursor and caps it at this phone's
+    clock. With `changedAt` the values are the server's, so decide whether the cap stays. A phone
+    whose clock runs behind would hold its cursor back and only fetch more.
+  - `MessageRepositoryImpl.syncChatMessages` leaves a document with `hasPendingWrites` out of the
+    cursor. Keep that: its `changedAt` is null or an estimate.
+  - `MessageSyncStateDao.writeRestored` already replaces a row of generation 1 and takes the new
+    cursor as it is, so the switch from `timestamp` to `changedAt` needs no change there.
+    `MessageSyncStateDaoTest` pins it.
+  - The two open points of step 1 sit in `BACKLOG.md` § *Performance & pagination (6.4)*.
+    `ARCHITECTURE.md` § *Message sync* and the `GOTCHAS.md` entry on `get()` name the tail too.
 
 Done when: the gate is green and a changed old message reaches Room without its chat being opened.
 
@@ -314,6 +361,12 @@ The listener, the sync and the push write the same rows, and the cursor now has 
   `SettingsViewModelTest`: the reload.
 - Docs: `ARCHITECTURE.md`, `FEATURE-MAP.md`, the AGENT-NOTE of `MessageRepositoryImpl`,
   `BACKLOG.md` § *Pending on-device verification*. CHANGELOG `Changed`, and `Added` for the row.
+- **(step-1 /code-review)** The sync skips a blocked sender's messages and its cursor passes them
+  (`TECH_DEBT.md` § *Unblocking a user does not bring back what the sync skipped*). Today the open
+  chat's whole listener brings them back after an unblock. This step takes that listener away, so
+  an unblock must delete the state rows, or the messages stay missing. Add the test.
+- **(step-1)** `MessageSyncStateDao.deleteAll` exists and has no caller yet.
+  `reloadAllMessages` is its first. `writeRestored` writes only for a chat with a row in `chats`.
 
 Done when: the gate is green and opening a restored chat asks for its changes only.
 
@@ -411,6 +464,16 @@ and it looks for no bugs. This step is the correctness review. It adds no featur
      (`FirestoreMessageSource.kt:392`). How many documents that returns on a real account is not
      known.
   3. `PocketBaseMessageSource.fetchMessages` asks for one page of 200 messages.
+     **(step-1)** Confirmed by reading, and it now marks a chat restored at its 200th message
+     (`TECH_DEBT.md` § *PocketBase: a message fetch is one page of 200*).
+- **(step-1 /code-review)** For area 1, three things step 1 settled and how. Check that they still
+  hold after steps 3 and 4.
+  - A restore that outlives a chat delete or a sign-out: `writeRestored` writes only while the chat
+    row exists, and `ChatRepositoryImpl.deleteLocally` deletes the chat row first. The reconcile
+    loop can still insert messages of the deleted chat after the delete. They have no state row.
+  - A cancelled sync: `ensureActive()` before the state write.
+  - `MessageDao.deleteMessagesByChatId` is still public. Nothing but `deleteChatMessages` may call
+    it, and no `ArchitectureTest` rule says so.
 - **Fix what is confirmed and severe.** A confirmed finding that loses a message or a change, shows
   a deleted message, or opens a security hole is fixed in this step, with a test that fails
   without the fix. A fix that would change a decision of this plan goes to the owner in the Shipped

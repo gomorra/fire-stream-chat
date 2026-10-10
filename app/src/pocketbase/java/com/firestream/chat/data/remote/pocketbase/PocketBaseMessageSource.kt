@@ -5,6 +5,7 @@
 //     (`chat_id.participants ~ @request.auth.id`) so unrelated chats never
 //     reach the client.
 //   * fetchMessages — REST GET filtered by chat_id, sorted by timestamp ASC.
+//   * fetchMessagesAfter — the same, with a lower bound on timestamp.
 //   * sendPlainMessage — POST + denormalised last_message_* writeback.
 //   * lastContentFor — pure helper, mirrors Firebase impl.
 //
@@ -91,8 +92,13 @@ class PocketBaseMessageSource @Inject constructor(
         }
     }
 
-    override suspend fun fetchMessages(chatId: String): List<RawMessage> {
-        val filter = "chat_id=\"$chatId\""
+    override suspend fun fetchMessages(chatId: String): List<RawMessage> =
+        fetchFiltered("chat_id=\"$chatId\"")
+
+    override suspend fun fetchMessagesAfter(chatId: String, afterTimestamp: Long): List<RawMessage> =
+        fetchFiltered("chat_id=\"$chatId\" && timestamp>$afterTimestamp")
+
+    private suspend fun fetchFiltered(filter: String): List<RawMessage> {
         val response = client.get(
             "/api/collections/messages/records?perPage=200&sort=timestamp&filter=${urlEncode(filter)}"
         )

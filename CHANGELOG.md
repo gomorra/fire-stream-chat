@@ -8,6 +8,10 @@ All notable changes to FireStream Chat. Format follows [Keep a Changelog](https:
 
 - **A GIFs tab, and stickers from an online catalogue.** The emoji panel has a third tab, *GIFs*, with what is trending on KLIPY and a search. A tap sends the GIF. The Stickers tab has an *Online* entry in its pack row with KLIPY's stickers, and a sticker search shows KLIPY's matches in a *More online* section under your own. Before the first request a notice says what this means: your searches go to KLIPY, and a pick is loaded from KLIPY by you and by the people you send it to. Nothing is asked of KLIPY until you accept it. An online sticker cannot be added to the favourites or to a pack. Both are only in a build made with a KLIPY key. (`d04c35de`)
 
+### Changed
+
+- **Starting the app no longer fetches every message again.** Each start, and each pull to refresh, used to read the whole history of every chat from the server. The app now fetches a chat whole once and afterwards asks only for its newest messages, so a start uses far less data and finishes sooner. The first start after this update still fetches everything once. A change to a message older than three days, such as an edit or a reaction, shows when you open its chat. (`6e24eb78`)
+
 ## [1.41.0] — 2026-10-09
 
 ### Added
