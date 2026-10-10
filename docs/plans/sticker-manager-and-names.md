@@ -1,6 +1,6 @@
 # Sticker manager and sticker names
 
-Status: approved by the owner on 2026-10-10. Steps 1 and 2 are shipped.
+Status: approved by the owner on 2026-10-10. Steps 1 to 3 are shipped.
 
 ## Context
 
@@ -295,6 +295,39 @@ at the row with the real collection.
   with the row. The picker follows the switch with no further code: `stickerShelves` reads
   `shownInRow` from the packs flow.
 
+**Approach**
+
+- Order: `StickerLibraryViewModel.kt` (the tab, the pack selection, merge, delete, the switch, the
+  drop), then `StickerLibraryScreen.kt` (tabs, the **+** menu, the two groups, the drag, the
+  selection bar and its two dialogs), then `SettingsScreen.kt` and `NavGraph.kt` for the row's name.
+- The two groups are two filters over one list in the owner's order. A drag moves a pack inside
+  its group only, and the drop writes the whole order with `reorderPacks`. The switch is the one
+  way between the groups.
+- The ViewModel shows a dropped order at once and takes it back when the write fails. Without
+  that the row jumps back until Room answers.
+- Only a `USER` or `INSTALLED` pack can be selected, since `mergePacks` refuses the other two.
+  *Favourites* and *Saved stickers* keep *Delete* in their row menu.
+- `movePack` and its tests go, with *Move up* and *Move down*.
+- Tests: `StickerLibraryViewModelTest` (merge in the shown order, delete of a selection, the
+  switch, a selection that loses a pack, the drop and a failed drop) and `StickerLibraryScreenTest`
+  (the two groups, the **+** menu, the selection bar, no switch on *Favourites*).
+- Nothing in the code contradicts the spec. Skills beyond the floor: `simplify` if the diff passes
+  600 lines. One ViewModel changes, and no worker, DI or crypto file.
+
+**Shipped** `5b7dfccb` (2026-10-10) — tier: mid. skills: simplify. Reviewer models: simplify: sonnet, sonnet, sonnet, sonnet. CHANGELOG entry (`Added`, under `[UNRELEASED] [1.42.0]`) is in `5b7dfccb`, and its hash was added in the `docs(plan):` commit.
+Departures (for sign-off):
+- Only a `USER` or `INSTALLED` pack can be selected. *Favourites* and *Saved stickers* keep *Delete* in their row menu, and a long press on one opens it like a tap.
+- A drag moves a pack inside its group only. The drop writes the whole order with `reorderPacks`. The ViewModel shows the dropped order at once and takes it back when the write fails.
+- The switch sits in the row's second line, beside the words *Own thumbnail*. With the menu and the handle at the row's end, the switch is in the middle of a narrow row.
+- The row menu keeps *Rename* and *Delete*. The delete question of one pack also says that a WhatsApp import will not bring its stickers back.
+- The three entries of the **+** menu have no second line any more. The file types *From files* takes are no longer named on the screen.
+- *Delete* of a selection calls `deletePack` once per pack and stops at the first failure (`TECH_DEBT.md`).
+- The Settings row's subtitle is new too. `SettingsScreen`'s parameter is `onStickersClick`.
+- `StickerPack.hasOwnThumbnail` is new on the domain model. The picker's `stickerShelves` reads it in place of its own rule (from `/simplify`).
+- `StickerLibraryUiState.selectedPacks` and `canMerge` are derived. The state has no list per group: the screen splits the list it shows.
+- No test drags a row. `StickerLibraryScreenTest` covers the rule a drag follows (`movedWithinGroup`), and the drag itself is on the `docs/BACKLOG.md` checklist.
+- Not done, from `/simplify`: one `deletePacks(ids)` in the repository, and one copy of the dropped order in place of two (`TECH_DEBT.md`).
+
 ### Step 4 — The manager's *All stickers* tab, and a WhatsApp import that shows what is new (UI)
 
 - *All stickers* is one grid of every sticker, with a title per pack and cells of about 64 dp, so
@@ -317,6 +350,13 @@ at the row with the real collection.
   which makes the existing *Remove* in `PackGrid` a delete from the library for such a sticker.
   `StickerImportResult` has no count of what was new in the folder. The new-only filter needs
   its own mark, as this step says.
+- **(step-3)** `StickerLibraryContent` draws the second tab as an empty `Box` with the tag
+  `ALL_STICKERS_TAB_TAG`. Replace it. `StickerLibraryUiState.selectedStickerIds` belongs to the
+  open pack: the packs collector drops every id that is not in `openPack`, and `editSelection`
+  reads `openPackId`. A selection across packs needs its own entries. The top bar's `when` already
+  tells a sticker selection from a pack selection (`selectedPackIds`), and `selectTab` ends a pack
+  selection. `PackNameDialog` asks for a pack's name and serves *New pack from these*. In a
+  Robolectric test the middle of a pack's row is its switch, so tap a row at its start.
 
 **‖ Checkpoint.** The owner tidies the real library on the phone and imports from WhatsApp again.
 
@@ -469,6 +509,13 @@ and it looks for no bugs. This step is the correctness review. It adds no featur
      the *WhatsApp* shelf appears or goes away while the panel is open. A sticker that sits in a
      grouped pack and in a pack with a thumbnail is on both shelves, and each sends its own pack.
      Step 2 had no review skill.
+     **(step-3)** Also: the drag in `PackList`. It keeps a local copy of the packs (`shown`) and a
+     `dragged` flag, and one `LaunchedEffect` both sends the drop and takes over new packs.
+     `StickerLibraryViewModel.reorderPacks` sorts the state at once and puts `observedPacks` back
+     when the write fails. Look at a write that fails at once, where the screen may never see the
+     state change, at packs that arrive during a drag, and at a pack whose switch is flipped while
+     another is dragged. `deleteSelected` stops at the first failure with the earlier packs gone.
+     Step 3 had `/simplify` only, and no test drags a row.
   3. Names in the app: `StickerSearch`, `StickerNameSync`, `StickerNameWorker`, the name sources,
      `firestore.rules`. Nothing is asked for while the switch is off. A made sticker, a pack that
      is switched off and a sticker that is switched off are never asked for. No answer changes
