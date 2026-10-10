@@ -168,7 +168,7 @@ Every step follows CLAUDE.md's post-step workflow (tests, `./gradlew test`,
 `./gradlew assembleDebug`, review skills, one commit, docs). UI steps load the `app-ui-design`
 skill. User-visible steps get a CHANGELOG entry and a bump through the `changelog-release` skill.
 
-### Step 1 — A sync state per chat, and a start that asks for the tail — skills: code-review; model: strong
+### Step 1 — A sync state per chat, and a start that asks for the tail — skills: code-review; model: strong; effort: high
 
 - `data/local/entity/MessageSyncStateEntity.kt`: the table `message_sync_state` with `chatId`
   (primary key), `restoreGeneration: Int` and `cursorMs: Long`. A row exists only for a chat whose
@@ -225,7 +225,7 @@ skill. User-visible steps get a CHANGELOG entry and a bump through the `changelo
 Done when: the gate is green, and in `MessageRepositorySyncTest` the second sync asks for the tail
 only.
 
-### Step 2 — Every write to a message stamps `changedAt` — skills: code-review; model: strong
+### Step 2 — Every write to a message stamps `changedAt` — skills: code-review; model: strong; effort: high
 
 Nothing reads the stamp in this step.
 
@@ -255,7 +255,7 @@ Nothing reads the stamp in this step.
 
 Done when: the gate is green and both Node suites are written.
 
-### Step 3 — The start asks for what changed — skills: code-review; model: strong
+### Step 3 — The start asks for what changed — skills: code-review; model: strong; effort: high
 
 - `RawMessage` gets `changedAt: Long?`. `FirestoreMessageSource.mapToRaw` reads it. A stamp that
   still waits for the server is null.
@@ -284,7 +284,7 @@ Done when: the gate is green and both Node suites are written.
 
 Done when: the gate is green and a changed old message reaches Room without its chat being opened.
 
-### Step 4 — The open chat listens for changes — skills: code-review, simplify; model: max
+### Step 4 — The open chat listens for changes — skills: code-review, simplify; model: max; effort: xhigh
 
 The listener, the sync and the push write the same rows, and the cursor now has two writers.
 
@@ -317,7 +317,7 @@ The listener, the sync and the push write the same rows, and the cursor now has 
 
 Done when: the gate is green and opening a restored chat asks for its changes only.
 
-### Step 5 — What the chat needs from old messages comes from Room (UI + state) — skills: app-ui-design; model: strong
+### Step 5 — What the chat needs from old messages comes from Room (UI + state) — skills: app-ui-design; model: strong; effort: high
 
 The list is still complete in this step, so nothing changes on screen. Each reader below moves from
 the list to its own Room query, collected by the manager that owns the slice.
@@ -341,7 +341,10 @@ the list to its own Room query, collected by the manager that owns the slice.
 
 Done when: the gate is green and each of the six readers passes with a list that lacks its message.
 
-### Step 6 — The chat loads a window (UI + state) — skills: app-ui-design, code-review; model: strong
+### Step 6 — The chat loads a window (UI + state) — skills: app-ui-design, code-review; model: strong; effort: xhigh
+
+This step runs one effort level above its tier. Scrolling, jumping and loading all change the same
+list at once.
 
 - `MessageDao`: the chat's rows from a timestamp on, the timestamp of the n-th newest row, and
   whether older rows exist.
@@ -373,7 +376,7 @@ Done when: the gate is green and each of the six readers passes with a list that
 
 Done when: the gate is green and a chat of 5,000 rows opens with 100 loaded.
 
-### Step 7 — Bug hunt over everything this plan built — model: max; budget: 60
+### Step 7 — Bug hunt over everything this plan built — model: max; effort: xhigh; budget: 60
 
 `/code-review` is the standards-and-spec skill while `.claude/skills/code-review` is a symlink,
 and it looks for no bugs. This step is the correctness review. It adds no feature.
@@ -454,3 +457,7 @@ scripts/run-plan.sh docs/plans/message-sync.md
 
 A run stops at every `‖` of the Order line, so the first run builds step 1 only. Run it again to
 go on.
+
+Step 1 can also be built by hand in a normal session, on main. It then gets its `**Shipped**` line
+under the heading, committed, and the runner goes on with step 2. Every step heading names its
+tier and its effort, and the runner uses both.
