@@ -10,7 +10,7 @@ All notable changes to FireStream Chat. Format follows [Keep a Changelog](https:
 
 ### Changed
 
-- **Starting the app no longer fetches every message again.** Each start, and each pull to refresh, used to read the whole history of every chat from the server. The app now fetches a chat whole once and afterwards asks only for its newest messages, so a start uses far less data and finishes sooner. The first start after this update still fetches everything once. A change to a message older than three days, such as an edit or a reaction, shows when you open its chat.
+- **Starting the app no longer fetches every message again.** Each start, and each pull to refresh, used to read the whole history of every chat from the server. The app now fetches a chat whole once and afterwards asks only for its newest messages, so a start uses far less data and finishes sooner. The first start after this update still fetches everything once. A change to a message older than three days, such as an edit or a reaction, shows when you open its chat. (`6e24eb78`)
 
 ## [1.41.0] — 2026-10-09
 
