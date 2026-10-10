@@ -76,7 +76,8 @@ jobs:
 
       # `test` runs the debug unit-test suites for both flavors — release
       # unit-test components are disabled (TECH_DEBT.md: "testReleaseUnitTest").
-      # `assembleDebug` compiles both flavors' debug APKs. One invocation so
-      # tests and assemble share daemon warmup and configure phase.
+      # `assembleDebug` builds the firebase debug APK only, so the pocketbase
+      # one is named. One invocation so tests and assemble share daemon warmup
+      # and configure phase.
       - name: Test and build
-        run: ./gradlew test assembleDebug
+        run: ./gradlew test assembleDebug assemblePocketbaseDebug

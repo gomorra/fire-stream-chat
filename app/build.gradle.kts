@@ -288,6 +288,16 @@ androidComponents {
     }
 }
 
+// `assembleDebug` builds the firebase flavor only. The pocketbase debug APK is
+// built by name: `./gradlew assemblePocketbaseDebug`.
+// AGP wires every flavor into the lifecycle task in its own afterEvaluate, which
+// runs before this one, so replacing the dependencies here is final.
+afterEvaluate {
+    tasks.named("assembleDebug") {
+        setDependsOn(listOf(tasks.named("assembleFirebaseDebug")))
+    }
+}
+
 // KSP 2.1.0 leaves intermediate per-round outputs in `byRounds/N/` under each
 // generated source dir. These duplicate the final output, and javac walks the
 // whole tree — yielding "duplicate class" errors during incremental rebuilds.

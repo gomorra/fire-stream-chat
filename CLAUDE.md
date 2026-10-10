@@ -7,10 +7,10 @@ FireStream Chat is an Android messaging app built with Kotlin, Jetpack Compose, 
 ## Build & Run
 
 ```bash
-# Build debug APK (defaults to firebase flavor)
+# Build the debug APK (firebase flavor only)
 ./gradlew assembleDebug
 
-# Per-flavor builds — firebase is default; pocketbase is the self-host variant
+# Per-flavor builds — pocketbase is the self-host variant and is only built by name
 ./gradlew assembleFirebaseDebug
 ./gradlew assemblePocketbaseDebug
 
@@ -254,7 +254,7 @@ Five functions in `functions/index.js` (Node.js 20) — push notifications for m
 ### Change Safety
 
 - **Every production code change must pass `./gradlew test` before being committed.** If a test fails, fix the root cause — do not skip or delete the test.
-- **CI gate** — `.github/workflows/ci.yml` runs `./gradlew test assembleDebug` on every push and PR to main. Since this repo pushes directly to main, a red run means the commit already landed: fix forward immediately.
+- **CI gate** — `.github/workflows/ci.yml` runs `./gradlew test assembleDebug assemblePocketbaseDebug` on every push and PR to main. Since this repo pushes directly to main, a red run means the commit already landed: fix forward immediately.
 - **Bug fixes require a regression test.** Before fixing a bug, write (or extend) a test that reproduces the failure, then verify the fix makes it green. This prevents the same defect from recurring.
 - **Modifications to tested code must keep tests in sync.** When changing logic that has existing test coverage, update the corresponding tests to reflect the new behavior.
 
