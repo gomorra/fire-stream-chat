@@ -86,6 +86,8 @@ data class StickerPackEntity(
     val createdAt: Long,
     val updatedAt: Long,
     val syncState: String = StickerSyncState.PENDING.name,
+    /** Whether the pack has its own thumbnail in the picker's row. See [StickerPack.shownInRow]. */
+    val shownInRow: Boolean = true,
 ) {
     fun toDomain(stickers: List<Sticker>) = StickerPack(
         id = id,
@@ -96,7 +98,27 @@ data class StickerPackEntity(
         stickers = stickers,
         createdAt = createdAt,
         updatedAt = updatedAt,
+        shownInRow = shownInRow,
     )
+
+    companion object {
+        /** The start of the import key of a pack that a sticker's WhatsApp metadata names. */
+        const val WHATSAPP_KEY_PREFIX = "wa:"
+
+        /** The start of the import key of a pack that is found by its name alone. */
+        const val LOOSE_KEY_PREFIX = "loose:"
+
+        /** The import key of the pack that WhatsApp stickers without pack metadata join. */
+        const val LOOSE_WHATSAPP_KEY = LOOSE_KEY_PREFIX + "WhatsApp"
+
+        /**
+         * What [shownInRow] starts as for a pack with [importKey]: false for a
+         * pack a WhatsApp import made, true for every other. A manifest without
+         * the field is read by the same rule.
+         */
+        fun shownInRowByDefault(importKey: String?): Boolean =
+            importKey == null || !(importKey.startsWith(WHATSAPP_KEY_PREFIX) || importKey == LOOSE_WHATSAPP_KEY)
+    }
 }
 
 /** Whether a pack's current state has reached the backend. */

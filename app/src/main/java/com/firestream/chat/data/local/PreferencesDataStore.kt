@@ -8,6 +8,7 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.floatPreferencesKey
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
+import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.firestream.chat.domain.model.ChatFontSize
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -76,6 +77,9 @@ class PreferencesDataStore @Inject constructor(
 
     // Sticker recents
     private val recentStickerIdsKey = stringPreferencesKey("recent_sticker_ids")
+
+    // Stickers deleted from the library
+    private val deletedStickerIdsKey = stringSetPreferencesKey("deleted_sticker_ids")
 
     // Klipy
     private val klipyCustomerIdKey = stringPreferencesKey("klipy_customer_id")
@@ -289,15 +293,15 @@ class PreferencesDataStore @Inject constructor(
     val recentEmojisFlow: Flow<List<String>> = recentsFlow(recentEmojisKey)
 
     /** A most-recent-first list kept as one comma-joined string, so no value may hold a comma. */
-    private fun recentsFlow(key: Preferences.Key<String>): Flow<List<String>> = context.dataStore.data.map { prefs ->
-        prefs[key]?.split(",")?.filter { it.isNotEmpty() }.orEmpty()
-    }
+    private fun recentsFlow(key: Preferences.Key<String>): Flow<List<String>> = context.dataStore.data.map { it.recents(key) }
+
+    private fun Preferences.recents(key: Preferences.Key<String>): List<String> =
+        this[key]?.split(",")?.filter { it.isNotEmpty() }.orEmpty()
 
     /** Moves [value] to the front of the list under [key] and keeps the newest [cap]. */
     private suspend fun pushRecent(key: Preferences.Key<String>, value: String, cap: Int) {
         context.dataStore.edit { prefs ->
-            val current = prefs[key]?.split(",")?.filter { it.isNotEmpty() }.orEmpty()
-            prefs[key] = (listOf(value) + (current - value)).take(cap).joinToString(",")
+            prefs[key] = (listOf(value) + (prefs.recents(key) - value)).take(cap).joinToString(",")
         }
     }
 
@@ -403,9 +407,45 @@ class PreferencesDataStore @Inject constructor(
 
     suspend fun addRecentSticker(stickerId: String) = pushRecent(recentStickerIdsKey, stickerId, cap = 30)
 
-    /** Forgets the sticker recents. They are the signed-in user's, and the next user's library may hold the same stickers. */
-    suspend fun clearRecentStickers() {
-        context.dataStore.edit { prefs -> prefs.remove(recentStickerIdsKey) }
+    /**
+     * Forgets the sticker recents and the deleted stickers. They are the
+     * signed-in user's, and the next user's library may hold the same stickers.
+     */
+    suspend fun clearStickerLists() {
+        context.dataStore.edit { prefs ->
+            prefs.remove(recentStickerIdsKey)
+            prefs.remove(deletedStickerIdsKey)
+        }
+    }
+
+    // --- Stickers deleted from the library ---
+
+    /**
+     * The ids of the stickers the user deleted from the library. A WhatsApp
+     * import leaves them out. Device-only, and not a Room table: a version bump
+     * would empty it.
+     */
+    suspend fun deletedStickerIds(): Set<String> = context.dataStore.data.first()[deletedStickerIdsKey].orEmpty()
+
+    /** Remembers [stickerIds] as deleted and takes them out of the sticker recents. */
+    suspend fun rememberDeletedStickers(stickerIds: Collection<String>) {
+        if (stickerIds.isEmpty()) return
+        val ids = stickerIds.toSet()
+        context.dataStore.edit { prefs ->
+            prefs[deletedStickerIdsKey] = prefs[deletedStickerIdsKey].orEmpty() + ids
+            val recents = prefs.recents(recentStickerIdsKey)
+            if (recents.any { it in ids }) prefs[recentStickerIdsKey] = (recents - ids).joinToString(",")
+        }
+    }
+
+    /** Forgets that [stickerIds] were deleted. For a sticker that was added again on purpose. */
+    suspend fun forgetDeletedStickers(stickerIds: Collection<String>) {
+        if (stickerIds.isEmpty()) return
+        val ids = stickerIds.toSet()
+        context.dataStore.edit { prefs ->
+            val deleted = prefs[deletedStickerIdsKey].orEmpty()
+            if (deleted.any { it in ids }) prefs[deletedStickerIdsKey] = deleted - ids
+        }
     }
 
     // --- Klipy ---

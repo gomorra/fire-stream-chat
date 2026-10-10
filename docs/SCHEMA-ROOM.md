@@ -34,10 +34,13 @@ Every `AppDatabase` version is reached by destructive migration, except 18 → 1
 | `sticker_packs.importKey` | What an import made the pack from: a WhatsApp pack's id, name and publisher, an archive's title and author, or the loose pack's name. Unique. A second import finds the pack through it. The `FAVOURITES` and `SAVED` packs have the fixed keys `kind:FAVOURITES` and `kind:SAVED`, so the unique index keeps them at one each. `null` for a pack made by hand |
 | `sticker_packs.kind` | `USER`, `INSTALLED`, `FAVOURITES` or `SAVED` |
 | `sticker_packs.sortOrder` | The pack's place in the user's order |
+| `sticker_packs.shownInRow` | Whether the pack has its own thumbnail in the picker's row. A new pack gets `false` when a WhatsApp import made it (import key `wa:…` or `loose:WhatsApp`) and `true` otherwise (`StickerPackEntity.shownInRowByDefault`). The owner can switch it for a `USER` or `INSTALLED` pack. Always `true` for `FAVOURITES` and `SAVED` |
 | `sticker_packs.syncState` | `PENDING`, `SYNCED` or `DELETED`. Every `StickerDao` write that changes a pack or its items sets `PENDING`. `StickerSyncWorker` uploads a `PENDING` pack and marks it `SYNCED`. `DELETED` is a tombstone: the pack is gone from the library, and the row stays until the worker has deleted the backend's copy |
 | `sticker_packs.updatedAt` | Moves strictly forward on every change, even on two changes in one millisecond. The worker marks a pack `SYNCED` only while this is still the value it uploaded, and a restore applies a backend copy only when that copy's value is later |
 | `sticker_pack_items.position` | Order inside the pack, ascending. A favourite is added in front, so positions can be negative |
 | `stickers.remoteUrl` | Where the backend holds the file. `null` until this device has uploaded the sticker or found it there (`StickerObjectSource.ensureUploaded`). Never taken from a received message |
+
+**The stickers deleted from the library are not in Room.** Their ids are a string set in `PreferencesDataStore` (`deleted_sticker_ids`), on this device only. A version bump empties the tables, and this list has to outlive it. A sticker is on the list when `deleteStickers`, `deletePack` or `removeStickers` left it in no pack. Its `stickers` row and its file stay. A WhatsApp import leaves a listed sticker out, and adding it on purpose takes it off the list. Sign-out clears the list.
 
 Removing a sticker from a pack deletes its item row. Deleting a pack deletes its item rows and turns the pack row into a tombstone without an import key. In both cases the `stickers` row and the file stay. A received sticker has a `stickers` row and no pack item.
 
@@ -165,6 +168,7 @@ erDiagram
         Long createdAt
         Long updatedAt
         String syncState
+        Boolean shownInRow
     }
 
     sticker_pack_items {

@@ -17,6 +17,8 @@ data class RemoteSticker(
  *
  * Everything in one that another user wrote is that user's claim. `StickerManifest`
  * checks it before a row is built from it.
+ *
+ * [shownInRow] is null for a manifest without the field, which an older build wrote.
  */
 data class RemoteStickerPack(
     val id: String,
@@ -30,6 +32,7 @@ data class RemoteStickerPack(
     val createdAt: Long,
     val updatedAt: Long,
     val stickers: List<RemoteSticker>,
+    val shownInRow: Boolean? = null,
 )
 
 /** What changed among one user's packs since the last emission: packs added or modified, and the ids of packs deleted. */

@@ -1143,6 +1143,17 @@ Klipy's stickers. The plan is `docs/plans/stickers-and-gifs.md`, and these parts
   Klipy forbids a proxy. Klipy sees the IP and the searches of a user of the GIFs tab or
   the online stickers, and the IP of everyone whose device shows a pick. Everything else is
   fetched from Storage only.
+- **A merged pack can come back small.** A merge keeps the import key of the first pack and
+  frees the keys of the others. A later WhatsApp import of a new sticker from one of those
+  packs makes that pack again, with that one sticker. Keeping the freed keys on the merged
+  pack would need a pack to hold several keys.
+- **The list of deleted stickers does not survive a reinstall.** It is kept on the device
+  (`PreferencesDataStore`, `deleted_sticker_ids`) and not in the backup. After a reinstall,
+  or on a second phone, a full WhatsApp import brings deleted stickers back. Sign-out clears
+  the list too.
+- **A pack made in the app and named *WhatsApp* has no thumbnail of its own.** The sticker
+  maker finds a pack by its name, so that name gives the import key `loose:WhatsApp`, which
+  is the key of the pack a WhatsApp import fills. The made sticker joins that pack.
 - **A GIF on a photo stays impossible.** The editor's pipeline ends at JPEG, and a
   flattened animation is one frame (`docs/plans/image-editor.md` §2.8).
 - **A tap on a GIF opens nothing.** The fullscreen viewer has no animated decoder.

@@ -33,8 +33,18 @@ interface StickerRepository {
      * A sticker that names its pack joins that pack, and an archive with a title
      * is one pack. A sticker that names none joins the pack called [loosePackName],
      * or the `SAVED` pack when it is null. Importing the same input again adds nothing.
+     *
+     * With [skipKnown], a sticker that some pack of the library holds, or that
+     * was deleted from the library, joins no pack. The WhatsApp import passes it:
+     * its folder holds every sticker ever seen, and a second import must not undo
+     * what the user moved, merged or deleted. Without it, the import is an add on
+     * purpose, and a sticker that was deleted is no longer remembered as deleted.
      */
-    suspend fun importFrom(uris: List<String>, loosePackName: String? = null): Result<StickerImportResult>
+    suspend fun importFrom(
+        uris: List<String>,
+        loosePackName: String? = null,
+        skipKnown: Boolean = false,
+    ): Result<StickerImportResult>
 
     /**
      * Puts the one picture at [uri] into the `SAVED` pack and succeeds with its
@@ -47,7 +57,8 @@ interface StickerRepository {
     /**
      * Adds [stickerId] to the favourites, or takes it out when it is one.
      * Succeeds with whether it is a favourite now. Fails for a sticker the
-     * library does not hold.
+     * library does not hold. A sticker that was deleted from the library stays
+     * deleted for a WhatsApp import once it is no favourite any more.
      */
     suspend fun toggleFavourite(stickerId: String): Result<Boolean>
 
@@ -57,12 +68,37 @@ interface StickerRepository {
     /** Puts the packs in the order of [packIds]. Packs not listed keep their place after them. */
     suspend fun reorderPacks(packIds: List<String>): Result<Unit>
 
+    /** Deletes the pack. A sticker it leaves in no pack counts as deleted from the library, as in [deleteStickers]. */
     suspend fun deletePack(packId: String): Result<Unit>
+
+    /**
+     * Gives a `USER` or `INSTALLED` pack its own thumbnail in the picker's row,
+     * or takes it away. Fails for the two unnamed packs, which are always in the row.
+     */
+    suspend fun setPackShownInRow(packId: String, shown: Boolean): Result<Unit>
+
+    /**
+     * Makes one pack of [packIds], at least two `USER` or `INSTALLED` packs.
+     * The first keeps its place and takes [name]. The stickers of the others
+     * follow in order, each once, and the other packs are deleted.
+     */
+    suspend fun mergePacks(packIds: List<String>, name: String): Result<Unit>
+
+    /** Makes a new pack called [name] that holds [stickerIds], and succeeds with its id. They stay in the packs they are in. */
+    suspend fun createPack(name: String, stickerIds: List<String>): Result<String>
 
     /** Moves [stickerIds] from one pack to the end of another. */
     suspend fun moveStickers(stickerIds: List<String>, fromPackId: String, toPackId: String): Result<Unit>
 
+    /** Takes [stickerIds] out of one pack. A sticker that is then in no pack counts as deleted from the library, as in [deleteStickers]. */
     suspend fun removeStickers(packId: String, stickerIds: List<String>): Result<Unit>
+
+    /**
+     * Deletes [stickerIds] from the library: out of every pack, the favourites
+     * included, and out of the recents. A WhatsApp import does not bring them
+     * back. Their files stay, so a chat still draws them.
+     */
+    suspend fun deleteStickers(stickerIds: List<String>): Result<Unit>
 
     /** Records that [stickerId] was just sent, for [observeRecents]. */
     suspend fun markUsed(stickerId: String)

@@ -179,7 +179,7 @@ class StickerLibraryViewModelTest {
 
     @Test
     fun `importing files passes no pack name and reports the counts`() {
-        coEvery { repository.importFrom(listOf("content://a", "content://b"), null) } returns
+        coEvery { repository.importFrom(listOf("content://a", "content://b"), null, skipKnown = false) } returns
             Result.success(StickerImportResult(imported = 1, duplicates = 1, rejected = 0, packIds = listOf("p")))
         val viewModel = StickerLibraryViewModel(repository)
 
@@ -195,14 +195,14 @@ class StickerLibraryViewModelTest {
 
         viewModel.importFiles(emptyList())
 
-        coVerify(exactly = 0) { repository.importFrom(any(), any()) }
+        coVerify(exactly = 0) { repository.importFrom(any(), any(), any()) }
         assertFalse(viewModel.uiState.value.isImporting)
     }
 
     @Test
     fun `a second import is ignored while one is running`() = runTest {
         val running = CompletableDeferred<Result<StickerImportResult>>()
-        coEvery { repository.importFrom(any(), any()) } coAnswers { running.await() }
+        coEvery { repository.importFrom(any(), any(), any()) } coAnswers { running.await() }
         val viewModel = StickerLibraryViewModel(repository)
 
         viewModel.importFiles(listOf("content://a"))
@@ -210,13 +210,13 @@ class StickerLibraryViewModelTest {
         viewModel.importFiles(listOf("content://b"))
         running.complete(Result.success(StickerImportResult(1, 0, 0, listOf("p"))))
 
-        coVerify(exactly = 1) { repository.importFrom(any(), any()) }
+        coVerify(exactly = 1) { repository.importFrom(any(), any(), any()) }
         assertFalse(viewModel.uiState.value.isImporting)
     }
 
     @Test
     fun `a failed import shows an error and ends the progress`() {
-        coEvery { repository.importFrom(any(), any()) } returns Result.failure(IllegalStateException("boom"))
+        coEvery { repository.importFrom(any(), any(), any()) } returns Result.failure(IllegalStateException("boom"))
         val viewModel = StickerLibraryViewModel(repository)
 
         viewModel.importFiles(listOf("content://a"))
@@ -281,7 +281,7 @@ class StickerLibraryViewModelTest {
     @Test
     fun `the WhatsApp import sends the selection in folder order under the WhatsApp pack name and closes the view`() {
         coEvery { repository.listWhatsAppFolder(any()) } returns Result.success(listOf(file("x"), file("y"), file("z")))
-        coEvery { repository.importFrom(any(), any()) } returns Result.success(StickerImportResult(2, 0, 0, listOf("p")))
+        coEvery { repository.importFrom(any(), any(), any()) } returns Result.success(StickerImportResult(2, 0, 0, listOf("p")))
         val viewModel = StickerLibraryViewModel(repository)
         viewModel.openWhatsAppFolder("content://tree")
         viewModel.toggleWhatsAppFile("content://wa/z")
@@ -289,7 +289,7 @@ class StickerLibraryViewModelTest {
 
         viewModel.importSelectedWhatsApp()
 
-        coVerify(exactly = 1) { repository.importFrom(listOf("content://wa/x", "content://wa/z"), "WhatsApp") }
+        coVerify(exactly = 1) { repository.importFrom(listOf("content://wa/x", "content://wa/z"), "WhatsApp", skipKnown = true) }
         assertNull(viewModel.uiState.value.whatsApp)
         assertEquals("Imported 2 stickers", viewModel.uiState.value.notice)
     }
@@ -297,7 +297,7 @@ class StickerLibraryViewModelTest {
     @Test
     fun `a failed WhatsApp import keeps the view and its selection`() {
         coEvery { repository.listWhatsAppFolder(any()) } returns Result.success(listOf(file("x")))
-        coEvery { repository.importFrom(any(), any()) } returns Result.failure(IllegalStateException("boom"))
+        coEvery { repository.importFrom(any(), any(), any()) } returns Result.failure(IllegalStateException("boom"))
         val viewModel = StickerLibraryViewModel(repository)
         viewModel.openWhatsAppFolder("content://tree")
         viewModel.toggleWhatsAppFile("content://wa/x")
@@ -316,7 +316,7 @@ class StickerLibraryViewModelTest {
 
         viewModel.importSelectedWhatsApp()
 
-        coVerify(exactly = 0) { repository.importFrom(any(), any()) }
+        coVerify(exactly = 0) { repository.importFrom(any(), any(), any()) }
     }
 
     @Test
@@ -326,6 +326,10 @@ class StickerLibraryViewModelTest {
         assertEquals(
             "Imported 5 stickers · 2 already in the library · 1 could not be imported",
             importSummary(StickerImportResult(5, 2, 1, listOf("p"))),
+        )
+        assertEquals(
+            "Imported 1 sticker · 7 already in the library · 2 deleted earlier",
+            importSummary(StickerImportResult(1, 3, 0, listOf("p"), alreadyInLibrary = 4, deletedEarlier = 2)),
         )
     }
 

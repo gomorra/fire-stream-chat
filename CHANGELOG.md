@@ -8,6 +8,10 @@ All notable changes to FireStream Chat. Format follows [Keep a Changelog](https:
 
 - **A GIFs tab, and stickers from an online catalogue.** The emoji panel has a third tab, *GIFs*, with what is trending on KLIPY and a search. A tap sends the GIF. The Stickers tab has an *Online* entry in its pack row with KLIPY's stickers, and a sticker search shows KLIPY's matches in a *More online* section under your own. Before the first request a notice says what this means: your searches go to KLIPY, and a pick is loaded from KLIPY by you and by the people you send it to. Nothing is asked of KLIPY until you accept it. An online sticker cannot be added to the favourites or to a pack. Both are only in a build made with a KLIPY key. (`d04c35de`)
 
+### Changed
+
+- **A second WhatsApp import keeps what you tidied.** WhatsApp's folder holds every sticker you ever saw, so importing it again used to put a moved sticker back into its old pack and bring back a pack or a sticker you had deleted. The import now leaves out every sticker that is already in one of your packs, and every sticker you deleted or removed from its last pack. Its summary counts both. *From files*, *Add pack* and the sticker maker still add a sticker you deleted before. Installing this version empties the sticker library on the phone once, and it comes back from your account's backup.
+
 ## [1.41.0] — 2026-10-09
 
 ### Added

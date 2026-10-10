@@ -11,20 +11,28 @@ import com.firestream.chat.data.sticker.StickerLibrarySync
 import com.firestream.chat.data.sticker.StickerMaker
 import com.firestream.chat.data.sticker.WhatsAppStickerFolder
 import com.firestream.chat.data.worker.StickerSyncScheduler
+import io.mockk.Runs
+import io.mockk.coEvery
 import io.mockk.every
+import io.mockk.just
 import io.mockk.mockk
 import kotlinx.coroutines.flow.emptyFlow
 
 /**
  * A [StickerRepositoryImpl] over the given tables and directory. Everything
  * else is a mock unless a test passes its own: a backend that keeps packs, no
- * restore running, a scheduler that queues nothing, and `uid1` signed in.
+ * restore running, a scheduler that queues nothing, no sticker remembered as
+ * deleted, and `uid1` signed in.
  */
 internal fun newStickerRepository(
     stickerDao: StickerDao,
     stickerFiles: StickerFiles,
     whatsAppFolder: WhatsAppStickerFolder = mockk(),
-    preferences: PreferencesDataStore = mockk(),
+    preferences: PreferencesDataStore = mockk {
+        coEvery { deletedStickerIds() } returns emptySet()
+        coEvery { rememberDeletedStickers(any()) } just Runs
+        coEvery { forgetDeletedStickers(any()) } just Runs
+    },
     stickerDownloads: StickerDownloads = mockk(),
     stickerObjectSource: StickerObjectSource = mockk(),
     packSource: StickerPackSource = mockk { every { isSupported } returns true },

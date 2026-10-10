@@ -54,6 +54,7 @@ internal object StickerManifest {
         createdAt = pack.createdAt,
         updatedAt = pack.updatedAt,
         stickers = listed(stickers),
+        shownInRow = pack.shownInRow,
     )
 
     /** The entries of [stickers] a manifest has room for, by count and by weight. */
@@ -69,20 +70,29 @@ internal object StickerManifest {
         }
     }
 
-    /** The pack row [remote] stands for, marked as synced. */
-    fun packOf(remote: RemoteStickerPack) = StickerPackEntity(
-        id = remote.id,
-        name = cleanStickerText(remote.name).orEmpty(),
-        publisher = remote.publisher?.let(::cleanStickerText),
-        kind = parseStickerPackKind(remote.kind).name,
-        originPackId = remote.originPackId?.takeIf(::isValidPackId),
+    /**
+     * The pack row [remote] stands for, marked as synced. A manifest without
+     * `shownInRow` gets what a new pack with its import key would. The two
+     * unnamed packs are in the row whatever a manifest says.
+     */
+    fun packOf(remote: RemoteStickerPack): StickerPackEntity {
+        val kind = parseStickerPackKind(remote.kind)
         // Not cleaned: it has to equal the key an import computes, separators included.
-        importKey = remote.importKey?.takeIf { it.isNotEmpty() && it.length <= MAX_IMPORT_KEY_LENGTH },
-        sortOrder = remote.sortOrder,
-        createdAt = remote.createdAt,
-        updatedAt = remote.updatedAt,
-        syncState = StickerSyncState.SYNCED.name,
-    )
+        val importKey = remote.importKey?.takeIf { it.isNotEmpty() && it.length <= MAX_IMPORT_KEY_LENGTH }
+        return StickerPackEntity(
+            id = remote.id,
+            name = cleanStickerText(remote.name).orEmpty(),
+            publisher = remote.publisher?.let(::cleanStickerText),
+            kind = kind.name,
+            originPackId = remote.originPackId?.takeIf(::isValidPackId),
+            importKey = importKey,
+            sortOrder = remote.sortOrder,
+            createdAt = remote.createdAt,
+            updatedAt = remote.updatedAt,
+            syncState = StickerSyncState.SYNCED.name,
+            shownInRow = !kind.isNamed || (remote.shownInRow ?: StickerPackEntity.shownInRowByDefault(importKey)),
+        )
+    }
 
     /**
      * The sticker rows [remote] lists, in its order. An entry is left out when

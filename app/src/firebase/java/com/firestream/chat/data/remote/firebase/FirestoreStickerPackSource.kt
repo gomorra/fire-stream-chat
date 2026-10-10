@@ -105,6 +105,7 @@ internal fun stickerPackToDocument(pack: RemoteStickerPack): Map<String, Any?> =
     "sortOrder" to pack.sortOrder,
     "createdAt" to pack.createdAt,
     "updatedAt" to pack.updatedAt,
+    "shownInRow" to pack.shownInRow,
     "stickers" to pack.stickers.map { sticker ->
         mapOf(
             "id" to sticker.id,
@@ -135,6 +136,7 @@ internal fun stickerPackFromDocument(id: String, data: Map<String, Any?>): Remot
         sortOrder = (data["sortOrder"] as? Number)?.toInt() ?: 0,
         createdAt = (data["createdAt"] as? Number)?.toLong() ?: 0L,
         updatedAt = (data["updatedAt"] as? Number)?.toLong() ?: 0L,
+        shownInRow = data["shownInRow"] as? Boolean,
         stickers = (data["stickers"] as? List<*>).orEmpty().mapNotNull { entry ->
             val sticker = entry as? Map<*, *> ?: return@mapNotNull null
             RemoteSticker(

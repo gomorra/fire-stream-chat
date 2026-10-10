@@ -177,7 +177,7 @@ class StickerLibrarySyncTest {
         val appScope = appScope()
         val steps = mutableListOf<String>()
         every { scheduler.cancel() } answers { steps += "cancel" }
-        coEvery { preferences.clearRecentStickers() } answers { steps += "recents" }
+        coEvery { preferences.clearStickerLists() } answers { steps += "recents" }
 
         sync(appScope).signingOut { steps += "sign-out" }
 
@@ -190,7 +190,7 @@ class StickerLibrarySyncTest {
         val appScope = appScope()
         val steps = mutableListOf<String>()
         // Like a DataStore edit, which does not run for a cancelled caller.
-        coEvery { preferences.clearRecentStickers() } coAnswers {
+        coEvery { preferences.clearStickerLists() } coAnswers {
             yield()
             steps += "recents"
         }

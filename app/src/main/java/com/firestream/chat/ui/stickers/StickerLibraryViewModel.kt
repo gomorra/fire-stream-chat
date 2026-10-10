@@ -115,7 +115,7 @@ class StickerLibraryViewModel @Inject constructor(
     /** Imports the picked files and archives. Stickers that name no pack go to the `SAVED` pack. */
     fun importFiles(uris: List<String>) {
         if (uris.isEmpty()) return
-        import(uris, loosePackName = null)
+        import(uris, loosePackName = null, skipKnown = false)
     }
 
     /** Shows the folder the user just granted, with nothing selected. */
@@ -150,7 +150,8 @@ class StickerLibraryViewModel @Inject constructor(
         // In the folder's order, which is newest first.
         val uris = wa.files.map { it.uri }.filter { it in wa.selected }
         if (uris.isEmpty()) return
-        import(uris, loosePackName = WHATSAPP_PACK_NAME)
+        // The folder holds every sticker ever seen, so what the library knows is left where it is.
+        import(uris, loosePackName = WHATSAPP_PACK_NAME, skipKnown = true)
     }
 
     fun clearError() = _uiState.update { it.copy(error = null) }
@@ -158,11 +159,11 @@ class StickerLibraryViewModel @Inject constructor(
     fun clearNotice() = _uiState.update { it.copy(notice = null) }
 
     /** A finished import closes the WhatsApp view, the only place one can start from while it is open. */
-    private fun import(uris: List<String>, loosePackName: String?) {
+    private fun import(uris: List<String>, loosePackName: String?, skipKnown: Boolean) {
         if (_uiState.value.isImporting) return
         _uiState.update { it.copy(isImporting = true) }
         viewModelScope.launch {
-            stickerRepository.importFrom(uris, loosePackName)
+            stickerRepository.importFrom(uris, loosePackName, skipKnown)
                 .onSuccess { result ->
                     _uiState.update { it.copy(isImporting = false, notice = importSummary(result), whatsApp = null) }
                 }
@@ -184,6 +185,7 @@ class StickerLibraryViewModel @Inject constructor(
          * stores it in that pack's import key, and the key is backed up with the
          * pack. So this value must not change: a changed name starts a second pack
          * beside the restored one. A translated name has to come from the repository.
+         * `StickerPackEntity.LOOSE_WHATSAPP_KEY` is the key it makes.
          */
         const val WHATSAPP_PACK_NAME = "WhatsApp"
     }
