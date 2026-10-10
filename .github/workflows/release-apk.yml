@@ -227,6 +227,8 @@ jobs:
           RELEASE_STORE_PASSWORD: ${{ secrets.RELEASE_STORE_PASSWORD }}
           RELEASE_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
           RELEASE_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
+          # Optional. Without it the release has no GIFs tab and no online stickers.
+          KLIPY_API_KEY: ${{ secrets.KLIPY_API_KEY }}
           BUILD_FIREBASE: ${{ steps.meta.outputs.build_firebase }}
           BUILD_POCKETBASE: ${{ steps.meta.outputs.build_pocketbase }}
         run: |

@@ -43,7 +43,7 @@ Back up the keystore file and both passwords to a password manager **before** co
 base64 -w 0 firestream-release.jks > firestream-release.jks.b64
 ```
 
-### 3. Add five repository secrets
+### 3. Add the repository secrets
 
 Settings → Secrets and variables → Actions → New repository secret:
 
@@ -54,6 +54,9 @@ Settings → Secrets and variables → Actions → New repository secret:
 | `RELEASE_KEY_ALIAS` | `firestream` (or whatever alias you used) |
 | `RELEASE_KEY_PASSWORD` | Key password |
 | `GOOGLE_SERVICES_JSON_B64` | Base64-encoded contents of `app/google-services.json` (`base64 -w 0 app/google-services.json`). Required because the file is gitignored and the Firebase Gradle plugin fails the build without it. |
+| `KLIPY_API_KEY` | The KLIPY app key from the Partner Panel. Optional. A release built without it has no GIFs tab and no online stickers. |
+
+The first five are required. The KLIPY key ends up inside the APK, where it can be read out.
 
 ## Local release builds
 
@@ -64,7 +67,10 @@ releaseStoreFile=/absolute/path/to/firestream-release.jks
 releaseStorePassword=...
 releaseKeyAlias=firestream
 releaseKeyPassword=...
+klipyApiKey=...
 ```
+
+`klipyApiKey` is optional and switches on the GIFs tab and the online stickers, in debug builds too.
 
 Then `./gradlew assembleFirebaseRelease` produces a signed APK at `app/build/outputs/apk/firebase/release/`.
 
