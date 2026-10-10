@@ -105,7 +105,18 @@ Questions asked and **not yet answered**:
 
 Effort level recommended to the owner: medium for the repair and for wiring an in-app switch, high for the prototypes.
 
+## The prototypes
+
+Built 2026-10-10 on branch `prototype/design-language`, worktree `.claude/worktrees/prototype-design-language`, commit `2ca73a80`. The branch starts at the theme repair's tip and is throwaway. Never merge it.
+
+- **The page** is `docs/prototypes/design-language.html` on that branch, published at https://claude.ai/artifact/46wQGJHdjZETBL6wkEzcji. It draws Today and A to F as three screens each: chat list, chat, settings with a dialog. It has a dark and light switch and a "Real font weights" box. Today opens with the box off, as the app renders now.
+- **The in-app switch** is `ui/theme/PrototypeLook.kt` on that branch. A floating pill at the top of every screen of a debug build steps through Today, A, D and E. "Aa" turns real font weights on. A tap on the name folds the pill into a dot. Nothing is saved, so a restart is back on Today.
+- The switch changes theme values only: the colour scheme, the type scale and the own-bubble fill (`ownBubbleColor()`, read by `MessageBubble`, `PollBubble` and `ListBubble`). D's hairlines and A's outlined icons are on the page only.
+- The APK is at `app/build/outputs/apk/firebase/debug/app-firebase-debug.apk` in the prototype worktree, versionCode 1139. It contains the theme repair. **It was not installed and has not run on a device.**
+
 ## Next steps
+
+0. Get the owner's pick from the page and the APK. Then fold the chosen parts into a plan in `docs/plans/` and delete this file.
 
 1. Wait for the owner's verdict on the repair. Apply what they ask to change, on the branch, through the gate.
 2. Ask about the font weights with the picture in mind.
