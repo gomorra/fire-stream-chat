@@ -112,7 +112,8 @@ step 7.
 1. **Each Room bump empties the local library.** `AppDatabase` is destructive on a version bump,
    and the backup restores the packs. A pack that was not synced yet is lost, and the pocketbase
    flavor has no backup. This plan bumps twice (steps 1 and 5). Both checkpoints test by upgrading
-   over an install.
+   over an install. Main bumps the version too (`docs/plans/message-sync.md`). A merge where both
+   sides bumped sets the version above both (`docs/PATTERNS.md#room-version-bump-rule`).
 2. **A manifest written by an older build has no `shownInRow`.** The restore derives it from the
    import key (step 1).
 3. **A merged pack can come back small.** Merging frees the import keys of the packs that were
@@ -404,7 +405,7 @@ Departures (for sign-off):
 - `Sticker` gets `names: List<String>` and `autoName: StickerAutoName?` (an English name, a German
   name, words, text, emojis). `StickerEntity` gets the columns for both, plus the two that step 6
   needs: `autoNameAllowed: Boolean` and `nameRequestedAt: Long?`. `StickerPackEntity` gets
-  `autoNameAllowed: Boolean`. `AppDatabase` goes from 33 to 34, and this is the plan's last bump.
+  `autoNameAllowed: Boolean`. `AppDatabase` takes the next free version, and this is the plan's last bump.
 - Limits: eight names of at most 40 characters, cleaned with `cleanStickerText`.
 - `RemoteSticker` gets `names` and `autoNameAllowed`. `RemoteStickerPack` gets `autoNameAllowed`.
   `StickerManifest` counts the bytes of the names toward `MAX_LIST_BYTES`. The automatic group is
