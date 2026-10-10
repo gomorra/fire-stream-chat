@@ -10,7 +10,7 @@ All notable changes to FireStream Chat. Format follows [Keep a Changelog](https:
 
 ### Changed
 
-- **A second WhatsApp import keeps what you tidied.** WhatsApp's folder holds every sticker you ever saw, so importing it again used to put a moved sticker back into its old pack and bring back a pack or a sticker you had deleted. The import now leaves out every sticker that is already in one of your packs, and every sticker you deleted or removed from its last pack. Its summary counts both. *From files*, *Add pack* and the sticker maker still add a sticker you deleted before. Installing this version empties the sticker library on the phone once, and it comes back from your account's backup.
+- **A second WhatsApp import keeps what you tidied.** WhatsApp's folder holds every sticker you ever saw, so importing it again used to put a moved sticker back into its old pack and bring back a pack or a sticker you had deleted. The import now leaves out every sticker that is already in one of your packs, and every sticker you deleted or removed from its last pack. Its summary counts both. *From files*, *Add pack* and the sticker maker still add a sticker you deleted before. Installing this version empties the sticker library on the phone once, and it comes back from your account's backup. (`28a3b8e6`)
 
 ## [1.41.0] — 2026-10-09
 

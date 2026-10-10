@@ -1,6 +1,6 @@
 # Sticker manager and sticker names
 
-Status: approved by the owner on 2026-10-10. No step has run.
+Status: approved by the owner on 2026-10-10. Step 1 is shipped.
 
 ## Context
 
@@ -184,6 +184,35 @@ skill. User-visible steps get a CHANGELOG entry and a bump through the `changelo
 Done when: the gate is green and a second import with every file selected changes nothing in a
 library that was tidied.
 
+**Approach**
+
+- Order: `StickerPackEntity` / `StickerPack` / `RemoteStickerPack` and the `AppDatabase` bump,
+  then `StickerManifest` and `FirestoreStickerPackSource`, then `StickerDao`,
+  `PreferencesDataStore`, `StickerRepository` + `StickerRepositoryImpl`, and last
+  `StickerLibraryViewModel` and `StickerLabels`.
+- The default of `shownInRow` is one function of the import key
+  (`StickerPackEntity.shownInRowByDefault`). `newPack` and `StickerManifest.packOf` both call it,
+  so a new pack and a restored old manifest cannot disagree.
+- The spec contradicts itself in one place. `deletePack` remembers nothing, so a deleted WhatsApp
+  pack would come back with the next import, and the step's own test says it stays away. A
+  sticker that `deletePack` or `removeStickers` leaves in no pack is therefore remembered like one
+  that `deleteStickers` took out. This changes no §0 decision: it is what *Tidying and import* asks for.
+- The remembered ids are cleared at sign-out, like the recents. They belong to the user who leaves.
+- Tests: the cases the step lists, in `StickerRepositoryImplTest`, `StickerDaoTest`,
+  `StickerManifestTest` and `FirestoreStickerPackSourceTest`, plus the summary line and the
+  `skipKnown` argument in `StickerLibraryViewModelTest`.
+- Skills: `code-review` (tagged), and `simplify` when the diff passes 600 lines, which it will.
+
+**Shipped** `28a3b8e6` (2026-10-10) — tier: strong. skills: simplify, code-review. Reviewer models: simplify: opus, opus, opus, opus; code-review: opus, opus. CHANGELOG entry (`Changed`, under `[UNRELEASED] [1.42.0]`) is in `28a3b8e6`, and its hash was added in the `docs(plan):` commit.
+Departures (for sign-off):
+- `deletePack` and `removeStickers` also remember a sticker they leave in no pack, and take it out of the recents. Without this a deleted WhatsApp pack came back with the next import.
+- `toggleFavourite` does not forget a remembered id. A favourite is skipped by the import anyway while it is one. With the forget, a deleted sticker that was starred and unstarred came back (found by `/code-review`).
+- `createPack` forgets the ids it holds, like the other adds on purpose. It returns the new pack's id.
+- Sign-out clears the remembered ids, with the recents (`PreferencesDataStore.clearStickerLists`). Signing out and in again as the same user therefore loses the list. Recorded in `docs/BACKLOG.md`.
+- `StickerImportResult.duplicates` still counts repeats inside one import. `importSummary` adds it to `alreadyInLibrary` for the one line *already in the library*.
+- A manifest cannot take *Favourites* or *Saved stickers* out of the row: `StickerManifest.packOf` forces `shownInRow` for them.
+- Not done, from `/simplify`: one home for all import-key formats, and a file of its own for the remembered ids. A pack made in the app and named *WhatsApp* shares the key `loose:WhatsApp` (`docs/BACKLOG.md`).
+
 ### Step 2 — One *WhatsApp* thumbnail in the picker, and a way into the manager (UI + state)
 
 - `stickerShelves` (`StickerLibraryTab.kt`) builds the row as: *Recents*, *Favourites*, one
@@ -204,6 +233,10 @@ library that was tidied.
   shape of `ui/chatlist/ChatListItemUiTest.kt` that a pick from a section carries its pack's id.
 - Docs: `FEATURE-MAP.md` (*Emoji / Sticker Picker* and *Stickers & GIFs*), a `docs/BACKLOG.md`
   device checklist, CHANGELOG `Changed`.
+- **(step-1)** `StickerPack.shownInRow` has the default `true`, so `testStickerPack` and every
+  older fixture is a pack in the row. A test of the *WhatsApp* shelf has to pass `false`.
+  `StickerPackKind.isNamed` tells a `USER` or `INSTALLED` pack from *Favourites* and *Saved
+  stickers*, whose `shownInRow` is always true.
 
 **‖ Checkpoint.** The owner installs over the current build, lets the library restore, and looks
 at the row with the real collection.
@@ -230,6 +263,10 @@ at the row with the real collection.
 - Tests: `StickerLibraryViewModelTest` (merge, the switch, a selection that loses a pack),
   `StickerLibraryScreenTest` (the two groups, the selection bar).
 - Docs: `FEATURE-MAP.md`, `SPEC.md`, the `docs/BACKLOG.md` checklist, CHANGELOG `Added`.
+- **(step-1)** `setPackShownInRow` and `mergePacks` fail for *Favourites* and *Saved stickers*, and
+  `mergePacks` fails for fewer than two packs. The UI should not offer what fails.
+  `deletePack` now remembers every sticker it leaves in no pack, so the *Delete* question should
+  say that a WhatsApp import will not bring them back.
 
 ### Step 4 — The manager's *All stickers* tab, and a WhatsApp import that shows what is new (UI)
 
@@ -247,6 +284,12 @@ at the row with the real collection.
 - Tests: `StickerLibraryViewModelTest` (a selection across packs, each action, the new-only filter
   and when its mark moves), `StickerLibraryScreenTest`.
 - Docs: `FEATURE-MAP.md`, the `docs/BACKLOG.md` checklist, CHANGELOG `Added`.
+- **(step-1)** `createPack` succeeds with the new pack's id. For *New pack from these*, call it
+  first and `removeStickers` per old pack after it: a sticker is then never in no pack, so it is
+  not remembered as deleted. `removeStickers` remembers a sticker it takes out of its last pack,
+  which makes the existing *Remove* in `PackGrid` a delete from the library for such a sticker.
+  `StickerImportResult` has no count of what was new in the folder. The new-only filter needs
+  its own mark, as this step says.
 
 **‖ Checkpoint.** The owner tidies the real library on the phone and imports from WhatsApp again.
 
@@ -384,6 +427,11 @@ and it looks for no bugs. This step is the correctness review. It adds no featur
   1. The library: `StickerRepositoryImpl`, `StickerDao`, `StickerManifest`, `StickerLibrarySync`,
      the pack sources. A second import after every kind of tidying. A merge or a delete that races
      a backup or a restore. A manifest from an older build. A sticker that sits in two packs.
+     **(step-1)** Also: the remembered ids are written to `PreferencesDataStore` outside the
+     `StickerDao` transaction and outside `importLock`, so look at a delete that runs beside an
+     import, and at a process that dies between the two writes. A restore from a second phone
+     can put a remembered sticker back into a pack. Step 1 had no correctness review: its
+     `/code-review` was the standards-and-spec skill.
   2. The picker and the manager: `StickerLibraryTab`, `StickerLibraryScreen`,
      `StickerLibraryViewModel`, `WhatsAppImportScreen`. A selection whose pack or sticker goes
      away. The pack id a pick is sent with. Grid keys. Rotation and process death.
