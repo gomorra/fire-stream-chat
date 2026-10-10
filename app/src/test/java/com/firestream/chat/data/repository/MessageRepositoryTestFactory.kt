@@ -5,6 +5,7 @@ import com.firestream.chat.data.crypto.SignalManager
 import com.firestream.chat.data.local.PreferencesDataStore
 import com.firestream.chat.data.local.dao.ChatDao
 import com.firestream.chat.data.local.dao.MessageDao
+import com.firestream.chat.data.local.dao.MessageSyncStateDao
 import com.firestream.chat.data.local.dao.StickerDao
 import com.firestream.chat.data.local.entity.ChatEntity
 import com.firestream.chat.data.outbox.BlockCheck
@@ -73,6 +74,8 @@ internal fun messageRepository(
     documentFiles: DocumentFiles = mockk(relaxed = true) { coEvery { describe(any()) } returns DocumentInfo(null, null) },
     stickerDao: StickerDao = mockk(relaxed = true) { coEvery { getSticker(any()) } returns null },
     stickerFiles: StickerFiles = mockk(relaxed = true),
+    // "No row" by default: a relaxed mock would answer with a mock row, and the sync would ask for a tail.
+    syncStateDao: MessageSyncStateDao = mockk(relaxed = true) { coEvery { getState(any()) } returns null },
 ) = MessageRepositoryImpl(
     messageDao = messageDao,
     chatDao = chatDao,
@@ -97,6 +100,7 @@ internal fun messageRepository(
     documentFiles = documentFiles,
     stickerDao = stickerDao,
     stickerFiles = stickerFiles,
+    syncStateDao = syncStateDao,
 )
 
 /**

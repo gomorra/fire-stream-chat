@@ -295,6 +295,15 @@ developer machine, and (c) likely to recur. Named, structural conventions belong
   (`FirestoreStickerPackSource.observeOwnPacks`, `StickerDao.removeIfSynced`). Such a flow
   emits differences, so it needs `buffer(Channel.UNLIMITED)`: a `trySend` into a full default
   buffer drops a difference that never comes again.
+- **A Firestore `get()` answers from the cache when the phone is offline.** It does not fail, and
+  the answer looks like any other. Anything that records progress from the answer then records
+  progress it never made. A sync cursor moved on a cache answer skips, for good, every message the
+  server holds beyond it. Pass `Source.SERVER` to a `get()` whose answer moves a cursor or marks
+  something as fetched, and let it throw offline (`FirestoreMessageSource.fetchFromServer`). A
+  server answer can still have this phone's pending writes laid over it, so leave a document with
+  `metadata.hasPendingWrites()` out of the cursor too. A listener has the same split:
+  `snapshot.metadata.isFromCache`. Regression: `FirestoreMessageSourceTest.fetchMessages asks the
+  server for the whole chat, oldest first`.
 - **Room's `@Upsert` with a partial entity keeps the columns the object does not carry; a
   `REPLACE` insert does not.** `OnConflictStrategy.REPLACE` deletes the row and inserts the
   new one, so every column the new object lacks goes back to its default. `messages` is split

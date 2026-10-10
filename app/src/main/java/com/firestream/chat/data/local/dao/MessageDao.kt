@@ -177,6 +177,20 @@ interface MessageDao {
     @Query("DELETE FROM messages WHERE chatId = :chatId")
     suspend fun deleteMessagesByChatId(chatId: String)
 
+    @Query("DELETE FROM message_sync_state WHERE chatId = :chatId")
+    suspend fun deleteSyncState(chatId: String)
+
+    /**
+     * A chat's messages and its sync state, in one transaction. A state row that
+     * outlived the messages would tell the next sync the chat is restored, and it
+     * would ask for the tail of a history Room no longer holds.
+     */
+    @Transaction
+    suspend fun deleteChatMessages(chatId: String) {
+        deleteMessagesByChatId(chatId)
+        deleteSyncState(chatId)
+    }
+
     @Query("UPDATE messages SET status = :status WHERE id = :messageId")
     suspend fun updateMessageStatus(messageId: String, status: String)
 
@@ -254,13 +268,11 @@ interface MessageDao {
     // The limit is a parameter, not a literal, so the caller that reports
     // "there may be more" and the query that truncates cannot drift apart.
     //
-    // `:chatId IS NULL` is the global scope. There is no index on
-    // `messages.chatId` (the `(chatId, timestamp)` index is deliberately
-    // deferred), so today the added clause costs no query plan — this is
-    // already a full scan behind a `LIKE '%…%'`. Note for whoever adds that
-    // index: an OR-term over a nullable bound parameter is not an indexable
-    // constraint, so the in-chat scope will not use it in this form. Splitting
-    // the query back in two is part of the index work.
+    // `:chatId IS NULL` is the global scope. This query does not use the
+    // `(chatId, timestamp)` index: an OR-term over a nullable bound parameter
+    // is not an indexable constraint, so both scopes are a full scan behind a
+    // `LIKE '%…%'`. Splitting the query back in two would let the in-chat
+    // scope use the index.
     //
     // `:query = ''` is a short-circuit, not a nicety: without it browse mode
     // would LIKE every row's content against '%%'.

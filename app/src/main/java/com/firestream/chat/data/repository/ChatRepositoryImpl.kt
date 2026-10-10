@@ -175,8 +175,18 @@ class ChatRepositoryImpl @Inject constructor(
     override suspend fun deleteChat(chatId: String): Result<Unit> = resultOf {
         val uid = authSource.currentUserId ?: throw Exception("Not authenticated")
         chatSource.removeFromArrayField(chatId, "participants", uid)
-        messageDao.deleteMessagesByChatId(chatId)
+        deleteLocally(chatId)
+    }
+
+    /**
+     * The chat row first, then its messages and sync state. A restore of this
+     * chat that is still running writes its state only while the chat row exists
+     * (`MessageSyncStateDao.writeRestored`), so in this order no state row
+     * outlives the messages.
+     */
+    private suspend fun deleteLocally(chatId: String) {
         chatDao.deleteChat(chatId)
+        messageDao.deleteChatMessages(chatId)
     }
 
     override fun observeTyping(chatId: String): Flow<List<String>> =
@@ -274,8 +284,7 @@ class ChatRepositoryImpl @Inject constructor(
                 chatSource.leaveGroupRemovingSelf(chatId, uid)
             }
         }
-        chatDao.deleteChat(chatId)
-        messageDao.deleteMessagesByChatId(chatId)
+        deleteLocally(chatId)
     }
 
     override suspend fun updateGroupPermissions(chatId: String, permissions: GroupPermissions): Result<Unit> = resultOf {

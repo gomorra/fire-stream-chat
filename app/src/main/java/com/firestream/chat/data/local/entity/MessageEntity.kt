@@ -3,6 +3,7 @@ package com.firestream.chat.data.local.entity
 import androidx.room.ColumnInfo
 import androidx.room.Embedded
 import androidx.room.Entity
+import androidx.room.Index
 import androidx.room.TypeConverters
 import com.firestream.chat.data.local.Converters
 import com.firestream.chat.data.outbox.SendTarget
@@ -31,7 +32,7 @@ import org.json.JSONObject
  * SENT transaction (`MessageDao.markSent`). Nothing needs to remember to preserve
  * a local column when it writes what the backend said.
  */
-@Entity(tableName = "messages", primaryKeys = ["id"])
+@Entity(tableName = "messages", primaryKeys = ["id"], indices = [Index("chatId", "timestamp")])
 @TypeConverters(Converters::class)
 data class MessageEntity(
     @Embedded val record: MessageRecord,

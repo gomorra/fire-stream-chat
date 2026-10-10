@@ -6,7 +6,7 @@ The app uses **two Room databases** so that destructive schema migrations on the
 
 | Database         | File              | Tables                                                                                                                                                  |
 | ---------------- | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `AppDatabase`    | `fire_stream_chat.db` | `users`, `chats`, `messages`, `contacts`, `lists`, `reminders`, `stickers`, `sticker_packs`, `sticker_pack_items`                                       |
+| `AppDatabase`    | `fire_stream_chat.db` | `users`, `chats`, `messages`, `contacts`, `lists`, `reminders`, `stickers`, `sticker_packs`, `sticker_pack_items`, `message_sync_state` |
 | `SignalDatabase` | `signal.db`       | `signal_identities`, `signal_sessions`, `signal_prekeys`, `signal_signed_prekeys`, `signal_kyber_prekeys`, `signal_sender_keys`, `signal_trusted_identities` |
 
 `AppDatabase.MIGRATION_18_19` drops the legacy Signal tables from `fire_stream_chat.db`; from version 19 onward Signal keys live exclusively in `signal.db`.
@@ -44,6 +44,16 @@ Removing a sticker from a pack deletes its item row. Deleting a pack deletes its
 A row can be there before its file. A restored pack, and a pack added from someone else, write `stickers` rows from a manifest, and each file is fetched when the sticker is first shown (`StickerRepository.ensureFile`). An `INSTALLED` pack has the import key `installed:<root pack id>`, which keeps a pack from being added twice.
 
 **A `STICKER` message names its sticker (version 31).** `messages.stickerId` is the sticker's hash and `messages.stickerPackId` the pack it was sent from, or `null`. Both are part of `MessageRecord`, so a snapshot writes them. On a received row they are the sender's claim: the id is checked with `StickerFiles.isValidId` before it reaches a path, and against the downloaded bytes before a file is stored. The row's `localUri` is the sticker's file in `filesDir/stickers/`, shared by every message that points at that sticker. A `GIF` row's `localUri` is its copy in `filesDir/documents/`.
+
+**`message_sync_state` holds one row per restored chat (version 33).** A row exists only for a chat whose whole history was fetched from the server on this install. `MessageRepositoryImpl.syncAllChatMessages` is its only writer. `messages` has an index on `(chatId, timestamp)` from the same version.
+
+| Column | Meaning |
+|---|---|
+| `chatId` | Primary key |
+| `restoreGeneration` | The `MessageSyncPlan.RESTORE_GENERATION` the whole fetch ran under. A row of an older generation counts as no row, and the next sync fetches the chat whole again |
+| `cursorMs` | The highest `timestamp` among the documents a sync fetched for the chat. `MessageSyncStateDao.raiseCursor` and `writeRestored` never lower it within one generation |
+
+The row leaves with the chat's messages. `MessageDao.deleteChatMessages` deletes both in one transaction, and sign-out clears every table. `writeRestored` writes nothing for a chat without a row in `chats`, so a restore that outlives its chat leaves no row behind. A destructive migration empties both tables, so the next start restores every chat.
 
 ```mermaid
 erDiagram

@@ -228,6 +228,25 @@ Removing a `String` parameter from a member whose next parameter is also a `Stri
 
 ---
 
+## A sync cursor lives beside the rows it describes
+
+**Definition.** What a sync knows about a set of Room rows is stored in the same database as those rows. The message sync keeps one row per chat in `message_sync_state`, next to `messages`. Whatever empties the messages empties the state with them: a destructive migration, `clearAllTables` on sign-out, and `MessageDao.deleteChatMessages` for one chat. A chat without a state row is fetched whole, so losing the rows always leads to a restore and never to a gap.
+
+The cursor moves only on an answer from the server, after that answer reached Room. It is taken from the fetched documents and never read from Room. It never moves back: `MessageSyncStateDao.raiseCursor` is one `MAX` statement.
+
+**Use when.** Adding state that says how far a set of Room rows is in step with the backend: a cursor, a "restored" flag, a generation.
+**Don't use when.** The state describes the device or the user and not rows: a preference, a notice the user dismissed. That is DataStore.
+
+**Example.** `app/src/main/java/com/firestream/chat/data/local/entity/MessageSyncStateEntity.kt`, `data/local/dao/MessageSyncStateDao.kt`, `MessageDao.deleteChatMessages`, and `MessageRepositoryImpl.syncChatMessages`, which writes the state last. Tests: `MessageSyncStateDaoTest`, `MessageRepositorySyncTest`.
+
+**Trap (three).** Keeping the cursor in DataStore. A Room version bump empties `messages` and leaves DataStore alone, so every chat would keep a cursor over an empty table and its history would never come back.
+
+Reading the cursor from Room, as the newest row's `timestamp`. A message this phone queued is the newest row, and the cursor would pass a message of the other person that landed before it.
+
+Deleting a chat's messages without its state row. Use `MessageDao.deleteChatMessages`. `deleteMessagesByChatId` alone leaves a row that says the chat is restored. Delete the chat row first: a restore that is still running writes its state only while the chat row exists (`MessageSyncStateDao.writeRestored`, `ChatRepositoryImpl.deleteLocally`).
+
+---
+
 ## When to add a new pattern here
 
 A convention belongs in this file when:

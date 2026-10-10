@@ -1,7 +1,8 @@
 // region: AGENT-NOTE
 // Responsibility: Application-data Room database (`fire_stream_chat.db`).
-//   9 entities: Users, Messages, Chats, Contacts, Lists, Reminders, and the sticker
-//   library's Stickers, StickerPacks and StickerPackItems. Signal Protocol tables
+//   10 entities: Users, Messages, Chats, Contacts, Lists, Reminders, the sticker
+//   library's Stickers, StickerPacks and StickerPackItems, and the message sync's
+//   state per chat (MessageSyncState). Signal Protocol tables
 //   were split out into SignalDatabase (`signal.db`) at version 19 so destructive
 //   migrations on this DB no longer wipe key material.
 // Owns: @Database `version` field — bump on any column/table add/remove/rename
@@ -23,6 +24,7 @@ import com.firestream.chat.data.local.dao.ChatDao
 import com.firestream.chat.data.local.dao.ContactDao
 import com.firestream.chat.data.local.dao.ListDao
 import com.firestream.chat.data.local.dao.MessageDao
+import com.firestream.chat.data.local.dao.MessageSyncStateDao
 import com.firestream.chat.data.local.dao.ReminderDao
 import com.firestream.chat.data.local.dao.StickerDao
 import com.firestream.chat.data.local.dao.UserDao
@@ -30,6 +32,7 @@ import com.firestream.chat.data.local.entity.ChatEntity
 import com.firestream.chat.data.local.entity.ContactEntity
 import com.firestream.chat.data.local.entity.ListEntity
 import com.firestream.chat.data.local.entity.MessageEntity
+import com.firestream.chat.data.local.entity.MessageSyncStateEntity
 import com.firestream.chat.data.local.entity.ReminderEntity
 import com.firestream.chat.data.local.entity.StickerEntity
 import com.firestream.chat.data.local.entity.StickerPackEntity
@@ -46,15 +49,17 @@ import com.firestream.chat.data.local.entity.UserEntity
         ReminderEntity::class,
         StickerEntity::class,
         StickerPackEntity::class,
-        StickerPackItemEntity::class
+        StickerPackItemEntity::class,
+        MessageSyncStateEntity::class
     ],
-    version = 32,
+    version = 33,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun userDao(): UserDao
     abstract fun messageDao(): MessageDao
+    abstract fun messageSyncStateDao(): MessageSyncStateDao
     abstract fun chatDao(): ChatDao
     abstract fun contactDao(): ContactDao
     abstract fun listDao(): ListDao
