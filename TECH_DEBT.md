@@ -986,6 +986,47 @@ by. Until then `fetchFor` could treat a cursor ahead of the clock as the clock.
 
 ---
 
+### What a person left out of automatic naming is open again in another person's copy
+
+**The smell.** Two paths hand a sticker to a second person without the first person's choice.
+
+- *Add pack*: `StickerRepositoryImpl.viewPack` and `installPack` carry each sticker's
+  `autoNameAllowed` and not the pack's. `StickerPackPreview` has no pack flag, and the installed
+  `StickerPackEntity` starts with `autoNameAllowed = true`. *Name automatically* off on a pack
+  writes the pack row only (`setPackAutoNameAllowed`), so its stickers still say allowed in the
+  manifest. A person who adds that pack with their own switch on asks for every sticker of it.
+- *Save* and the favourites: `saveSticker` builds its row with `StickerEntity.of`, which is
+  allowed by default. A sticker message does not say that its sticker was made in the app. A
+  made sticker that someone else saves or stars is asked for from their phone.
+
+The notice says that stickers made in the app are left out. That holds on the maker's phone only.
+
+**Why we haven't fixed it.** Found by the pre-release review of v1.43.0, read from the code and
+not reproduced. The second person holds the picture already, and the switch is theirs and off
+by default. The fix needs a decision: does the first person's choice travel with the sticker, or
+does the notice say that it does not.
+
+**When to revisit.** Step 8 of `docs/plans/sticker-manager-and-names.md`, and before automatic
+naming is offered to anyone but the server's owner.
+
+---
+
+### A phone on an older build can open a pack that was left out of automatic naming
+
+**The smell.** `StickerLibrarySync.applyRemotePack` updates a known pack from a newer manifest
+with `packAllowsAutoName(remote)`. A manifest written by a build before 1.43 has no
+`autoNameAllowed`, and reads as the import key's default, which is allowed for a `wa:` pack.
+Close a pack on the updated phone, then reorder it on a phone that is not updated: the later
+`updatedAt` wins, and the pack is open again.
+
+**Why we haven't fixed it.** Found by the pre-release review of v1.43.0, inferred from the code.
+It needs two phones of one account on different builds, and it ends when both are updated.
+
+**When to revisit.** Step 8 of `docs/plans/sticker-manager-and-names.md`. A manifest that does
+not state the flag could leave the stored one as it is.
+
+---
+
 ## How to use this file
 
 - **Add entries** when you consciously decide not to fix something you noticed. Record the file paths, the reason, and the trigger condition.

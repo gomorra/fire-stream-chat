@@ -40,8 +40,9 @@ Firestore questions. Nothing ran on a device. Check it by upgrading over an inst
 
 ### The sticker naming service on the PC (2026-10-11)
 
-`docs/plans/sticker-manager-and-names.md` step 7, `tools/sticker-namer/`. **No line of it has run,
-and neither have its tests.** The first stage of `setup.sh` runs the tests, and
+`docs/plans/sticker-manager-and-names.md` step 7, `tools/sticker-namer/`. Its tests pass on
+Python 3.14 with the pinned packages. **Nothing else of it has run:** no engine, no key, no
+Firestore, and not `setup.sh`. The first stage of `setup.sh` runs the tests, and
 `.github/workflows/sticker-namer.yml` runs them on the push.
 1. `bash tools/sticker-namer/setup.sh`, stage 1: the two pinned packages install on this PC's
    Python, and the tests pass. A failure there is a fault in the tool.
