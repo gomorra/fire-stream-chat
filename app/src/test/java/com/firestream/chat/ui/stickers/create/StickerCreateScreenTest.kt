@@ -1,6 +1,7 @@
 package com.firestream.chat.ui.stickers.create
 
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
@@ -139,10 +140,16 @@ class StickerCreateScreenTest {
     fun `add names opens a field beside add emoji, and a name is a chip that a tap takes out`() {
         val added = mutableListOf<String>()
         val removed = mutableListOf<String>()
-        setContent(
-            StickerCreateUiState(draft = withSubject, names = listOf("Grumpy cat")),
-            StickerCreateActions(words = StickerWordCallbacks(onAddName = { added += it }, onRemoveName = { removed += it })),
+        // The screen holds what is typed, as the ViewModel does.
+        val state = mutableStateOf(StickerCreateUiState(draft = withSubject, names = listOf("Grumpy cat")))
+        val words = StickerWordCallbacks(
+            onAddName = { added += it },
+            onRemoveName = { removed += it },
+            onNameDraft = { draft -> state.value = state.value.copy(nameDraft = draft) },
         )
+        composeTestRule.setContent {
+            MaterialTheme { StickerCreateContent(uiState = state.value, actions = StickerCreateActions(words = words)) }
+        }
 
         composeTestRule.onNodeWithText(ADD_EMOJI_LABEL).performScrollTo().assertIsDisplayed()
         composeTestRule.onNodeWithTag(STICKER_NAME_FIELD_TAG).assertDoesNotExist()
@@ -153,5 +160,13 @@ class StickerCreateScreenTest {
 
         assertEquals(listOf("Montag"), added)
         assertEquals(listOf("Grumpy cat"), removed)
+        assertEquals("an added name leaves the field empty", "", state.value.nameDraft)
+    }
+
+    @Test
+    fun `a name typed before the screen was drawn again is shown in its field`() {
+        setContent(StickerCreateUiState(draft = withSubject, nameDraft = "Mon"))
+
+        composeTestRule.onNodeWithTag(STICKER_NAME_FIELD_TAG).performScrollTo().assertIsDisplayed()
     }
 }

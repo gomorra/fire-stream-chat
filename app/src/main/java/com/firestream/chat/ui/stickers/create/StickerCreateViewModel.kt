@@ -32,6 +32,8 @@ data class StickerCreateUiState(
     val emojis: List<String> = emptyList(),
     /** The names the sticker is found by in a search. */
     val names: List<String> = emptyList(),
+    /** What is typed in the name field and not yet added. A save takes it as a name. */
+    val nameDraft: String = "",
     /** The packs a made sticker can join: the user's own. */
     val packs: List<StickerPack> = emptyList(),
     /** The pack the sticker joins, or `null` for the pack named [newPackName]. */
@@ -132,6 +134,8 @@ class StickerCreateViewModel @Inject constructor(
 
     fun removeName(name: String) = _uiState.update { it.copy(names = it.names - name) }
 
+    fun setNameDraft(draft: String) = _uiState.update { it.copy(nameDraft = draft) }
+
     /** [packId] is one of the user's packs, or `null` for a new one. */
     fun choosePack(packId: String?) {
         packChosen = true
@@ -146,7 +150,9 @@ class StickerCreateViewModel @Inject constructor(
         if (!state.canSave) return
         _uiState.update { it.copy(isSaving = true) }
         viewModelScope.launch {
-            stickerRepository.createSticker(image.path, state.crop, state.emojis, state.names, state.packId, state.newPackName)
+            // A name still in the field is saved too.
+            val names = StickerWords.withName(state.names, state.nameDraft)
+            stickerRepository.createSticker(image.path, state.crop, state.emojis, names, state.packId, state.newPackName)
                 .onSuccess { _uiState.update { it.copy(isSaving = false, isDone = true) } }
                 .onFailure { e -> _uiState.update { it.copy(isSaving = false, error = AppError.from(e)) } }
         }

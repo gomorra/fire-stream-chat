@@ -129,6 +129,7 @@ fun StickerCreateScreen(
                 onRemoveEmoji = viewModel::removeEmoji,
                 onAddName = viewModel::addName,
                 onRemoveName = viewModel::removeName,
+                onNameDraft = viewModel::setNameDraft,
             ),
             onChoosePack = viewModel::choosePack,
             onNewPackName = viewModel::setNewPackName,
@@ -244,6 +245,7 @@ private fun StickerEditor(
         StickerWordChips(
             emojis = uiState.emojis,
             names = uiState.names,
+            nameDraft = uiState.nameDraft,
             callbacks = actions.words,
             maxEmojis = StickerDraft.MAX_EMOJIS,
         )

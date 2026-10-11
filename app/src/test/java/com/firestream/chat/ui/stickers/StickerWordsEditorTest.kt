@@ -66,6 +66,22 @@ class StickerWordsEditorTest {
     }
 
     @Test
+    fun `a name still in the field is saved with Save, without the check button`() {
+        val saved = mutableListOf<List<String>>()
+        composeTestRule.setContent {
+            MaterialTheme {
+                StickerWordsEditor(sticker = sticker, onSave = { _, names, _ -> saved += names }, onCancel = {})
+            }
+        }
+
+        composeTestRule.onNodeWithText(ADD_NAMES_LABEL).performScrollTo().performClick()
+        composeTestRule.onNodeWithTag(STICKER_NAME_FIELD_TAG).performTextInput(" Grumpy cat ")
+        composeTestRule.onNodeWithText("Save").performScrollTo().performClick()
+
+        assertEquals(listOf(listOf("Old name", "Katze", "Grumpy cat")), saved)
+    }
+
+    @Test
     fun `what was found automatically is shown and cannot be removed`() {
         val named = sticker.copy(
             autoName = StickerAutoName(nameEn = "Sleepy bear", nameDe = "Müder Bär", words = listOf("tired", "Schlaf"), text = "Gute Nacht"),
@@ -115,7 +131,7 @@ class StickerWordsEditorTest {
         val full = (1..StickerWords.MAX_NAMES).map { "n$it" }
         composeTestRule.setContent {
             MaterialTheme {
-                StickerWordChips(emojis = listOf("😺"), names = full, callbacks = StickerWordCallbacks(), maxEmojis = 1)
+                StickerWordChips(emojis = listOf("😺"), names = full, nameDraft = "", callbacks = StickerWordCallbacks(), maxEmojis = 1)
             }
         }
 

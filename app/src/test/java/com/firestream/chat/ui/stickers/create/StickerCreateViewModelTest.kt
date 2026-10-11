@@ -213,6 +213,19 @@ class StickerCreateViewModelTest {
     }
 
     @Test
+    fun `a name still in the field is saved with the sticker`() {
+        val viewModel = viewModelWith()
+        viewModel.addName("Montag")
+        viewModel.setNameDraft(" Grumpy cat ")
+
+        viewModel.save()
+
+        coVerify(exactly = 1) {
+            repository.createSticker(outlined.path, StickerCrop(), emptyList(), listOf("Montag", "Grumpy cat"), any(), any())
+        }
+    }
+
+    @Test
     fun `names are added once each, taken out again, and saved with the sticker`() {
         val viewModel = viewModelWith()
         viewModel.addName(" Grumpy cat ")

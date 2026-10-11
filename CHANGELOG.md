@@ -8,6 +8,10 @@ All notable changes to FireStream Chat. Format follows [Keep a Changelog](https:
 
 - **See what a sticker is found by.** A tap on a sticker now opens one sheet in three places: on a sticker in a chat, inside a pack of the sticker manager, and in *All stickers*. It shows the sticker large, your names and emojis, and what was found automatically: the German and the English name, the search words and the text on the sticker. Its rows add the sticker to the favourites or take it out, and *Edit names and emojis* opens the edit, from a chat too. In a chat the sheet shows the words only for a sticker your library holds, and it asks nobody for a name. *All stickers* has a button beside the search field that switches the grid to a list, where each sticker has its names and its search words beside it, so a few hundred automatic names can be read through. The search, the two filters and the selection work the same in both. (`bc5d3042`)
 
+### Fixed
+
+- **Save keeps the name you are typing.** In the sticker maker and in *Edit names and emojis*, a name that was still in the field was dropped by *Save*, unless the field's check button was pressed first. *Save* now takes it as a name.
+
 ## [1.43.0] — 2026-10-11
 
 ### Added

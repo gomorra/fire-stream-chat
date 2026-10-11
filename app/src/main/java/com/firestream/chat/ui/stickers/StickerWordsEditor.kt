@@ -53,6 +53,8 @@ internal data class StickerWordCallbacks(
     val onRemoveEmoji: (String) -> Unit = {},
     val onAddName: (String) -> Unit = {},
     val onRemoveName: (String) -> Unit = {},
+    /** What is typed in the name field and not yet added. The caller adds it with a save. */
+    val onNameDraft: (String) -> Unit = {},
 )
 
 internal const val STICKER_NAME_FIELD_TAG = "sticker-name-field"
@@ -66,24 +68,28 @@ internal const val ADD_NAMES_LABEL = "Add names"
  *
  * The lists are the caller's, and so are the limits it applies to an add. The
  * add chips step aside at [maxEmojis] emojis and at the limit of names.
+ *
+ * [nameDraft] is the caller's too, so a save can take a name that is still in
+ * the field. Nobody should have to press the field's check button first.
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun StickerWordChips(
     emojis: List<String>,
     names: List<String>,
+    nameDraft: String,
     callbacks: StickerWordCallbacks,
     modifier: Modifier = Modifier,
     maxEmojis: Int = StickerWords.MAX_EMOJIS,
 ) {
     var pickingEmoji by remember { mutableStateOf(false) }
-    var addingNames by remember { mutableStateOf(false) }
-    var nameDraft by remember { mutableStateOf("") }
+    // Open from the start when a name is still typed, so a save never takes a name nobody can see.
+    var addingNames by remember { mutableStateOf(nameDraft.isNotEmpty()) }
     val canAddName = names.size < StickerWords.MAX_NAMES
     val submitName = {
         if (nameDraft.isNotBlank()) {
             callbacks.onAddName(nameDraft)
-            nameDraft = ""
+            callbacks.onNameDraft("")
         }
     }
 
@@ -105,7 +111,7 @@ internal fun StickerWordChips(
         if (addingNames && canAddName) {
             OutlinedTextField(
                 value = nameDraft,
-                onValueChange = { nameDraft = it.take(StickerWords.MAX_NAME_LENGTH) },
+                onValueChange = { callbacks.onNameDraft(it.take(StickerWords.MAX_NAME_LENGTH)) },
                 singleLine = true,
                 label = { Text("Name") },
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
@@ -202,12 +208,14 @@ internal fun StickerWordsEditor(
     // Saved across a rotation: the draft is what the person typed, and nothing else holds it.
     var emojis by rememberSaveable(sticker.id, stateSaver = WordsSaver) { mutableStateOf(sticker.emojis) }
     var names by rememberSaveable(sticker.id, stateSaver = WordsSaver) { mutableStateOf(sticker.names) }
+    var nameDraft by rememberSaveable(sticker.id) { mutableStateOf("") }
     val callbacks = remember(sticker.id) {
         StickerWordCallbacks(
             onAddEmoji = { emojis = StickerWords.withEmoji(emojis, it) },
             onRemoveEmoji = { emojis = emojis - it },
             onAddName = { names = StickerWords.withName(names, it) },
             onRemoveName = { names = names - it },
+            onNameDraft = { nameDraft = it },
         )
     }
 
@@ -217,7 +225,7 @@ internal fun StickerWordsEditor(
     ) {
         LibraryStickerImage(sticker = sticker, modifier = Modifier.size(96.dp))
         WordsTitle("Emojis and names")
-        StickerWordChips(emojis = emojis, names = names, callbacks = callbacks)
+        StickerWordChips(emojis = emojis, names = names, nameDraft = nameDraft, callbacks = callbacks)
         Text(
             text = "The sticker is found by these in a search.",
             style = MaterialTheme.typography.bodySmall,
@@ -239,7 +247,8 @@ internal fun StickerWordsEditor(
             modifier = Modifier.fillMaxWidth().padding(top = 16.dp, bottom = 16.dp),
         ) {
             TextButton(onClick = onCancel) { Text("Cancel") }
-            TextButton(onClick = { onSave(emojis, names, usedAsMine) }) { Text("Save") }
+            // A name still in the field is saved too.
+            TextButton(onClick = { onSave(emojis, StickerWords.withName(names, nameDraft), usedAsMine) }) { Text("Save") }
         }
     }
 }
