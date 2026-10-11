@@ -14,26 +14,19 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.InputChip
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
@@ -60,10 +53,12 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import coil.compose.AsyncImage
 import com.firestream.chat.domain.model.StickerCrop
+import com.firestream.chat.domain.model.StickerDraft
 import com.firestream.chat.domain.model.StickerDraftImage
-import com.firestream.chat.ui.chat.picker.EmojiTab
 import com.firestream.chat.ui.stickers.EmptyHint
 import com.firestream.chat.ui.stickers.StickerTopBar
+import com.firestream.chat.ui.stickers.StickerWordCallbacks
+import com.firestream.chat.ui.stickers.StickerWordChips
 import java.io.File
 
 /** What the maker's controls can ask for. One bundle keeps the composables under the parameter ceiling. */
@@ -74,8 +69,8 @@ internal data class StickerCreateActions(
     val onUseCutout: (Boolean) -> Unit = {},
     val onOutline: (Boolean) -> Unit = {},
     val onTransform: (zoom: Float, panX: Float, panY: Float) -> Unit = { _, _, _ -> },
-    val onAddEmoji: (String) -> Unit = {},
-    val onRemoveEmoji: (String) -> Unit = {},
+    /** The adds and removes of the sticker's emojis and names. */
+    val words: StickerWordCallbacks = StickerWordCallbacks(),
     val onChoosePack: (String?) -> Unit = {},
     val onNewPackName: (String) -> Unit = {},
     val onSave: () -> Unit = {},
@@ -129,8 +124,12 @@ fun StickerCreateScreen(
             onUseCutout = viewModel::setUseCutout,
             onOutline = viewModel::setOutline,
             onTransform = viewModel::transform,
-            onAddEmoji = viewModel::addEmoji,
-            onRemoveEmoji = viewModel::removeEmoji,
+            words = StickerWordCallbacks(
+                onAddEmoji = viewModel::addEmoji,
+                onRemoveEmoji = viewModel::removeEmoji,
+                onAddName = viewModel::addName,
+                onRemoveName = viewModel::removeName,
+            ),
             onChoosePack = viewModel::choosePack,
             onNewPackName = viewModel::setNewPackName,
             onSave = viewModel::save,
@@ -199,8 +198,6 @@ private fun StickerEditor(
     actions: StickerCreateActions,
     modifier: Modifier = Modifier,
 ) {
-    var pickingEmoji by remember { mutableStateOf(false) }
-
     Column(
         modifier = modifier.verticalScroll(rememberScrollState()).padding(horizontal = 16.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -243,28 +240,15 @@ private fun StickerEditor(
             AssistChip(onClick = actions.onPickPhoto, label = { Text("Another photo") })
         }
 
-        SectionTitle("Emojis")
-        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-            uiState.emojis.forEach { emoji ->
-                InputChip(
-                    selected = false,
-                    onClick = { actions.onRemoveEmoji(emoji) },
-                    label = { Text(emoji) },
-                    trailingIcon = {
-                        Icon(Icons.Default.Close, contentDescription = "Remove $emoji", modifier = Modifier.size(16.dp))
-                    },
-                )
-            }
-            if (uiState.canAddEmoji) {
-                AssistChip(
-                    onClick = { pickingEmoji = true },
-                    label = { Text("Add emoji") },
-                    leadingIcon = { Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp)) },
-                )
-            }
-        }
+        SectionTitle("Emojis and names")
+        StickerWordChips(
+            emojis = uiState.emojis,
+            names = uiState.names,
+            callbacks = actions.words,
+            maxEmojis = StickerDraft.MAX_EMOJIS,
+        )
         Text(
-            text = "The sticker is found by these in a search, and the first one stands for it in a preview.",
+            text = "The sticker is found by these in a search, and the first emoji stands for it in a preview.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
@@ -294,16 +278,6 @@ private fun StickerEditor(
                 modifier = Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 24.dp),
             )
         }
-    }
-
-    if (pickingEmoji) {
-        EmojiSheet(
-            onPick = { emoji ->
-                pickingEmoji = false
-                actions.onAddEmoji(emoji)
-            },
-            onDismiss = { pickingEmoji = false },
-        )
     }
 }
 
@@ -368,17 +342,4 @@ private fun SectionTitle(text: String) {
         color = MaterialTheme.colorScheme.primary,
         modifier = Modifier.fillMaxWidth().padding(top = 20.dp, bottom = 4.dp),
     )
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun EmojiSheet(onPick: (String) -> Unit, onDismiss: () -> Unit) {
-    ModalBottomSheet(onDismissRequest = onDismiss) {
-        EmojiTab(
-            query = "",
-            recentEmojis = emptyList(),
-            onSelection = { onPick(it.emoji) },
-            modifier = Modifier.fillMaxWidth().height(360.dp),
-        )
-    }
 }

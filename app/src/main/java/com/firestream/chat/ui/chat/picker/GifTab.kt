@@ -35,6 +35,7 @@ import com.firestream.chat.domain.model.OnlineMedia
 import com.firestream.chat.domain.model.OnlineMediaKind
 import com.firestream.chat.ui.chat.gif.OnlineMediaFeed
 import com.firestream.chat.ui.chat.gif.OnlineMediaUiState
+import com.firestream.chat.ui.components.ConsentNotice
 import com.firestream.chat.ui.components.StickerImage
 import com.firestream.chat.ui.components.rememberAnimatedImageRequest
 
@@ -190,26 +191,13 @@ internal fun OnlineMediaFooter(
  */
 @Composable
 internal fun OnlineMediaNotice(onAccept: () -> Unit, modifier: Modifier = Modifier) {
-    Column(
-        modifier = modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 12.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
+    ConsentNotice(
+        title = "GIFs and online stickers come from KLIPY",
+        body = "What you search for here goes to KLIPY. The people you send a pick to load it from KLIPY, " +
+            "which sees their IP address and yours.",
+        modifier = modifier,
     ) {
-        Text(
-            text = "GIFs and online stickers come from KLIPY",
-            style = MaterialTheme.typography.titleSmall,
-            textAlign = TextAlign.Center,
-        )
-        Text(
-            text = "What you search for here goes to KLIPY. The people you send a pick to load it from KLIPY, " +
-                "which sees their IP address and yours.",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.padding(top = 6.dp),
-        )
-        Button(onClick = onAccept, modifier = Modifier.padding(top = 10.dp)) {
-            Text("Continue")
-        }
+        Button(onClick = onAccept) { Text("Continue") }
     }
 }
 

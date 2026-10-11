@@ -164,8 +164,25 @@ data class Sticker(
     val width: Int,
     val height: Int,
     val isAnimated: Boolean,
-    val emojis: List<String>,
-    val localPath: String             // filesDir/stickers/<id>.<ext>; the file may not be there yet
+    val emojis: List<String>,         // tags from the file or a person
+    val localPath: String,            // filesDir/stickers/<id>.<ext>; the file may not be there yet
+    val names: List<String> = emptyList(),   // typed by a person; at most 8 of 40 characters (StickerWords)
+    val autoName: StickerAutoName? = null,   // what the naming service found; never changes emojis or names
+    val autoNameAllowed: Boolean = true      // false for a sticker made in the app
+)
+
+data class StickerAutoName(           // a part that was not found is empty
+    val nameEn: String = "",
+    val nameDe: String = "",
+    val words: List<String> = emptyList(),   // search words in both languages
+    val text: String = "",            // the text written on the sticker
+    val emojis: List<String> = emptyList()
+)
+
+data class StickerAutoNaming(         // automatic sticker names as this device has them
+    val isSupported: Boolean = false, // false on a backend without a naming service
+    val isEnabled: Boolean = false,   // the person's switch; off until they switch it on
+    val isRefused: Boolean = false    // the backend refused the last look; switches nothing off
 )
 
 data class StickerPack(
@@ -177,7 +194,8 @@ data class StickerPack(
     val stickers: List<Sticker>,      // in pack order
     val createdAt: Long,
     val updatedAt: Long,
-    val shownInRow: Boolean = true    // own thumbnail in the picker's row; false for a pack a WhatsApp import made
+    val shownInRow: Boolean = true,   // own thumbnail in the picker's row; false for a pack a WhatsApp import made
+    val autoNameAllowed: Boolean = true      // false for a pack the sticker maker created
 )
 
 data class StickerPackPreview(        // a pack someone shared, as it is offered for adding

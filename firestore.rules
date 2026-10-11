@@ -202,6 +202,27 @@ service cloud.firestore {
                     && (resource == null || resource.data.ownerId == request.auth.uid);
     }
 
+    // ── Sticker Names ────────────────────────────────────────────
+    // One document per sticker, named by the SHA-256 of the sticker's bytes.
+    // A phone asks for a name by creating the document as a request. The
+    // naming service answers with the Admin SDK, which these rules do not
+    // apply to. No one lists: a sticker id is all it takes to fetch the
+    // sticker's file, so a list would hand out every user's stickers. No
+    // client changes or deletes a document, so no one can forge an answer.
+    // Tests: firestore-rules-tests/stickerNames.test.js.
+    match /stickerNames/{stickerId} {
+      allow get:    if isAuth();
+      // The key list is every field a request has. A new field needs it changed.
+      allow create: if isAuth()
+                    && stickerId.matches('^[0-9a-f]{64}$')
+                    && request.resource.data.keys().hasAll(['status', 'format', 'requestedAt'])
+                    && request.resource.data.keys().hasOnly(['status', 'format', 'requestedAt'])
+                    && request.resource.data.status == 'pending'
+                    && request.resource.data.format is string
+                    && request.resource.data.format.size() <= 16
+                    && request.resource.data.requestedAt == request.time;
+    }
+
     // ── Invite Links ─────────────────────────────────────────────
     match /inviteLinks/{token} {
       allow read:   if isAuth();

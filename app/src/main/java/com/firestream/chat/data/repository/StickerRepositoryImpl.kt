@@ -13,7 +13,11 @@
 //   leaves in no pack is remembered on the device, an import with skipKnown
 //   leaves it out, and an add on purpose forgets it again (an import without
 //   skipKnown, saveSticker, installPack, createSticker, createPack). A favourite
-//   does not: the star can come off again.
+//   does not: the star can come off again. The cleaning of the emojis and names
+//   a person gives a sticker (StickerWords), and that a made sticker and a pack
+//   the maker creates are closed to automatic naming (autoNameAllowed = false).
+//   The writes of consent to automatic names: the device's switch, a pack's
+//   and a sticker's.
 // Collaborators: StickerDao (rows, and every multi-statement write as one
 //   transaction), StickerFiles (the content-addressed files), StickerPackArchive
 //   and WaStickerMetadata (untrusted input), WhatsAppStickerFolder (the folder
@@ -23,11 +27,14 @@
 //   StickerManifest (a viewed pack), StickerObjectSource and StickerDownloads
 //   (a missing file, found by its id and checked against it), StickerMaker
 //   (the draft and the bytes of a made sticker, which is stored like an import,
-//   and the WebP of a keyboard picture that is no sticker file).
+//   and the WebP of a keyboard picture that is no sticker file),
+//   StickerNameScheduler (the naming run) and StickerNameSource (whether this
+//   backend names stickers at all).
 // Don't put here: parsing of a file or an archive (domain/util/WebpContainer,
 //   data/sticker/), sending a sticker (MessageRepositoryImpl — "The repository
 //   decides who a send is for", docs/PATTERNS.md), the upload of a pack
 //   (StickerSyncWorker) or the merge of a restored one (StickerDao.applyRemotePack),
+//   who is asked for a name and what an answer may hold (StickerNameSync),
 //   anything a screen picks or launches (the composable owns its launchers).
 // endregion
 
@@ -38,6 +45,7 @@ import com.firestream.chat.data.local.dao.StickerDao
 import com.firestream.chat.data.local.entity.StickerEntity
 import com.firestream.chat.data.local.entity.StickerPackEntity
 import com.firestream.chat.data.remote.source.AuthSource
+import com.firestream.chat.data.remote.source.StickerNameSource
 import com.firestream.chat.data.remote.source.StickerObjectSource
 import com.firestream.chat.data.remote.source.StickerPackSource
 import com.firestream.chat.data.sticker.StickerDownloads
@@ -53,8 +61,10 @@ import com.firestream.chat.data.sticker.cleanStickerText
 import com.firestream.chat.data.util.parseStickerPackKind
 import com.firestream.chat.data.util.rethrowIfCancellation
 import com.firestream.chat.data.util.resultOf
+import com.firestream.chat.data.worker.StickerNameScheduler
 import com.firestream.chat.data.worker.StickerSyncScheduler
 import com.firestream.chat.domain.model.Sticker
+import com.firestream.chat.domain.model.StickerAutoNaming
 import com.firestream.chat.domain.model.StickerCrop
 import com.firestream.chat.domain.model.StickerDraft
 import com.firestream.chat.domain.model.StickerFormat
@@ -64,8 +74,10 @@ import com.firestream.chat.domain.model.StickerPackKind
 import com.firestream.chat.domain.model.StickerPackPreview
 import com.firestream.chat.domain.model.WhatsAppStickerFile
 import com.firestream.chat.domain.repository.StickerRepository
+import com.firestream.chat.domain.util.StickerWords
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -84,6 +96,7 @@ import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlin.coroutines.EmptyCoroutineContext
 
 @Singleton
 class StickerRepositoryImpl @Inject constructor(
@@ -98,6 +111,8 @@ class StickerRepositoryImpl @Inject constructor(
     private val syncScheduler: StickerSyncScheduler,
     private val authSource: AuthSource,
     private val stickerMaker: StickerMaker,
+    private val nameSource: StickerNameSource,
+    private val nameScheduler: StickerNameScheduler,
 ) : StickerRepository {
 
     /**
@@ -455,6 +470,9 @@ class StickerRepositoryImpl @Inject constructor(
                 isAnimated = sticker.isAnimated,
                 emojis = sticker.emojis,
                 createdAt = now,
+                // The owner's names come with the pack. A sticker the library has keeps its own.
+                names = sticker.names,
+                autoNameAllowed = sticker.autoNameAllowed,
             )
         }
         // False: a copy is there already, which is what the caller wanted.
@@ -471,6 +489,7 @@ class StickerRepositoryImpl @Inject constructor(
         imagePath: String,
         crop: StickerCrop,
         emojis: List<String>,
+        names: List<String>,
         packId: String?,
         packName: String,
     ): Result<String> = resultOf {
@@ -482,22 +501,83 @@ class StickerRepositoryImpl @Inject constructor(
             null
         }
         val bytes = stickerMaker.render(imagePath, crop)
-        val tags = emojis.map { it.trim() }.filter { it.isNotEmpty() }.distinct().take(StickerDraft.MAX_EMOJIS)
+        val tags = StickerWords.cleanEmojis(emojis, StickerDraft.MAX_EMOJIS)
         withContext(Dispatchers.IO) {
             // Under the import lock, like an import: a refused archive deletes files that have no row yet.
             importLock.withLock {
                 val stored = stickerFiles.store(bytes) ?: throw IllegalStateException(NOT_A_STICKER)
                 val now = System.currentTimeMillis()
+                // A made sticker is the user's own picture. It is not sent to the naming service.
                 val sticker = StickerEntity.of(stored, tags, now)
+                    .copy(names = StickerWords.cleanNames(names), autoNameAllowed = false)
                 if (newPackTarget != null) {
-                    stickerDao.importInto(newPack(newPackTarget, now), listOf(sticker), now)
+                    stickerDao.importInto(newPack(newPackTarget, now).copy(autoNameAllowed = false), listOf(sticker), now)
                 } else if (!stickerDao.addMadeSticker(packId!!, sticker, now)) {
                     throw NoSuchElementException(PACK_GONE)
                 }
+                // The same picture made a second time is a row the library had. It keeps that row.
+                stickerDao.markMade(stored.id, sticker.names, now)
                 preferences.forgetDeletedStickers(listOf(stored.id))
                 stored.id
             }
         }.also { syncScheduler.syncIfPending() }
+    }
+
+    override suspend fun setStickerWords(
+        stickerId: String,
+        emojis: List<String>,
+        names: List<String>,
+        stopAutoNaming: Boolean,
+    ): Result<Unit> = resultOf {
+        // Leaving a sticker out of naming is consent. A plain edit of its words may be cancelled like any other.
+        withContext(if (stopAutoNaming) NonCancellable else EmptyCoroutineContext) {
+            val written = stickerDao.setStickerWords(
+                stickerId = stickerId,
+                emojis = StickerWords.cleanEmojis(emojis),
+                names = StickerWords.cleanNames(names),
+                now = System.currentTimeMillis(),
+                stopAutoNaming = stopAutoNaming,
+            )
+            if (!written) throw NoSuchElementException("That sticker is not in the library")
+            syncScheduler.syncIfPending()
+        }
+    }
+
+    override fun observeAutoNaming(): Flow<StickerAutoNaming> {
+        if (!nameSource.isSupported) return flowOf(StickerAutoNaming())
+        return combine(preferences.autoNameStickersFlow, preferences.stickerNamingRefusedFlow) { enabled, refused ->
+            StickerAutoNaming(isSupported = true, isEnabled = enabled, isRefused = refused)
+        }
+    }
+
+    // The three writes below are consent. The screen that asks for one can close in the same moment, and a
+    // write cancelled half-way would leave a picture open to the naming service that its owner just closed.
+
+    override suspend fun setAutoNaming(enabled: Boolean): Result<Unit> = resultOf {
+        withContext(NonCancellable) {
+            preferences.setAutoNameStickers(enabled)
+            if (enabled) nameScheduler.runIfWanted() else nameScheduler.cancel()
+        }
+    }
+
+    override suspend fun refreshAutoNames() = nameScheduler.runIfWanted()
+
+    override suspend fun setPackAutoNaming(packId: String, allowed: Boolean): Result<Unit> = resultOf {
+        withContext(NonCancellable) {
+            requirePack(packId)
+            stickerDao.setPackAutoNameAllowed(packId, allowed, System.currentTimeMillis())
+            syncScheduler.syncIfPending()
+            if (allowed) nameScheduler.runIfWanted()
+        }
+    }
+
+    override suspend fun setStickersAutoNaming(stickerIds: List<String>, allowed: Boolean): Result<Unit> = resultOf {
+        withContext(NonCancellable) {
+            val ids = stickerIds.filter(StickerFiles::isValidId).distinct()
+            stickerDao.setStickersAutoNameAllowed(ids, allowed, System.currentTimeMillis())
+            syncScheduler.syncIfPending()
+            if (allowed) nameScheduler.runIfWanted()
+        }
     }
 
     private suspend fun requirePack(packId: String): StickerPackEntity =

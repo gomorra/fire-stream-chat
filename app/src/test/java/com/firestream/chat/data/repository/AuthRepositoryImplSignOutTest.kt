@@ -9,6 +9,7 @@ import com.firestream.chat.data.local.dao.UserDao
 import com.firestream.chat.data.remote.source.AuthSource
 import com.firestream.chat.data.remote.source.StickerPackSource
 import com.firestream.chat.data.sticker.StickerLibrarySync
+import com.firestream.chat.data.worker.StickerNameScheduler
 import com.firestream.chat.data.worker.StickerSyncScheduler
 import com.google.firebase.messaging.FirebaseMessaging
 import io.mockk.coVerify
@@ -40,6 +41,7 @@ class AuthRepositoryImplSignOutTest {
     private val signalManager = mockk<SignalManager>(relaxed = true)
     private val firebaseMessaging = mockk<FirebaseMessaging>(relaxed = true)
     private val stickerSyncScheduler = mockk<StickerSyncScheduler>(relaxed = true)
+    private val stickerNameScheduler = mockk<StickerNameScheduler>(relaxed = true)
     private val preferences = mockk<PreferencesDataStore>(relaxed = true)
     private val syncScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
     private val stickerLibrarySync = StickerLibrarySync(
@@ -47,6 +49,7 @@ class AuthRepositoryImplSignOutTest {
         mockk<StickerPackSource>(relaxed = true),
         authSource,
         stickerSyncScheduler,
+        stickerNameScheduler,
         preferences,
         syncScope,
     )
@@ -84,6 +87,8 @@ class AuthRepositoryImplSignOutTest {
 
         coVerifyOrder {
             stickerSyncScheduler.cancel()
+            // The naming run too: it would ask about the leaving user's stickers.
+            stickerNameScheduler.cancel()
             database.clearAllTables()
             authSource.signOut()
             preferences.clearStickerLists()

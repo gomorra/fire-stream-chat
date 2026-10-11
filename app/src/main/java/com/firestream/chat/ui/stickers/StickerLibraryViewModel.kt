@@ -3,10 +3,13 @@ package com.firestream.chat.ui.stickers
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.firestream.chat.domain.model.AppError
+import com.firestream.chat.domain.model.Sticker
+import com.firestream.chat.domain.model.StickerAutoNaming
 import com.firestream.chat.domain.model.StickerPack
 import com.firestream.chat.domain.model.StickerPackKind
 import com.firestream.chat.domain.model.WhatsAppStickerFile
 import com.firestream.chat.domain.repository.StickerRepository
+import com.firestream.chat.domain.util.StickerNameFilter
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -40,6 +43,10 @@ data class WhatsAppImportState(
     val allSelected: Boolean get() = shownFiles.isNotEmpty() && shownFiles.all { it.uri in selected }
 }
 
+/** The sticker [id] as the first pack that holds it has it, or `null` when no pack does. */
+private fun List<StickerPack>.findSticker(id: String): Sticker? =
+    firstNotNullOfOrNull { pack -> pack.stickers.firstOrNull { it.id == id } }
+
 /** One sticker in one pack. A sticker that two packs hold is two entries. */
 data class StickerEntry(val packId: String, val stickerId: String)
 
@@ -64,6 +71,12 @@ data class StickerLibraryUiState(
     val selectedStickers: Set<StickerEntry> = emptySet(),
     /** What the search field of the *All stickers* tab holds. */
     val query: String = "",
+    /** Which stickers the *All stickers* tab shows, by how they are named. */
+    val nameFilter: StickerNameFilter = StickerNameFilter.ALL,
+    /** Automatic sticker names: offered or not, switched on or not, refused by the backend or not. */
+    val autoNaming: StickerAutoNaming = StickerAutoNaming(),
+    /** The sticker whose emojis and names are being edited, or `null`. */
+    val editingStickerId: String? = null,
     /** The WhatsApp folder view, shown over everything else while it is not `null`. */
     val whatsApp: WhatsAppImportState? = null,
     val isImporting: Boolean = false,
@@ -85,6 +98,15 @@ data class StickerLibraryUiState(
 
     /** How many stickers the selection holds. A sticker picked in two packs counts once. */
     val selectedStickerCount: Int get() = selectedStickers.mapTo(HashSet()) { it.stickerId }.size
+
+    /** A sticker's emojis and names are edited one sticker at a time. */
+    val canEditSelected: Boolean get() = selectedStickerCount == 1
+
+    /** Asking for a name is offered only while the person has automatic names switched on. */
+    val canNameSelectedNow: Boolean get() = autoNaming.isSupported && autoNaming.isEnabled
+
+    val editingSticker: Sticker?
+        get() = editingStickerId?.let(packs::findSticker)
 
     /**
      * The packs the selection can move to. Not *Favourites*, which has its own
@@ -132,10 +154,48 @@ class StickerLibraryViewModel @Inject constructor(
                             openPackId = open?.id,
                             selectedStickers = state.selectedStickers.heldBy(packs),
                             selectedPackIds = state.selectedPackIds.filterTo(LinkedHashSet()) { it in selectable },
+                            // A sticker that left the library while its sheet was open has nothing to edit.
+                            editingStickerId = state.editingStickerId?.takeIf { packs.findSticker(it) != null },
                         )
                     }
                 }
         }
+        viewModelScope.launch {
+            // A failure here leaves automatic names as not offered, which is the state without them.
+            stickerRepository.observeAutoNaming().catch { }.collect { naming -> _uiState.update { it.copy(autoNaming = naming) } }
+        }
+        // The manager is where names are looked at, so opening it looks for answers that came in.
+        viewModelScope.launch { stickerRepository.refreshAutoNames() }
+    }
+
+    fun setAutoNaming(enabled: Boolean) = edit { stickerRepository.setAutoNaming(enabled) }
+
+    fun setPackAutoNaming(packId: String, allowed: Boolean) = edit { stickerRepository.setPackAutoNaming(packId, allowed) }
+
+    fun setNameFilter(filter: StickerNameFilter) = _uiState.update { it.copy(nameFilter = filter) }
+
+    /**
+     * Opens the selected stickers to automatic naming and asks for them at
+     * once. A sticker is still not asked for while a pack that holds it is left
+     * out, so the first such pack is named in a notice.
+     */
+    fun nameSelectedNow() {
+        val state = _uiState.value
+        val ids = state.selectedStickers.mapTo(HashSet()) { it.stickerId }
+        val closedPack = state.packs.firstOrNull { pack -> !pack.autoNameAllowed && pack.stickers.any { it.id in ids } }
+        setSelectedNaming(allowed = true)
+        if (closedPack != null) {
+            _uiState.update {
+                it.copy(notice = "${closedPack.label()} is left out of automatic names. Switch “Name automatically” on in its menu.")
+            }
+        }
+    }
+
+    /** Leaves the selected stickers out of automatic naming. What was found for them earlier stays. */
+    fun stopNamingSelected() = setSelectedNaming(allowed = false)
+
+    private fun setSelectedNaming(allowed: Boolean) = editSelection { byPack ->
+        stickerRepository.setStickersAutoNaming(byPack.values.flatten().distinct(), allowed)
     }
 
     /** A selection belongs to the tab it was made in, so changing the tab ends it. */
@@ -231,6 +291,25 @@ class StickerLibraryViewModel @Inject constructor(
     /** Deletes the selected stickers from the library: out of every pack, and a WhatsApp import leaves them out. */
     fun deleteSelectedStickers() =
         editSelection { byPack -> stickerRepository.deleteStickers(byPack.values.flatten().distinct()) }
+
+    /** Opens the edit of the one selected sticker's emojis and names, and ends the selection. */
+    fun editSelectedSticker() = _uiState.update { state ->
+        if (!state.canEditSelected) state
+        else state.copy(editingStickerId = state.selectedStickers.first().stickerId, selectedStickers = emptySet())
+    }
+
+    fun closeStickerEdit() = _uiState.update { it.copy(editingStickerId = null) }
+
+    /**
+     * Gives the sticker being edited these emojis and names, and closes the
+     * edit. With [stopAutoNaming] the sticker is also left out of automatic
+     * naming from now on: its owner took what was found as their own.
+     */
+    fun saveStickerWords(emojis: List<String>, names: List<String>, stopAutoNaming: Boolean) {
+        val stickerId = _uiState.value.editingStickerId ?: return
+        edit { stickerRepository.setStickerWords(stickerId, emojis, names, stopAutoNaming) }
+        closeStickerEdit()
+    }
 
     /** Runs [block] on the selected stickers, as sticker ids by pack id, then clears the selection. */
     private fun editSelection(block: suspend (byPack: Map<String, List<String>>) -> Result<Unit>) {

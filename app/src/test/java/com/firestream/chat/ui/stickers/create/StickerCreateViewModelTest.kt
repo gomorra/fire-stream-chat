@@ -40,7 +40,7 @@ class StickerCreateViewModelTest {
     fun setUp() {
         every { repository.observePacks() } returns packs
         coEvery { repository.prepareStickerDraft(any()) } returns Result.success(withSubject)
-        coEvery { repository.createSticker(any(), any(), any(), any(), any()) } returns Result.success("id")
+        coEvery { repository.createSticker(any(), any(), any(), any(), any(), any()) } returns Result.success("id")
     }
 
     private fun viewModelWith(draft: StickerDraft = withSubject): StickerCreateViewModel {
@@ -145,7 +145,6 @@ class StickerCreateViewModelTest {
 
         listOf("😺", "😺", "🐶", "🦊", "🐸").forEach(viewModel::addEmoji)
         assertEquals(listOf("😺", "🐶", "🦊"), viewModel.uiState.value.emojis)
-        assertFalse(viewModel.uiState.value.canAddEmoji)
 
         viewModel.removeEmoji("🐶")
         assertEquals(listOf("😺", "🦊"), viewModel.uiState.value.emojis)
@@ -208,9 +207,27 @@ class StickerCreateViewModelTest {
         viewModel.save()
 
         coVerify(exactly = 1) {
-            repository.createSticker(cutout.path, StickerCrop(scale = 2f), listOf("😺"), "mine", any())
+            repository.createSticker(cutout.path, StickerCrop(scale = 2f), listOf("😺"), emptyList(), "mine", any())
         }
         assertTrue(viewModel.uiState.value.isDone)
+    }
+
+    @Test
+    fun `names are added once each, taken out again, and saved with the sticker`() {
+        val viewModel = viewModelWith()
+        viewModel.addName(" Grumpy cat ")
+        viewModel.addName("grumpy CAT")
+        viewModel.addName("  ")
+        viewModel.addName("Montag")
+        viewModel.addName("Typo")
+        viewModel.removeName("Typo")
+        assertEquals(listOf("Grumpy cat", "Montag"), viewModel.uiState.value.names)
+
+        viewModel.save()
+
+        coVerify(exactly = 1) {
+            repository.createSticker(outlined.path, StickerCrop(), emptyList(), listOf("Grumpy cat", "Montag"), any(), any())
+        }
     }
 
     @Test
@@ -219,30 +236,30 @@ class StickerCreateViewModelTest {
         viewModel.setNewPackName("  ")
         assertFalse(viewModel.uiState.value.canSave)
         viewModel.save()
-        coVerify(exactly = 0) { repository.createSticker(any(), any(), any(), any(), any()) }
+        coVerify(exactly = 0) { repository.createSticker(any(), any(), any(), any(), any(), any()) }
 
         viewModel.setNewPackName("Holiday")
         viewModel.save()
 
-        coVerify(exactly = 1) { repository.createSticker(outlined.path, StickerCrop(), emptyList(), null, "Holiday") }
+        coVerify(exactly = 1) { repository.createSticker(outlined.path, StickerCrop(), emptyList(), emptyList(), null, "Holiday") }
     }
 
     @Test
     fun `a second tap while saving makes one sticker`() {
         val pending = CompletableDeferred<Result<String>>()
-        coEvery { repository.createSticker(any(), any(), any(), any(), any()) } coAnswers { pending.await() }
+        coEvery { repository.createSticker(any(), any(), any(), any(), any(), any()) } coAnswers { pending.await() }
         val viewModel = viewModelWith()
 
         viewModel.save()
         viewModel.save()
 
         assertTrue(viewModel.uiState.value.isSaving)
-        coVerify(exactly = 1) { repository.createSticker(any(), any(), any(), any(), any()) }
+        coVerify(exactly = 1) { repository.createSticker(any(), any(), any(), any(), any(), any()) }
     }
 
     @Test
     fun `a failed save shows its reason and keeps the draft`() {
-        coEvery { repository.createSticker(any(), any(), any(), any(), any()) } returns
+        coEvery { repository.createSticker(any(), any(), any(), any(), any(), any()) } returns
             Result.failure(IllegalStateException("That picture has too much detail for a sticker"))
         val viewModel = viewModelWith()
 

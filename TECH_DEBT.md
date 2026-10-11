@@ -361,6 +361,51 @@ Known refactors and code smells that have been consciously deferred or declined.
 
 ---
 
+### The sticker search folds every sticker's words on every keystroke
+
+**The smell.** `StickerSearch.find` and `sections` cut each sticker's names and automatic words into folded words (`wordsOf`: lowercase, strip accents, a regex split) each time the query changes. Both run in composition, in `StickerLibraryTab` and `AllStickersTab`, behind `remember(packs, query)`. The words of a sticker change only when the library changes.
+
+**Why we haven't fixed it.** The owner's library is a few hundred stickers, where one search is a few thousand short strings. An index built once per library emission is a second data structure with its own invalidation. Flagged by `/simplify` on step 5 of `docs/plans/sticker-manager-and-names.md`.
+
+**When to revisit.** When typing in the sticker search drops frames on a phone, or a library passes a few thousand stickers. Then build the folded words once per `packs` emission (`StickerSearch.index(packs)`) and let a keystroke run `startsWith` over it.
+
+---
+
+### A sticker's names travel with its packs, not with the sticker
+
+**The smell.** A sticker's emojis and names are one row in `stickers`, and the backup is per pack. `StickerDao.setStickerWords` therefore marks every pack that holds the sticker, and each manifest carries its own copy of the words. A second device takes them from a manifest only when that manifest is newer than its own row of the same pack (`StickerDao.applyRemotePack`, `mergeStickers(takeWords = true)`). Three things follow.
+
+- Two devices that edit the same sticker at about the same time can end with different words. Which pack's manifest is applied last decides, and it can differ per device.
+- A pack change on a device that has not seen an edit yet takes the edit back. The sticker is in packs A and B. Phone 1 renames it and uploads both. Phone 2 reorders pack B before it has applied them, and uploads B with the old names and a later `updatedAt`. Phone 1 applies that B and the names go back, while A's manifest still holds the new ones.
+- A sticker that is in no pack is in no manifest. Its names do not survive a reinstall.
+- A manifest without `autoNameAllowed` does not say which stickers were made in the app. A restore of one closes a pack to automatic naming by its import key (`StickerPackEntity.autoNameAllowedByDefault`), and each of its stickers takes the pack's answer (`StickerManifest.stickersOf`). A made sticker that sits in an imported pack of such a manifest reads as allowed.
+
+**Why we haven't fixed it.** One record of words per sticker is a second synced collection with its own merge rule, which the plan refused for the list of deleted stickers too (`docs/plans/sticker-manager-and-names.md`, §0). The owner edits names on one phone at a time. For the last point no rule exists: a row does not tell a made sticker from an imported one. Automatic names are asked for such a sticker once the switch is on, unless its owner closes it with *Do not name automatically*. The device checklist in `docs/BACKLOG.md` says so. The same restore rule can open a sticker again that was closed on another phone, when an older manifest of a second pack is applied after the newer one.
+
+**When to revisit.** When names are seen to differ between two phones, or when a made sticker is found to have been sent to the naming service. Step 8 of the plan reviews this path.
+
+---
+
+### Automatic sticker names — the known limits
+
+**The smell.** Seven things about `stickerNames/{stickerId}` and `StickerNameSync` are accepted.
+
+- **Anyone signed in can ask for a name for any sticker id.** `firestore.rules` checks the shape of a request and that the id is 64 hex digits, and nothing about who holds the sticker. The naming service then spends time on it. A request for an id without a file in Storage costs the service one failed read.
+- **Anyone signed in can read the name of any sticker whose id they have.** A name says what is on a sticker. An id comes with every sticker message and every pack manifest, and the file itself is readable by the same id.
+- **A Lottie sticker gets no automatic name.** The service names WebP stickers only, and the phone does not ask for another format. A Lottie sticker is found by its emojis and by the names a person types.
+- **A sticker without a usable answer is read once per run.** No column says that the service answered `skipped`, or that an answer was malformed. Such a sticker is held back from a new request by `nameRequestedAt`, for a day at a time, and each naming run still reads its document. The rules let no phone replace the record, so it stays until the service or the owner rewrites it.
+- **A run comes back at most every five hours, not every day.** WorkManager's backoff grows no further (`docs/GOTCHAS.md`). While requests wait for a service that is switched off, the phone reads every waiting document about five times a day.
+- **A naming run writes to `stickers` once per sticker.** Each `setNameRequestedAt` and `setAutoName` makes Room read the whole library again for every collector of `observePacks()`, although `nameRequestedAt` is not in the domain model. A first run over a few hundred stickers is a few hundred such reads while the manager or a chat is open. One write per batch would do. Flagged by `/simplify` on step 6 of `docs/plans/sticker-manager-and-names.md`, with a shared helper for the two schedulers' enqueue and a naming trigger at every first upload, which the `REPLACE` policy would turn into a restart per file.
+- **The naming service reads its queue twice.** `tools/sticker-namer/firebase_store.py` listens to the pending requests only to wake the loop, and the loop then reads them again with a query of its own. Each pending document is billed once for the listener and once per round. A round that left a request pending comes back after 1, 2, 4 … minutes, up to 30, and reads every pending document again. A sticker the engine refuses is asked three times in each such round. Flagged by `/simplify` on step 7. Taking the work list from the listener's snapshot, and a not-before time per sticker, would end both.
+- **The naming service's engine is a string.** `Engine` branches on `"ollama"` in `ask` and in `is_loaded`, its four settings travel as separate arguments, and `config.engine_settings` returns a dict. The defaults (`gemma4:26b`, the Ollama address, `10000`) are stated in `config.py`, in `setup.sh` and in the tool's README. Flagged by `/code-review` and `/simplify` on step 7. A class per engine and one settings type would end the first three. No Python could run in the session that wrote the tool, so no refactor was made that its tests could not confirm.
+- **The switch is per device.** It is kept in `PreferencesDataStore` and cleared at sign-out. A second phone asks nothing until it is switched on there too. A name that the first phone fetched reaches the second only through its own fetch, because no pack manifest carries what was found.
+
+**Why we haven't fixed it.** The user base is closed, and the plan accepts the first two as open risks (`docs/plans/sticker-manager-and-names.md`, risks 4 and 5). A column for `skipped` is a Room bump, which empties the library on every phone. A delayed work of its own for the day-long wait is a second unique work with its own replace rules.
+
+**When to revisit.** Before the app is opened to users who are not trusted: then a request needs a check that the asker holds the sticker, which only a Cloud Function can make. Add the `skipped` column with the next Room bump that happens for another reason. Step 8 of the plan reviews this path.
+
+---
+
 ### Calls — the known limits
 
 **The smell.**

@@ -46,6 +46,15 @@ Tests are the primary feedback loop during implementation, not a step appended a
 - `calls.test.js` has two groups. "the app" holds every write `FirestoreCallSource` makes, in each state the call can be in, including the orders older app versions used. These must pass. "the rules refuse" holds the abuses, which must fail.
 - The calls rules list every field a call document may hold. A new field, or a write in a new state, needs the rule changed and a test here. Deploy the rules (`firebase deploy --only firestore:rules`) before the app version that writes it ships, or its writes are refused.
 
+#### Sticker naming service tests
+
+`tools/sticker-namer/` is a Python tool with its own tests. It is separate from the Gradle build, and `./gradlew test` does not run it.
+
+- Run them with `python -m pytest tools/sticker-namer`, in an environment with `tools/sticker-namer/requirements-dev.txt` installed.
+- The tests use a fake engine and fake Firestore and Storage clients. They need no key, no network and no graphics card.
+- `.github/workflows/sticker-namer.yml` runs them for each push to main or pull request that changes the folder.
+- `answer.py` repeats the limits of `StickerNameAnswer`. A change of a limit in the app needs the same change there, and a test on both sides.
+
 ---
 
 ## Continuous feedback loop

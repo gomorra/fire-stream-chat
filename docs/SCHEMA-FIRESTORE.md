@@ -91,8 +91,23 @@ stickerPacks/{packId}                          # one sticker pack's manifest; id
 ├── importKey                                  # percent-encoded: its parts are joined by U+0000
 ├── sortOrder, createdAt, updatedAt            # updatedAt decides which side is newer on a restore
 ├── shownInRow                                 # own thumbnail in the picker's row; absent in an older manifest, then derived from importKey
+├── autoNameAllowed                            # whether the naming service may be asked about the pack's stickers; absent in an older manifest, then derived from importKey
 └── stickers[]                                 # in pack order, at most 4000
-    └── { id, format, width, height, animated, emojis[] }   # id = SHA-256 of the file; no url
+    └── { id, format, width, height, animated, emojis[], names[], autoNameAllowed }
+                                               # id = SHA-256 of the file; no url. names: at most 8 of 40 characters.
+                                               # names and autoNameAllowed are absent in an older manifest.
+                                               # What the naming service found is not in a manifest.
+
+stickerNames/{stickerId}                       # one sticker's automatic name; id = SHA-256 of the sticker's file
+├── status                                     # "pending" (a request) | "done" (answered) | "skipped" (the service cannot name it)
+├── format                                     # the sticker's format, "WEBP". The service reads stickers/<id>.<ext> by it
+├── requestedAt                                # server time of the request
+├── nameEn, nameDe                             # done only: at most 80 characters each
+├── words[]                                    # done only: search words in both languages, at most 16 of 40 characters
+├── text                                       # done only: the text on the sticker, at most 128 characters, or ""
+├── emojis[]                                   # done only: at most 3
+├── model, namedAt                             # done only: written by the service, not read by the app
+└── reason                                     # skipped only
 ```
 
 ### Realtime Database
@@ -117,6 +132,7 @@ The RTDB presence path uses the `.info/connected` pattern: on connect, set `isOn
 - **Subcollection isolation**: `blockedUsers`, `messages`, `items`, `history`, `callerCandidates`/`calleeCandidates` are subcollections — they don't appear in parent document reads.
 - **A call document holds only the fields `firestore.rules` lists.** Only the caller and the callee read a call or its ICE candidates. An update may change only `status`, `endReason`, `endedAt`, `offer` and `answer`. Only the caller writes `offer` and `callerCandidates`, and only the callee writes `answer` and `calleeCandidates`. The status only moves forward: `ringing`, then `answered` or `declined`, then `ended`. A new field needs a rules change, a test in `firestore-rules-tests/`, and a rules deploy before the app version that writes it ships.
 - **A sticker pack manifest is a backup and a share at once.** `stickerPacks/{packId}` is written by `StickerSyncWorker` for every pack of its owner, the favourites and the loose stickers included. Any signed-in user may `get` one by id, which is how **View pack** reads the pack a received sticker names. Only the owner may list or write (`firestore.rules`). A manifest names its stickers by hash and holds no url: a file is fetched from the Storage object `stickers/<id>.<ext>` and checked against that hash.
+- **A sticker's automatic name belongs to the sticker, not to a user.** `stickerNames/{stickerId}` is one document per sticker file. A phone asks by creating it with `status: "pending"`, `format` and `requestedAt`, and nothing else: no user, no pack, nothing a person typed. The naming service answers with the Admin SDK. Every phone that holds the sticker reads the same answer, so a sticker is named once. A phone reads one document at a time and looks before it asks (`StickerNameSync`). `firestore.rules` allows a signed-in user a `get` and that one `create`. It refuses every `list`, because a sticker id is all it takes to fetch the sticker's file, and every `update` and `delete`, so no client can forge an answer. The app checks an answer before it stores it (`StickerNameAnswer`): one field over a limit drops all of it. Tests: `firestore-rules-tests/stickerNames.test.js`.
 
 ---
 

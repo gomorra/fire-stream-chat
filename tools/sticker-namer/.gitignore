@@ -1,0 +1,11 @@
+# The virtual environment that setup.sh creates.
+.venv/
+venv/
+__pycache__/
+.pytest_cache/
+
+# A key or a settings file never belongs here. Both live in ~/.config/firestream-sticker-namer/.
+*.json
+env
+.env
+*.env

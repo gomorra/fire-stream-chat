@@ -9,6 +9,7 @@ import com.firestream.chat.data.remote.source.RemoteSticker
 import com.firestream.chat.data.remote.source.RemoteStickerPack
 import com.firestream.chat.data.remote.source.StickerPackChanges
 import com.firestream.chat.data.remote.source.StickerPackSource
+import com.firestream.chat.data.worker.StickerNameScheduler
 import com.firestream.chat.data.worker.StickerSyncScheduler
 import io.mockk.coEvery
 import io.mockk.coVerify
@@ -47,9 +48,10 @@ class StickerLibrarySyncTest {
     private val authSource = mockk<AuthSource> { every { currentUserId } returns "uid1" }
     private val scheduler = mockk<StickerSyncScheduler>(relaxed = true)
     private val preferences = mockk<PreferencesDataStore>(relaxed = true)
+    private val nameScheduler = mockk<StickerNameScheduler>(relaxed = true)
 
     private fun TestScope.sync(appScope: CoroutineScope) =
-        StickerLibrarySync(stickerDao, packSource, authSource, scheduler, preferences, appScope)
+        StickerLibrarySync(stickerDao, packSource, authSource, scheduler, nameScheduler, preferences, appScope)
 
     /** A scope on the test's dispatcher that the test cancels itself: the sharing coroutine never completes. */
     private fun TestScope.appScope() = CoroutineScope(UnconfinedTestDispatcher(testScheduler) + SupervisorJob())

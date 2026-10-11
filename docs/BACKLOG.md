@@ -38,6 +38,84 @@ Firestore questions. Nothing ran on a device. Check it by upgrading over an inst
 6. Delete a chat that the other person then writes into again. Its history comes back whole.
 7. Read the reads per day in the Firebase console before and after the update.
 
+### The sticker naming service on the PC (2026-10-11)
+
+`docs/plans/sticker-manager-and-names.md` step 7, `tools/sticker-namer/`. **No line of it has run,
+and neither have its tests.** The first stage of `setup.sh` runs the tests, and
+`.github/workflows/sticker-namer.yml` runs them on the push.
+1. `bash tools/sticker-namer/setup.sh`, stage 1: the two pinned packages install on this PC's
+   Python, and the tests pass. A failure there is a fault in the tool.
+2. `evaluate.py` on a folder of about 40 stickers, with `gemma4:26b` and `gemma4:12b`. Neither request
+   body in `engine.py` has been sent to an engine. Check that thinking is off (`think: false` for Ollama, `chat_template_kwargs` for
+   llama.cpp) and that an answer comes back as the six fields.
+3. The service account has the two roles and no other. `firebase_store.py` reads a file and writes
+   an answer with them. No test covers that file.
+4. One sticker named end to end, as the last stage of the wizard asks. A German and an English
+   search find it.
+5. With a game on the graphics card, the log says the card is busy, and names arrive after the game
+   ends. While a batch runs, `nvidia-smi` shows the model, and it leaves about two minutes after
+   the last sticker.
+6. With Ollama stopped, requests stay `pending`, and they are answered after it starts again.
+   With `MODEL` set to a model Ollama does not have, requests stay `pending` too, and none is
+   answered `skipped`.
+7. `systemctl --user stop sticker-namer` in the middle of a batch, then `start`: the rest is named,
+   and no document is written twice.
+8. A reboot: the unit starts with the session, also before the network is up.
+
+### Automatic sticker names (2026-10-11)
+
+`docs/plans/sticker-manager-and-names.md` step 6. JVM and Robolectric tests cover who is asked for,
+the answer check, the worker's verdicts, the switch with its notice and the document shape. Nothing
+ran on a device, and the rules tests ran only in CI. Items 4 to 8 need the naming service of step 7.
+1. **Before the rules are deployed:** the manager's *Packs* tab starts with the row *Name my
+   stickers automatically*, off. Switch it on. The notice shows first, and *Switch on* switches it
+   on. A moment later the row says that naming is not available. The switch stays on, and nothing
+   else in the manager changes.
+2. Deploy `firestore.rules`. Open the manager again: the row says *On*.
+3. **Before switching on with the real library:** look for stickers you made in the app before
+   1.43 and moved out of *My stickers* before the update. The backup of that time does not say
+   they were made, so they read as open. Select them → **⋮** → *Do not name automatically*.
+4. With the switch on, `stickerNames/` in the Firestore console gets one document per WebP sticker
+   whose file is in Storage, with `status`, `format` and `requestedAt` and nothing else. A made
+   sticker, a Lottie sticker and a sticker of a pack with *Name automatically* off get none.
+5. Switch off, import new stickers: no new document. Switch on again: they are asked for.
+6. With the service running, names arrive within minutes of opening the manager. The search finds
+   a sticker by its German and its English name. *All stickers* → *Named automatically* shows
+   them, and *No name* shows the rest.
+7. Edit sheet of a named sticker: *Found automatically* lists what came back. *Use as mine* adds
+   the names as chips, *Save* keeps them, and the sticker gets no new request afterwards.
+8. Second phone, same account, switch on: it creates no second document for a sticker the first
+   phone asked for, and shows the same names.
+9. Select a made sticker → *Name now*. The notice names its pack. Switch *Name automatically* on in
+   that pack's menu: this one sticker is asked for, and the other made stickers of the pack are not.
+10. Sign out and in again: the switch is off.
+11. A debug build opens the manager and the pack menu without a crash. Only a device runs the dex
+    verifier (`docs/GOTCHAS.md`, the composable parameter ceiling).
+
+### Sticker names and the text search (2026-10-11)
+
+`docs/plans/sticker-manager-and-names.md` step 5. JVM and Robolectric tests cover the search, the
+limits, the manifest, the restore rule and the chips. Nothing ran on a device.
+1. Install over the previous build. The sticker library is empty for a moment and comes back from
+   the backup, with every pack, its order and its thumbnail switch.
+2. Sticker maker: *Add names* sits beside *Add emoji* and opens a field. Each name becomes a chip,
+   the keyboard's Done adds one, and the field stays for the next. The keyboard does not cover the
+   field. Save the sticker.
+3. Stickers tab → search: the start of a word of that name finds the sticker, in capitals or not.
+   A name with an umlaut is found without it, and *ß* by *ss*. A pack's name finds its stickers.
+   *cat* still finds stickers tagged with a cat emoji, after those found by name.
+4. Manager → *All stickers*: the same search, under the pack titles. Long-press one sticker →
+   **⋮** → *Edit names and emojis*. The sheet shows the sticker and its chips. Add a name and an
+   emoji, remove one, *Save*. With two stickers selected the entry is not offered.
+5. The edit sheet with the keyboard open: the field and *Save* stay reachable, and the emoji
+   picker opens over the sheet and closes back to it.
+6. Second phone, same account: the names typed on the first phone arrive, and the search finds
+   the sticker there.
+7. Second account: *View pack* on a sticker of a named pack, *Add pack*. The owner's names came
+   along.
+8. A debug build opens the maker and the edit sheet without a crash. Only a device runs the dex
+   verifier (`docs/GOTCHAS.md`, the composable parameter ceiling).
+
 ### The sticker manager's *All stickers* tab and the new-only WhatsApp import (2026-10-10)
 
 `docs/plans/sticker-manager-and-names.md` step 4. JVM tests cover the selection, its actions, the

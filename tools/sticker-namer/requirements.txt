@@ -1,0 +1,3 @@
+# What the service runs with. Pinned, so an update is a choice.
+firebase-admin==7.1.0
+Pillow==12.0.0

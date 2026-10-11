@@ -54,6 +54,7 @@ class StickerSyncWorkerTest {
     private val objectSource = mockk<StickerObjectSource>()
     private val packSource = mockk<StickerPackSource>()
     private val authSource = mockk<AuthSource>()
+    private val nameScheduler = mockk<StickerNameScheduler>(relaxed = true)
 
     /** The neutral rules only — no backend here. */
     private val classifier = object : SendErrorClassifier {
@@ -97,6 +98,7 @@ class StickerSyncWorkerTest {
                     workerParameters: WorkerParameters,
                 ): ListenableWorker = StickerSyncWorker(
                     appContext, workerParameters, dao, files, StickerUploads(dao, files, objectSource), packSource, authSource, classifier,
+                    nameScheduler,
                 )
             })
             .build()
@@ -135,6 +137,20 @@ class StickerSyncWorkerTest {
         assertEquals(listOf(first, second), manifest.stickers.map { it.id })
         assertEquals(StickerSyncState.SYNCED.name, syncState("cats"))
         assertEquals("https://storage.example/stickers/$first.webp", dao.getSticker(first)!!.remoteUrl)
+    }
+
+    @Test
+    fun `a run that put a file on the backend asks for a naming run, and one that uploaded nothing does not`() = runTest {
+        val first = imported(1)
+        pendingPack("cats", first)
+
+        worker().doWork()
+        coVerify(exactly = 1) { nameScheduler.runIfWanted() }
+
+        // The file is there by now, so the second backup only writes the manifest.
+        dao.touchPack("cats", now = 9L)
+        worker().doWork()
+        coVerify(exactly = 1) { nameScheduler.runIfWanted() }
     }
 
     @Test

@@ -2,7 +2,12 @@ package com.firestream.chat.data.remote.source
 
 import kotlinx.coroutines.flow.Flow
 
-/** One sticker as a pack manifest lists it. It names the file by its hash and holds no url. */
+/**
+ * One sticker as a pack manifest lists it. It names the file by its hash and holds no url.
+ *
+ * [names] and [autoNameAllowed] are null for an entry without the field, which
+ * an older build wrote. What the naming service found is not in a manifest.
+ */
 data class RemoteSticker(
     val id: String,
     val format: String,
@@ -10,6 +15,8 @@ data class RemoteSticker(
     val height: Int,
     val isAnimated: Boolean,
     val emojis: List<String>,
+    val names: List<String>? = null,
+    val autoNameAllowed: Boolean? = null,
 )
 
 /**
@@ -18,7 +25,8 @@ data class RemoteSticker(
  * Everything in one that another user wrote is that user's claim. `StickerManifest`
  * checks it before a row is built from it.
  *
- * [shownInRow] is null for a manifest without the field, which an older build wrote.
+ * [shownInRow] and [autoNameAllowed] are null for a manifest without the field,
+ * which an older build wrote.
  */
 data class RemoteStickerPack(
     val id: String,
@@ -33,6 +41,7 @@ data class RemoteStickerPack(
     val updatedAt: Long,
     val stickers: List<RemoteSticker>,
     val shownInRow: Boolean? = null,
+    val autoNameAllowed: Boolean? = null,
 )
 
 /** What changed among one user's packs since the last emission: packs added or modified, and the ids of packs deleted. */

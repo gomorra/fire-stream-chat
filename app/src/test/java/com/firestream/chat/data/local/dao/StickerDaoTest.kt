@@ -5,8 +5,10 @@ import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import com.firestream.chat.data.local.AppDatabase
 import com.firestream.chat.data.local.entity.StickerEntity
+import com.firestream.chat.data.local.entity.StickerNameCandidate
 import com.firestream.chat.data.local.entity.StickerPackEntity
 import com.firestream.chat.data.local.entity.StickerSyncState
+import com.firestream.chat.domain.model.StickerAutoName
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
 import org.junit.After
@@ -106,6 +108,84 @@ class StickerDaoTest {
         assertEquals(sticker("bare", listOf("🔥")), rows["bare"])
         assertEquals(sticker("tagged", listOf("😀")), rows["tagged"])
         assertEquals(sticker("new", listOf("🌱")), rows["new"])
+    }
+
+    @Test
+    fun `a known sticker gains names only when it had none, and keeps what was found automatically`() = runTest {
+        val found = sticker("bare").copy(autoNameEn = "Sleepy bear", autoWords = listOf("tired"), nameRequestedAt = 7L)
+        dao.insertStickers(listOf(found, sticker("named").copy(names = listOf("Mine"), autoNameAllowed = false)))
+
+        dao.mergeStickers(
+            listOf(
+                sticker("bare").copy(names = listOf("Theirs")),
+                sticker("named").copy(names = listOf("Theirs"), autoNameAllowed = true),
+            )
+        )
+
+        val rows = dao.getStickers(listOf("bare", "named")).associateBy { it.id }
+        assertEquals(found.copy(names = listOf("Theirs")), rows["bare"])
+        assertEquals(sticker("named").copy(names = listOf("Mine"), autoNameAllowed = false), rows["named"])
+    }
+
+    @Test
+    fun `an edit of a sticker's words marks every pack that holds it, and no other`() = runTest {
+        dao.insertStickers(listOf(sticker("a", listOf("😀")).copy(autoNameDe = "Bär"), sticker("b")))
+        listOf("one", "two", "other").forEach { dao.insertPack(pack(it)) }
+        dao.addToPack("one", listOf("a", "b"), atFront = false, now = 2L)
+        dao.addToPack("two", listOf("a"), atFront = false, now = 2L)
+        dao.addToPack("other", listOf("b"), atFront = false, now = 2L)
+        listOf("one", "two", "other").forEach { dao.markSynced(it, dao.getPack(it)!!.updatedAt) }
+
+        assertEquals(true, dao.setStickerWords("a", listOf("🔥"), listOf("Fire"), now = 9L))
+
+        assertEquals(sticker("a", listOf("🔥")).copy(names = listOf("Fire"), autoNameDe = "Bär"), dao.getSticker("a"))
+        assertEquals(listOf("PENDING", "PENDING", "SYNCED"), listOf("one", "two", "other").map { syncState(it) })
+        assertEquals(listOf(9L, 9L), listOf("one", "two").map { dao.getPack(it)!!.updatedAt })
+    }
+
+    @Test
+    fun `an edit that changes nothing marks no pack, and one of an unknown sticker writes nothing`() = runTest {
+        dao.insertStickers(listOf(sticker("a", listOf("😀"))))
+        dao.insertPack(pack("one"))
+        dao.addToPack("one", listOf("a"), atFront = false, now = 2L)
+        dao.markSynced("one", dao.getPack("one")!!.updatedAt)
+
+        assertEquals(true, dao.setStickerWords("a", listOf("😀"), emptyList(), now = 9L))
+        assertEquals(false, dao.setStickerWords("ghost", listOf("😀"), listOf("Ghost"), now = 9L))
+
+        assertEquals("SYNCED", syncState("one"))
+        assertNull(dao.getSticker("ghost"))
+    }
+
+    @Test
+    fun `a newer manifest of the same pack brings the words typed on another device, when it states them`() = runTest {
+        val local = sticker("a", listOf("😀")).copy(names = listOf("Old"), autoNameEn = "Found")
+        dao.insertStickers(listOf(local))
+        dao.insertPack(pack("p"))
+        dao.addToPack("p", listOf("a"), atFront = false, now = 2L)
+        val edited = sticker("a", listOf("🔥")).copy(names = listOf("New"), autoNameAllowed = false)
+
+        // A manifest of an older build lists the sticker without names. It must not wipe them.
+        dao.applyRemotePack(pack("p").copy(updatedAt = 50L), listOf(sticker("a")), now = 60L, statesWords = false)
+        assertEquals(local, dao.getSticker("a"))
+
+        dao.applyRemotePack(pack("p").copy(updatedAt = 70L), listOf(edited), now = 80L, statesWords = true)
+        assertEquals(local.copy(emojis = listOf("🔥"), names = listOf("New"), autoNameAllowed = false), dao.getSticker("a"))
+
+        // Not newer than the row: nothing is taken.
+        dao.applyRemotePack(pack("p").copy(updatedAt = 70L), listOf(sticker("a")), now = 90L, statesWords = true)
+        assertEquals(listOf("New"), dao.getSticker("a")!!.names)
+    }
+
+    @Test
+    fun `a manifest that is new to the library leaves the words of a known sticker alone`() = runTest {
+        val local = sticker("a", listOf("😀")).copy(names = listOf("Mine"))
+        dao.insertStickers(listOf(local))
+
+        dao.applyRemotePack(pack("fresh"), listOf(sticker("a", listOf("🔥")).copy(names = listOf("Theirs"))), now = 5L, statesWords = true)
+
+        assertEquals(local, dao.getSticker("a"))
+        assertEquals(listOf("a"), dao.getStickerIds("fresh"))
     }
 
     @Test
@@ -524,5 +604,158 @@ class StickerDaoTest {
             assertEquals(id, 7L, dao.getPack(id)!!.updatedAt)
         }
         assertEquals("a write that changed nothing marks nothing", StickerSyncState.SYNCED.name, syncState("idle"))
+    }
+
+    // --- Automatic names ---
+
+    /** A sticker the naming service may be asked about: a WebP whose file the backend holds. */
+    private fun nameable(id: String) = sticker(id).copy(remoteUrl = "https://storage.example/$id.webp")
+
+    @Test
+    fun `the naming candidates are open WebP files on the backend without a name, in a pack and in no closed pack`() = runTest {
+        dao.insertPack(pack("open"))
+        dao.insertPack(pack("closed").copy(autoNameAllowed = false))
+        dao.insertStickers(
+            listOf(
+                nameable("asked").copy(createdAt = 2L, nameRequestedAt = 9L),
+                nameable("older").copy(createdAt = 1L),
+                nameable("closed itself").copy(autoNameAllowed = false),
+                nameable("named").copy(autoNameDe = "Müder Bär"),
+                nameable("named by words").copy(autoWords = listOf("tired")),
+                nameable("named by an emoji").copy(autoEmojis = listOf("😴")),
+                nameable("named by its text").copy(autoText = "Gute Nacht"),
+                nameable("in a closed pack too"),
+                nameable("in a closed pack only"),
+                sticker("not uploaded"),
+                nameable("lottie").copy(format = "LOTTIE"),
+                nameable("in no pack"),
+            )
+        )
+        dao.addToPack(
+            "open",
+            listOf(
+                "asked", "older", "closed itself", "in a closed pack too", "not uploaded", "lottie",
+                "named", "named by words", "named by an emoji", "named by its text",
+            ),
+            atFront = false,
+            now = 2L,
+        )
+        dao.addToPack("closed", listOf("in a closed pack too", "in a closed pack only"), atFront = false, now = 2L)
+
+        assertEquals(
+            listOf(StickerNameCandidate("older", "WEBP", null), StickerNameCandidate("asked", "WEBP", 9L)),
+            dao.getNameCandidates(),
+        )
+
+        // A deleted pack holds nothing, so it closes nothing.
+        dao.deletePack("closed", now = 3L)
+        assertEquals(setOf("older", "asked", "in a closed pack too"), dao.getNameCandidates().mapTo(HashSet()) { it.id })
+
+        // What an answer writes takes the sticker out, and an answer that held nothing would not.
+        dao.setAutoName("older", StickerAutoName(nameEn = "Sleepy bear"))
+        dao.setAutoName("asked", StickerAutoName())
+        assertEquals(setOf("asked", "in a closed pack too"), dao.getNameCandidates().mapTo(HashSet()) { it.id })
+
+        // A synced pack's files are on the backend, also for a row that has no url: a restored one.
+        dao.markSynced("open", dao.getPack("open")!!.updatedAt)
+        assertEquals(
+            setOf("asked", "in a closed pack too", "not uploaded"),
+            dao.getNameCandidates().mapTo(HashSet()) { it.id },
+        )
+    }
+
+    @Test
+    fun `a sticker that leaves a pack left out of naming stays out, by a move, a removal, a merge and a delete`() = runTest {
+        listOf("closed", "gone", "open", "other").forEach { dao.insertPack(pack(it)) }
+        dao.setPackAutoNameAllowed("closed", allowed = false, now = 2L)
+        dao.setPackAutoNameAllowed("gone", allowed = false, now = 2L)
+        dao.insertStickers(listOf("moved", "removed", "merged", "kept", "free", "survivor").map { sticker(it) })
+        dao.addToPack("closed", listOf("moved", "removed", "merged", "kept"), atFront = false, now = 2L)
+        dao.addToPack("gone", listOf("survivor"), atFront = false, now = 2L)
+        dao.addToPack("open", listOf("free"), atFront = false, now = 2L)
+        dao.addToPack("other", listOf("removed", "survivor"), atFront = false, now = 2L)
+        db.openHelper.writableDatabase.execSQL("UPDATE sticker_packs SET syncState = 'SYNCED', updatedAt = 1")
+        suspend fun allowed(vararg ids: String) = ids.map { dao.getSticker(it)!!.autoNameAllowed }
+
+        dao.moveBetweenPacks("closed", "open", listOf("moved"), now = 7L)
+        dao.removeFromPack("closed", listOf("removed"), now = 7L)
+        // Leaving an open pack closes nothing.
+        dao.moveBetweenPacks("open", "other", listOf("free"), now = 7L)
+
+        assertEquals(listOf(false, false, true, true), allowed("moved", "removed", "kept", "free"))
+        // The manifest of every pack that still holds one carries its switch.
+        assertEquals(StickerSyncState.PENDING.name, syncState("other"))
+
+        dao.deletePackLocally("gone", keepTombstone = true, now = 8L)
+        dao.mergePacks(listOf("open", "closed"), "Merged", keepTombstones = true, now = 9L)
+
+        assertEquals(listOf(false, false, false), allowed("survivor", "merged", "kept"))
+        assertEquals("the pack that took them in stays open for its own", true, dao.getPack("open")!!.autoNameAllowed)
+        assertEquals(listOf(true), allowed("free"))
+    }
+
+    @Test
+    fun `an automatic name fills its own columns, keeps a person's words and marks no pack`() = runTest {
+        dao.insertPack(pack("p"))
+        dao.insertStickers(listOf(sticker("a", emojis = listOf("😺")).copy(names = listOf("Mine"), nameRequestedAt = 4L)))
+        dao.addToPack("p", listOf("a"), atFront = false, now = 2L)
+        dao.markSynced("p", dao.getPack("p")!!.updatedAt)
+        val before = dao.getPack("p")!!
+        val found = StickerAutoName("Sleepy bear", "Müder Bär", listOf("tired"), "Gute Nacht", listOf("😴"))
+
+        assertEquals(true, dao.setAutoName("a", found))
+        assertEquals(false, dao.setAutoName("unknown", found))
+
+        val row = dao.getSticker("a")!!
+        assertEquals(found, row.autoName)
+        assertEquals(listOf("😺") to listOf("Mine"), row.emojis to row.names)
+        assertEquals(4L, row.nameRequestedAt)
+        assertEquals(before, dao.getPack("p"))
+    }
+
+    @Test
+    fun `the time of the last look for a name marks no pack`() = runTest {
+        dao.insertPack(pack("p"))
+        dao.insertStickers(listOf(sticker("a")))
+        dao.addToPack("p", listOf("a"), atFront = false, now = 2L)
+        dao.markSynced("p", dao.getPack("p")!!.updatedAt)
+
+        dao.setNameRequestedAt("a", 9L)
+
+        assertEquals(9L, dao.getSticker("a")!!.nameRequestedAt)
+        assertEquals(StickerSyncState.SYNCED.name, syncState("p"))
+    }
+
+    @Test
+    fun `closing stickers to naming marks the packs that hold one that changed, and no other`() = runTest {
+        listOf("holds a", "holds b", "other").forEach { dao.insertPack(pack(it)) }
+        dao.insertStickers(listOf(sticker("a"), sticker("b").copy(autoNameAllowed = false), sticker("c")))
+        dao.addToPack("holds a", listOf("a"), atFront = false, now = 2L)
+        dao.addToPack("holds b", listOf("b"), atFront = false, now = 2L)
+        dao.addToPack("other", listOf("c"), atFront = false, now = 2L)
+        db.openHelper.writableDatabase.execSQL("UPDATE sticker_packs SET syncState = 'SYNCED', updatedAt = 1")
+
+        dao.setStickersAutoNameAllowed(listOf("a", "b", "unknown"), allowed = false, now = 7L)
+
+        assertEquals(listOf(false, false, true), listOf("a", "b", "c").map { dao.getSticker(it)!!.autoNameAllowed })
+        assertEquals(StickerSyncState.PENDING.name, syncState("holds a"))
+        assertEquals("b was closed already", StickerSyncState.SYNCED.name, syncState("holds b"))
+        assertEquals(StickerSyncState.SYNCED.name, syncState("other"))
+
+        dao.setStickersAutoNameAllowed(listOf("b"), allowed = true, now = 8L)
+        assertEquals(true, dao.getSticker("b")!!.autoNameAllowed)
+        assertEquals(StickerSyncState.PENDING.name, syncState("holds b"))
+    }
+
+    @Test
+    fun `a pack's naming switch marks the pack, and the value it has marks nothing`() = runTest {
+        dao.insertPack(pack("p"))
+
+        dao.setPackAutoNameAllowed("p", allowed = true, now = 7L)
+        assertEquals(StickerSyncState.SYNCED.name, syncState("p"))
+
+        dao.setPackAutoNameAllowed("p", allowed = false, now = 7L)
+        assertEquals(false, dao.getPack("p")!!.autoNameAllowed)
+        assertEquals(StickerSyncState.PENDING.name to 7L, syncState("p") to dao.getPack("p")!!.updatedAt)
     }
 }

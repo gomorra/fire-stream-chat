@@ -35,10 +35,15 @@ Every `AppDatabase` version is reached by destructive migration, except 18 → 1
 | `sticker_packs.kind` | `USER`, `INSTALLED`, `FAVOURITES` or `SAVED` |
 | `sticker_packs.sortOrder` | The pack's place in the user's order |
 | `sticker_packs.shownInRow` | Whether the pack has its own thumbnail in the picker's row. A new pack gets `false` when a WhatsApp import made it (import key `wa:…` or `loose:WhatsApp`) and `true` otherwise (`StickerPackEntity.shownInRowByDefault`). The owner can switch it for a `USER` or `INSTALLED` pack. Always `true` for `FAVOURITES` and `SAVED` |
+| `sticker_packs.autoNameAllowed` | Whether the naming service may be asked about the pack's stickers. `false` for a pack the sticker maker created. A manifest without the field is read by `StickerPackEntity.autoNameAllowedByDefault`, which goes by the import key |
 | `sticker_packs.syncState` | `PENDING`, `SYNCED` or `DELETED`. Every `StickerDao` write that changes a pack or its items sets `PENDING`. `StickerSyncWorker` uploads a `PENDING` pack and marks it `SYNCED`. `DELETED` is a tombstone: the pack is gone from the library, and the row stays until the worker has deleted the backend's copy |
 | `sticker_packs.updatedAt` | Moves strictly forward on every change, even on two changes in one millisecond. The worker marks a pack `SYNCED` only while this is still the value it uploaded, and a restore applies a backend copy only when that copy's value is later |
 | `sticker_pack_items.position` | Order inside the pack, ascending. A favourite is added in front, so positions can be negative |
 | `stickers.remoteUrl` | Where the backend holds the file. `null` until this device has uploaded the sticker or found it there (`StickerObjectSource.ensureUploaded`). Never taken from a received message |
+| `stickers.emojis`, `stickers.names` | The words of a person: the emoji tags from the file or an edit, and up to eight typed names of at most 40 characters (`StickerWords`). `StickerDao.setStickerWords` writes both and marks every pack that holds the sticker `PENDING`, because a manifest lists them |
+| `stickers.autoNameEn`, `autoNameDe`, `autoWords`, `autoText`, `autoEmojis` | What the naming service found: a name in English and in German, search words, the text on the sticker, emojis. `null` or an empty list until an answer is stored. No edit by a person writes them, and no manifest carries them |
+| `stickers.autoNameAllowed` | `false` for a sticker the naming service must not be asked about. A sticker made in the app starts with `false`. A sticker that leaves a pack whose `autoNameAllowed` is `false`, by a move, a removal, a merge or the pack's delete, is set to `false` too (`StickerDao.keepOutOfNaming`) |
+| `stickers.nameRequestedAt` | When this device last asked for a name, or last found a record on the backend that holds no usable answer. `null` before the first look. `StickerNameSync` asks again a day after it at the earliest. No pack is marked when it changes |
 
 **The stickers deleted from the library are not in Room.** Their ids are a string set in `PreferencesDataStore` (`deleted_sticker_ids`), on this device only. A version bump empties the tables, and this list has to outlive it. A sticker is on the list when `deleteStickers`, `deletePack` or `removeStickers` left it in no pack. Its `stickers` row and its file stay. A WhatsApp import leaves a listed sticker out, and adding it on purpose takes it off the list. Sign-out clears the list.
 
@@ -165,6 +170,14 @@ erDiagram
         String emojisJSON
         Long createdAt
         String remoteUrl
+        String namesJSON
+        String autoNameEn
+        String autoNameDe
+        String autoWordsJSON
+        String autoText
+        String autoEmojisJSON
+        Boolean autoNameAllowed
+        Long nameRequestedAt
     }
 
     sticker_packs {
@@ -179,6 +192,7 @@ erDiagram
         Long updatedAt
         String syncState
         Boolean shownInRow
+        Boolean autoNameAllowed
     }
 
     sticker_pack_items {

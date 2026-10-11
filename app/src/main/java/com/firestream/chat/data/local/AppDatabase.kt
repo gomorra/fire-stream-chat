@@ -52,7 +52,7 @@ import com.firestream.chat.data.local.entity.UserEntity
         StickerPackItemEntity::class,
         MessageSyncStateEntity::class
     ],
-    version = 34,
+    version = 35,
     exportSchema = false
 )
 @TypeConverters(Converters::class)

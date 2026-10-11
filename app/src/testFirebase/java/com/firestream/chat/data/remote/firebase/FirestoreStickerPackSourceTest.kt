@@ -94,6 +94,34 @@ class FirestoreStickerPackSourceTest {
         assertNull(stickerPackFromDocument("p1", mapOf("ownerId" to "uid1", "shownInRow" to "yes"))!!.shownInRow)
     }
 
+    @Test
+    fun `names and the automatic-naming switches are written, and read as unknown from a document without them`() {
+        val named = pack.copy(
+            autoNameAllowed = false,
+            stickers = listOf(
+                RemoteSticker("a".repeat(64), "WEBP", 512, 256, true, listOf("😺"), names = listOf("Grumpy cat"), autoNameAllowed = false),
+                RemoteSticker("b".repeat(64), "WEBP", 96, 96, false, emptyList(), names = emptyList(), autoNameAllowed = true),
+            ),
+        )
+
+        val written = stickerPackToDocument(named)
+
+        assertEquals(false, written["autoNameAllowed"])
+        assertEquals(named, stickerPackFromDocument("p1", asRead(written)))
+        val old = stickerPackFromDocument(
+            "p1",
+            mapOf("ownerId" to "uid1", "stickers" to listOf(mapOf("id" to "a".repeat(64), "names" to "Cat", "autoNameAllowed" to 1L))),
+        )!!
+        assertNull(old.autoNameAllowed)
+        assertEquals(listOf(null to null), old.stickers.map { it.names to it.autoNameAllowed })
+        // A list of the wrong things is a list without them.
+        val mixed = stickerPackFromDocument(
+            "p1",
+            mapOf("ownerId" to "uid1", "stickers" to listOf(mapOf("id" to "a".repeat(64), "names" to listOf("Cat", 3L)))),
+        )!!
+        assertEquals(listOf("Cat"), mixed.stickers.single().names)
+    }
+
     // The separator of an import key is U+0000, which a stored string does not carry.
     @Test
     fun `an import key is written without its control characters and read back with them`() {

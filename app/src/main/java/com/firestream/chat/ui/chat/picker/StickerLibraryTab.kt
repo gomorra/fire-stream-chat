@@ -162,8 +162,9 @@ internal fun stickerShelves(packs: List<StickerPack>, recents: List<Sticker>): L
  * Thumbnails are still. A grid of animated stickers would run one decoder per
  * cell.
  *
- * A search runs across every pack. [query] becomes emojis through the emoji
- * keyword table, and the stickers tagged with them are the results.
+ * A search runs across every pack (`StickerSearch.find`). It finds a sticker
+ * by its names, by what was found on it automatically, by its pack's name, and
+ * by the emojis the emoji keyword table gives for [query].
  *
  * When [online] is available, the pack row has an **Online** entry with
  * KLIPY's stickers, and a search shows KLIPY's results in a *More online*
@@ -211,7 +212,7 @@ internal fun StickerLibraryTab(
     val active = shelves.firstOrNull { it.key == activeKey } ?: shelves.firstOrNull()
     val searching = query.isNotBlank()
     val matches = remember(query, packs) {
-        if (searching) StickerSearch.byEmojis(packs, EmojiSearchData.searchEmojis(query) + query) else emptyList()
+        if (searching) StickerSearch.find(packs, query, EmojiSearchData::searchEmojis) { it.label() } else emptyList()
     }
     // A search is one section of results. A shelf brings its own.
     val sections = remember(matches, searching, active) {

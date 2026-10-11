@@ -26,6 +26,7 @@ import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * The backup of the sticker library: every pack whose state the backend does
@@ -47,6 +48,10 @@ import kotlinx.coroutines.withContext
  * in `Result.retry()`. A permanent one, such as rules that refuse the write,
  * ends it in `Result.failure()`. The pack then stays pending until the
  * scheduler is asked again.
+ *
+ * A run that uploaded a file asks [StickerNameScheduler] for a naming run at
+ * its end, whatever its verdict: the naming service reads a sticker from the
+ * backend, and that sticker can be asked for now.
  */
 @HiltWorker
 class StickerSyncWorker @AssistedInject constructor(
@@ -58,12 +63,23 @@ class StickerSyncWorker @AssistedInject constructor(
     private val packSource: StickerPackSource,
     private val authSource: AuthSource,
     private val errorClassifier: SendErrorClassifier,
+    private val nameScheduler: StickerNameScheduler,
 ) : CoroutineWorker(context, params) {
+
+    /** Whether this run put a file on the backend. Set from several uploads at once. */
+    private val uploadedFiles = AtomicBoolean(false)
 
     override suspend fun doWork(): Result {
         // Read once. A manifest is written as this user's, whoever is signed in by then,
         // and the rules refuse it for anyone else.
         val ownerId = authSource.currentUserId ?: return Result.success()
+        val result = sync(ownerId)
+        // The naming service reads a sticker's file from the backend, so a file that is there now can be asked for.
+        if (uploadedFiles.get()) nameScheduler.runIfWanted()
+        return result
+    }
+
+    private suspend fun sync(ownerId: String): Result {
         val failed = HashMap<String, SendFailure>()
         repeat(MAX_PASSES) {
             val unsynced = stickerDao.getUnsyncedPacks().filterNot { it.id in failed }
@@ -111,7 +127,12 @@ class StickerSyncWorker @AssistedInject constructor(
         stickers
             .filter { it.remoteUrl == null && StickerFiles.isValidId(it.id) }
             .filter { stickerFiles.fileFor(it.id, parseStickerFormat(it.format)).isFile }
-            .map { sticker -> async { permits.withPermit { stickerUploads.ensureUploaded(sticker.id) } } }
+            .map { sticker ->
+                async {
+                    permits.withPermit { stickerUploads.ensureUploaded(sticker.id) }
+                    uploadedFiles.set(true)
+                }
+            }
             .awaitAll()
     }
 

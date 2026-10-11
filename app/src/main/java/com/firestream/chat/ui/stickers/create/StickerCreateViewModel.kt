@@ -10,6 +10,7 @@ import com.firestream.chat.domain.model.StickerPack
 import com.firestream.chat.domain.model.StickerPackKind
 import com.firestream.chat.domain.repository.StickerRepository
 import com.firestream.chat.domain.util.StickerGeometry
+import com.firestream.chat.domain.util.StickerWords
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -29,6 +30,8 @@ data class StickerCreateUiState(
     val outline: Boolean = true,
     val crop: StickerCrop = StickerCrop(),
     val emojis: List<String> = emptyList(),
+    /** The names the sticker is found by in a search. */
+    val names: List<String> = emptyList(),
     /** The packs a made sticker can join: the user's own. */
     val packs: List<StickerPack> = emptyList(),
     /** The pack the sticker joins, or `null` for the pack named [newPackName]. */
@@ -50,8 +53,6 @@ data class StickerCreateUiState(
                 else -> draft.cutout
             }
         }
-
-    val canAddEmoji: Boolean get() = emojis.size < StickerDraft.MAX_EMOJIS
 
     val canSave: Boolean
         get() = image != null && !isSaving && !isPreparing && (packId != null || newPackName.isNotBlank())
@@ -120,11 +121,16 @@ class StickerCreateViewModel @Inject constructor(
         state.copy(crop = StickerGeometry.transformed(state.crop, zoom, panX, panY, image.width, image.height))
     }
 
-    fun addEmoji(emoji: String) = _uiState.update {
-        if (!it.canAddEmoji || emoji in it.emojis) it else it.copy(emojis = it.emojis + emoji)
-    }
+    /** Adds one emoji tag. A repeat, and one past the maker's limit, change nothing. */
+    fun addEmoji(emoji: String) =
+        _uiState.update { it.copy(emojis = StickerWords.withEmoji(it.emojis, emoji, StickerDraft.MAX_EMOJIS)) }
 
     fun removeEmoji(emoji: String) = _uiState.update { it.copy(emojis = it.emojis - emoji) }
+
+    /** Adds one name the sticker is found by. A blank one, a repeat, and one past the limit change nothing. */
+    fun addName(name: String) = _uiState.update { it.copy(names = StickerWords.withName(it.names, name)) }
+
+    fun removeName(name: String) = _uiState.update { it.copy(names = it.names - name) }
 
     /** [packId] is one of the user's packs, or `null` for a new one. */
     fun choosePack(packId: String?) {
@@ -140,7 +146,7 @@ class StickerCreateViewModel @Inject constructor(
         if (!state.canSave) return
         _uiState.update { it.copy(isSaving = true) }
         viewModelScope.launch {
-            stickerRepository.createSticker(image.path, state.crop, state.emojis, state.packId, state.newPackName)
+            stickerRepository.createSticker(image.path, state.crop, state.emojis, state.names, state.packId, state.newPackName)
                 .onSuccess { _uiState.update { it.copy(isSaving = false, isDone = true) } }
                 .onFailure { e -> _uiState.update { it.copy(isSaving = false, error = AppError.from(e)) } }
         }

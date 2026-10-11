@@ -1,7 +1,9 @@
 package com.firestream.chat.ui.stickers
 
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -12,6 +14,7 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -22,42 +25,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
-import com.firestream.chat.domain.model.Sticker
-import com.firestream.chat.domain.model.StickerPack
+import com.firestream.chat.domain.util.StickerNameFilter
 import com.firestream.chat.domain.util.StickerSearch
 import com.firestream.chat.ui.chat.picker.EmojiSearchData
-
-/** One pack's part of the grid of every sticker: the pack, and those of its stickers the grid shows. */
-internal data class PackSection(val pack: StickerPack, val stickers: List<Sticker>)
-
-/**
- * The grid of every sticker as sections, one per pack that has something to
- * show, in the user's pack order.
- *
- * A blank [query] shows every sticker. Otherwise a pack whose name holds the
- * query shows whole, and any other pack shows its stickers tagged with an
- * emoji the query names. [emojisFor] turns a word into emojis.
- *
- * A sticker that two packs hold is in both sections. The picker's search
- * returns it once, because a pick needs one pack. Here each is its own entry.
- */
-internal fun allStickerSections(
-    packs: List<StickerPack>,
-    query: String,
-    emojisFor: (String) -> List<String> = EmojiSearchData::searchEmojis,
-): List<PackSection> {
-    val words = query.trim()
-    if (words.isEmpty()) return packs.filter { it.stickers.isNotEmpty() }.map { PackSection(it, it.stickers) }
-    val isTagged = StickerSearch.taggedWith(emojisFor(words) + words)
-    return packs.mapNotNull { pack ->
-        val found = when {
-            pack.label().contains(words, ignoreCase = true) -> pack.stickers
-            isTagged != null -> pack.stickers.filter(isTagged)
-            else -> emptyList()
-        }
-        if (found.isEmpty()) null else PackSection(pack, found)
-    }
-}
 
 internal const val ALL_STICKERS_TAB_TAG = "all-stickers-tab"
 internal const val STICKER_SEARCH_TAG = "sticker-search"
@@ -68,17 +38,31 @@ internal fun stickerEntryTag(entry: StickerEntry): String = "sticker:${entry.pac
 /** Six cells in a row on a phone 360 dp wide. */
 private val SMALL_STICKER_CELL = 56.dp
 
-/** Every sticker of the library in one grid, under a search field. A long press starts a selection that can span packs. */
+/**
+ * Every sticker of the library in one grid, under a search field. A long press
+ * starts a selection that can span packs. The search is `StickerSearch.sections`:
+ * a sticker's names, what was found on it automatically, its emojis and its pack's name.
+ * The two chips under the field narrow the grid to the stickers nobody named,
+ * or to those the naming service named.
+ */
 @Composable
 internal fun AllStickersTab(uiState: StickerLibraryUiState, actions: StickerLibraryActions, modifier: Modifier = Modifier) {
-    val sections = remember(uiState.packs, uiState.query) { allStickerSections(uiState.packs, uiState.query) }
+    val sections = remember(uiState.packs, uiState.query, uiState.nameFilter) {
+        StickerSearch.sections(
+            packs = uiState.packs,
+            query = uiState.query,
+            emojisFor = EmojiSearchData::searchEmojis,
+            packName = { it.label() },
+            filter = uiState.nameFilter,
+        )
+    }
     val selected = uiState.selectedStickers
     Column(modifier = modifier.fillMaxSize().testTag(ALL_STICKERS_TAB_TAG)) {
         OutlinedTextField(
             value = uiState.query,
             onValueChange = actions.onSetQuery,
             singleLine = true,
-            placeholder = { Text("Search by emoji or pack") },
+            placeholder = { Text("Search by name, emoji or pack") },
             leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
             trailingIcon = {
                 if (uiState.query.isNotEmpty()) {
@@ -90,6 +74,21 @@ internal fun AllStickersTab(uiState: StickerLibraryUiState, actions: StickerLibr
             shape = MaterialTheme.shapes.extraLarge,
             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp).testTag(STICKER_SEARCH_TAG),
         )
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+        ) {
+            NameFilterChip(NO_NAME_FILTER_LABEL, StickerNameFilter.NO_NAME, uiState.nameFilter, actions.onSetNameFilter)
+            // Without a naming service no sticker is ever named automatically.
+            if (uiState.autoNaming.isSupported) {
+                NameFilterChip(
+                    AUTO_NAMED_FILTER_LABEL,
+                    StickerNameFilter.NAMED_AUTOMATICALLY,
+                    uiState.nameFilter,
+                    actions.onSetNameFilter,
+                )
+            }
+        }
         when {
             sections.isNotEmpty() -> LazyVerticalGrid(
                 columns = GridCells.Adaptive(SMALL_STICKER_CELL),
@@ -123,7 +122,17 @@ internal fun AllStickersTab(uiState: StickerLibraryUiState, actions: StickerLibr
             }
             uiState.query.isNotBlank() -> EmptyHint(
                 title = "No stickers for “${uiState.query.trim()}”",
-                body = "Search by an emoji, a word for one, or a pack's name",
+                body = "Search by a sticker's name, an emoji, a word for one, or a pack's name",
+                modifier = Modifier.fillMaxWidth().padding(vertical = 48.dp),
+            )
+            uiState.nameFilter == StickerNameFilter.NO_NAME -> EmptyHint(
+                title = "Every sticker has a name",
+                body = "A sticker shows here while it has no name of yours and none that was found automatically",
+                modifier = Modifier.fillMaxWidth().padding(vertical = 48.dp),
+            )
+            uiState.nameFilter == StickerNameFilter.NAMED_AUTOMATICALLY -> EmptyHint(
+                title = "No sticker is named automatically yet",
+                body = "A sticker shows here once the naming service has found a name for it",
                 modifier = Modifier.fillMaxWidth().padding(vertical = 48.dp),
             )
             !uiState.isLoading -> EmptyHint(
@@ -133,4 +142,23 @@ internal fun AllStickersTab(uiState: StickerLibraryUiState, actions: StickerLibr
             )
         }
     }
+}
+
+internal const val NO_NAME_FILTER_LABEL = "No name"
+internal const val AUTO_NAMED_FILTER_LABEL = "Named automatically"
+
+/** One filter of the grid by how a sticker is named. A tap on the chip that is on shows every sticker again. */
+@Composable
+private fun NameFilterChip(
+    label: String,
+    filter: StickerNameFilter,
+    current: StickerNameFilter,
+    onSet: (StickerNameFilter) -> Unit,
+) {
+    val selected = current == filter
+    FilterChip(
+        selected = selected,
+        onClick = { onSet(if (selected) StickerNameFilter.ALL else filter) },
+        label = { Text(label) },
+    )
 }
