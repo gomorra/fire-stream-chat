@@ -113,6 +113,7 @@ the step met its spec — the judge grades that, nothing acts on the grade yet.
 | `step-result.schema.json` | The result every step session ends with. |
 | `variants/*.env` | Named configurations for `--variant`; known keys only. |
 | `report.sh` | Per-step table from one or more run logs, with the minutes waited out at usage limits. |
+| `watch.sh` | Follows the running session as readable lines, and moves to the next session by itself. It only reads the stream files. |
 | `selfcheck.sh`, `fixtures/` | Pure-function and dry-run checks; runs in CI. `fixtures/stream-probe.jsonl` is a trimmed real stream (CLI 2.1.288); the other stream, result and transcript fixtures follow its shapes and the field names recorded in the plan. |
 | `e2e.sh` | The driver's control flow against a stub `claude` and `gradlew` in a scratch repo; called by `selfcheck.sh`. |
 | `benchmark.md` | The 2026-09-20 configuration benchmark: protocol, results of every arm, the hand-read of the judge's findings, and the decision behind the mid-tier default. Raw run data stays in the gitignored `docs/plans/.runs/`. |

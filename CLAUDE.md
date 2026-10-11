@@ -143,6 +143,7 @@ scripts/run-plan.sh <plan-path> [--from N] [--to N] [--dry-run] [--cap <tier>] [
 - **`--variant NAME`** runs under `scripts/plan-runner/variants/NAME.env` on its own branch, worktree and log. Pass it on every re-run.
 - **`--base REF`** sets where a new plan branch starts.
 - **`scripts/plan-runner/report.sh <run-id>…`** prints cost, turns, nudges, usage-limit waits and grades per step.
+- **`scripts/plan-runner/watch.sh [<run-id>]`** follows what the running step session does, as readable lines. It moves to the next session by itself and is safe beside a run.
 
 Contract and design: `docs/plans/done/plan-runner.md` (§5 and §6 cover everything since the first real step). Result schemas, prompt templates, variants, self-check and the stubbed end-to-end check live in `scripts/plan-runner/`.
 
