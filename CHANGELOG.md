@@ -2,6 +2,12 @@
 
 All notable changes to FireStream Chat. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); each section is headed by the SemVer `versionName` shipped on that merge day (e.g. `## [1.2.3] — 2026-04-24`). Bump rule: `feat:` → minor, `fix:` → patch, `feat!:` / `BREAKING CHANGE:` → major. `versionCode` is derived from `git rev-list --count HEAD`.
 
+## [UNRELEASED] [1.42.2] — 2026-10-11
+
+### Fixed
+
+- **A pack's switch no longer squeezes its text.** In the sticker settings' Packs tab the *Own thumbnail* switch sat inside the line under the pack name and cut the count and the publisher short. The switch is at the right edge of the row now and the drag handle is at the left. The group heading says what the switch does, so the row carries no label for it. (`82c575b9`)
+
 ## [1.42.1] — 2026-10-10
 
 ### Fixed

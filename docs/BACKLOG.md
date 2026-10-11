@@ -68,9 +68,10 @@ selection bar and the rule a drag follows. No test drags a row, and nothing ran 
 
 1. Settings → Storage → *Stickers* opens the manager with the tabs *Packs* and *All stickers*.
 2. The **+** in the top bar offers *Create*, *From WhatsApp* and *From files*, and each works.
-3. Switch *Own thumbnail* on for a WhatsApp pack. It moves to *In the picker row*, and the
-   Stickers tab of a chat shows its thumbnail. Switch it off again.
-4. Drag a pack by its handle inside its group. The row stays where it was dropped, also after
+3. Turn on the switch at the right edge of a WhatsApp pack's row. The pack moves to
+   *In the picker row*, and the Stickers tab of a chat shows its thumbnail. Turn it off again.
+   The name, the count and the publisher of a pack are readable on a narrow phone.
+4. Drag a pack by the handle at the left of its row, inside its group. The row stays where it was dropped, also after
    leaving the screen and coming back. A row cannot be dropped into the other group.
 5. With several dozen packs, drag one to the edge of the list: the list scrolls.
 6. A long press selects a pack, and a tap adds another. *Merge* asks for a name and makes one

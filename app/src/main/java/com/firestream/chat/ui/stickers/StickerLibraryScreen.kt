@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
@@ -48,8 +49,6 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
-import androidx.compose.material3.ListItem
-import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.PrimaryTabRow
@@ -75,6 +74,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -582,7 +584,10 @@ private fun DeletePacksDialog(packs: List<StickerPack>, onConfirm: () -> Unit, o
     )
 }
 
-/** One pack. While packs are selected ([isSelecting]) a tap picks, and the menu and the handle make way for the mark. */
+/**
+ * One pack: the handle, the first sticker, the name over the count, the *Own thumbnail* switch and the menu.
+ * While packs are selected ([isSelecting]) a tap picks, the handle goes and the mark takes the menu's place.
+ */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun PackRow(
@@ -597,87 +602,93 @@ private fun PackRow(
 ) {
     var menuOpen by remember { mutableStateOf(false) }
     val count = "${pack.stickers.size} ${stickers(pack.stickers.size)}"
-    ListItem(
-        headlineContent = { Text(pack.label()) },
-        supportingContent = {
-            val countLine = pack.publisher?.let { "$count · $it" } ?: count
-            // The repository refuses the switch for the two unnamed packs, which are always in the row.
-            if (pack.kind.isNamed) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(countLine, style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
-                    Text(
-                        "Own thumbnail",
-                        style = MaterialTheme.typography.bodySmall,
-                        modifier = Modifier.padding(end = 8.dp),
+    // The handle and the menu button bring their own 12 dp of air, so the row adds only 4 dp at each edge.
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(
+                when {
+                    isDragging -> MaterialTheme.colorScheme.surfaceContainerHighest
+                    isSelected -> MaterialTheme.colorScheme.primaryContainer
+                    else -> MaterialTheme.colorScheme.surface
+                }
+            )
+            .combinedClickable(
+                // A tap picks once a long press has started a selection. Only a pack with a name can be merged.
+                onClick = { if (isSelecting) actions.onTogglePack(pack.id) else actions.onOpenPack(pack.id) },
+                onLongClick = if (pack.kind.isNamed) ({ actions.onTogglePack(pack.id) }) else null,
+            )
+            .heightIn(min = 72.dp)
+            .padding(horizontal = 4.dp, vertical = 8.dp),
+    ) {
+        // The handle and the menu keep their place in both modes, so nothing in a row moves when a selection starts.
+        Box(modifier = Modifier.size(48.dp), contentAlignment = Alignment.Center) {
+            if (!isSelecting) {
+                Box(modifier = Modifier.fillMaxSize().then(dragHandleModifier), contentAlignment = Alignment.Center) {
+                    Icon(
+                        Icons.Default.DragHandle,
+                        contentDescription = "Drag ${pack.label()} to reorder",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                    Switch(
-                        checked = pack.shownInRow,
-                        onCheckedChange = { actions.onSetShownInRow(pack.id, it) },
-                        enabled = !isSelecting,
-                        modifier = Modifier.testTag(ownThumbnailSwitchTag(pack.id)),
+                }
+            }
+        }
+        val first = pack.stickers.firstOrNull()
+        if (first != null) {
+            LibraryStickerImage(sticker = first, modifier = Modifier.size(48.dp))
+        } else {
+            Icon(Icons.Default.EmojiEmotions, contentDescription = null, modifier = Modifier.size(48.dp).padding(8.dp))
+        }
+        Column(modifier = Modifier.weight(1f).padding(horizontal = 12.dp)) {
+            Text(
+                pack.label(),
+                style = MaterialTheme.typography.bodyLarge,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                pack.publisher?.let { "$count · $it" } ?: count,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        // The group heading says what the switch does, so it carries no label of its own.
+        // The repository refuses the switch for the two unnamed packs, which are always in the row.
+        if (pack.kind.isNamed) {
+            Switch(
+                checked = pack.shownInRow,
+                onCheckedChange = { actions.onSetShownInRow(pack.id, it) },
+                enabled = !isSelecting,
+                modifier = Modifier
+                    .testTag(ownThumbnailSwitchTag(pack.id))
+                    .semantics { contentDescription = "Own thumbnail for ${pack.label()}" },
+            )
+        }
+        Box(modifier = Modifier.size(48.dp), contentAlignment = Alignment.Center) {
+            if (isSelecting) {
+                if (isSelected) {
+                    Icon(
+                        Icons.Default.CheckCircle,
+                        contentDescription = "Selected",
+                        tint = MaterialTheme.colorScheme.primary,
                     )
                 }
             } else {
-                Text(countLine, style = MaterialTheme.typography.bodySmall)
-            }
-        },
-        leadingContent = {
-            val first = pack.stickers.firstOrNull()
-            if (first != null) {
-                LibraryStickerImage(sticker = first, modifier = Modifier.size(48.dp))
-            } else {
-                Icon(Icons.Default.EmojiEmotions, contentDescription = null, modifier = Modifier.size(48.dp).padding(8.dp))
-            }
-        },
-        trailingContent = {
-            // One size in both modes, so a row does not change its height when a selection starts.
-            Box(modifier = Modifier.size(width = 96.dp, height = 48.dp), contentAlignment = Alignment.CenterEnd) {
-                if (isSelecting) {
-                    if (isSelected) {
-                        Icon(
-                            Icons.Default.CheckCircle,
-                            contentDescription = "Selected",
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.padding(end = 12.dp),
-                        )
+                IconButton(onClick = { menuOpen = true }) {
+                    Icon(Icons.Default.MoreVert, contentDescription = "Options for ${pack.label()}")
+                }
+                DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                    if (pack.canRename) {
+                        DropdownMenuItem(text = { Text("Rename") }, onClick = { menuOpen = false; onRename() })
                     }
-                } else {
-                    Row {
-                        Box {
-                            IconButton(onClick = { menuOpen = true }) {
-                                Icon(Icons.Default.MoreVert, contentDescription = "Options for ${pack.label()}")
-                            }
-                            DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-                                if (pack.canRename) {
-                                    DropdownMenuItem(text = { Text("Rename") }, onClick = { menuOpen = false; onRename() })
-                                }
-                                DropdownMenuItem(text = { Text("Delete") }, onClick = { menuOpen = false; onDelete() })
-                            }
-                        }
-                        Box(modifier = Modifier.size(48.dp).then(dragHandleModifier), contentAlignment = Alignment.Center) {
-                            Icon(
-                                Icons.Default.DragHandle,
-                                contentDescription = "Drag ${pack.label()} to reorder",
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                    }
+                    DropdownMenuItem(text = { Text("Delete") }, onClick = { menuOpen = false; onDelete() })
                 }
             }
-        },
-        colors = ListItemDefaults.colors(
-            containerColor = when {
-                isDragging -> MaterialTheme.colorScheme.surfaceContainerHighest
-                isSelected -> MaterialTheme.colorScheme.primaryContainer
-                else -> ListItemDefaults.containerColor
-            },
-        ),
-        modifier = Modifier.combinedClickable(
-            // A tap picks once a long press has started a selection. Only a pack with a name can be merged.
-            onClick = { if (isSelecting) actions.onTogglePack(pack.id) else actions.onOpenPack(pack.id) },
-            onLongClick = if (pack.kind.isNamed) ({ actions.onTogglePack(pack.id) }) else null,
-        ),
-    )
+        }
+    }
 }
 
 @Composable
