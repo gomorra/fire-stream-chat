@@ -1,6 +1,6 @@
 # Sticker manager and sticker names
 
-Status: approved by the owner on 2026-10-10. Steps 1 to 6 are shipped.
+Status: approved by the owner on 2026-10-10. Steps 1 to 7 are shipped.
 
 ## Context
 
@@ -675,9 +675,60 @@ Departures (for sign-off):
   `.github/workflows/firestore-rules.yml` runs them on the push. Look at that run before the
   rules are deployed.
 
+**Approach**
+
+- Order, all under `tools/sticker-namer/`: `config.py` (the env file), `answer.py` (the schema, the
+  question, the limits of `StickerNameAnswer`), `picture.py` (hash, first frame to PNG), `card.py`
+  (`nvidia-smi`), `engine.py` (both clients), `namer.py` (one request, and the loop),
+  `firebase_store.py` (the only file that imports `firebase-admin`), `evaluate.py`, the unit,
+  `setup.sh` from the `wizard` skill's template, the README. Then `FEATURE-MAP.md` and
+  `ARCHITECTURE.md`.
+- `namer.py` sees Firestore and Storage through two small interfaces, so the tests run with fakes
+  and without `firebase-admin`. The listener only wakes the loop. The loop reads the pending
+  requests itself, which is also how a request that was left pending is tried again.
+- An answer is written in a transaction that writes only while the document is still `pending`.
+  That covers a request answered during the wait for the graphics card, and two namers at once.
+- The card is only looked at while the model is not loaded. A loaded model fills the card itself,
+  and the namer would wait for its own model to leave.
+- A file that is not in Storage yet may still be uploading. Such a request stays pending for a day
+  and is answered `skipped` after that.
+- Tests (`pytest`): the answer check, the picture (hash, Lottie, a broken file), the card, both
+  engine request bodies, the config, and `namer` end to end with fakes for the six cases the step
+  lists.
+- This session cannot run Python: the headless allowlist refuses `python` and `pytest`. A workflow
+  of its own, like `firestore-rules.yml`, runs the tool's tests on the push. It is not part of the
+  CI gate. `setup.sh` runs them too, before anything else is set up.
+- Nothing in the code contradicts a §0 decision. Skills beyond the floor: `simplify`, because the
+  diff will pass 600 lines.
+
+**Shipped** `6ca0aedf` (2026-10-11) — tier: strong, tagged strong. skills: code-review, simplify. Reviewer models: code-review: sonnet, opus; simplify: sonnet, sonnet, sonnet, sonnet. No CHANGELOG entry: nothing in the app changes.
+Departures (for sign-off):
+- **No Python ran.** The headless session's allowlist refuses `python`, `pytest`, `bash -n` and `shellcheck`. The tool's tests, the two pinned packages (`firebase-admin==7.1.0`, `Pillow==12.0.0`, and `pytest==8.4.2` for the tests) and `setup.sh` were read, by the author and by the `/code-review` reviewer, and never executed. The Gradle gate is green, and it does not cover the tool. Stage 1 of `setup.sh` runs the tests first, and `docs/BACKLOG.md` lists what has to be seen on the PC.
+- `.github/workflows/sticker-namer.yml` is new. It runs the tool's tests when the folder changes. The plan said the tool is not part of the CI gate, and it is not: the workflow is separate, like `firestore-rules.yml`.
+- Neither request body in `engine.py` was sent to an engine. Both were written from what the engines document, not copied from the test of 2026-10-10. Thinking is switched off with `think: false` for Ollama and with `chat_template_kwargs.enable_thinking` for llama.cpp. `evaluate.py` shows whether both hold.
+- The commit prefix is `chore(stickers)`, not `feat`, because a `feat` owes a CHANGELOG entry and a version bump.
+- The listener only wakes the loop, and the loop reads the pending requests itself. A round that left a request pending comes back after 1, 2, 4 … minutes, up to 30. A new request ends the wait at once.
+- The cheap refusals come before the wait for the graphics card: the id, the format, the file, the hash, the picture. The card is only looked at while the model is not loaded (`/api/ps` for Ollama). A loaded model fills the card itself. llama.cpp's server always counts as loaded. Without `nvidia-smi` the service does not wait.
+- An answer is written in a transaction, only while the document is still `pending`. After a wait for the card the document is read once more, so a request answered meanwhile costs no model call.
+- A file that is not in Storage leaves the request pending for a day after `requestedAt`, then it is answered `skipped`. An upload may still be running.
+- The model is asked up to three times. Three answers that break a limit end in `skipped`. An engine that refuses the request (a 4xx status, such as a `MODEL` it does not have) or answers no JSON leaves the request pending: a wrong setting must not close the library for good (found by `/code-review`). A 5xx status or no connection ends the batch.
+- Also refused, with `skipped`: an id that is not 64 hex digits, a file above 2 MiB, a picture above 2048 × 2048 pixels, a file that is no WebP.
+- `words` keeps at most eight words per language. A word or a name that holds *sticker* is dropped or asked for again.
+- The service does not start with a key file that group or others can read, and exits with status 78, after which the unit does not restart it.
+- A setting was added, `KEEP_ALIVE` (default `2m`). `MIN_FREE_VRAM_MB` defaults to 10000, which fits `gemma4:12b`. For `gemma4:26b` on the 16 GB card the owner sets it at the checkpoint. The wizard also writes `PROJECT_ID` into the env file, to remember it for a second run.
+- The unit has no ordering after the network. A user unit cannot be ordered after the system's network target, so the service treats a missing network as a failure that passes. The wizard offers `loginctl enable-linger`.
+- The roles are *Cloud Datastore User* and *Storage Object Viewer*, on the project. The viewer role is not narrowed to the one bucket.
+- `setup.sh` was written out by hand with the `wizard` skill's library copied in, because the sandbox refused `cp` from the skill's folder. `diff` against `template.sh` shows the library is identical. It has seven stages.
+- `docs/TESTING.md` and `docs/BACKLOG.md` were edited too, beyond the docs the step lists.
+- Not done, from `/simplify` and `/code-review`: a class per engine and one settings type, the work list taken from the listener's snapshot, a not-before time per refused sticker (`TECH_DEBT.md`).
+
 **‖ Checkpoint.** The owner deploys `firestore.rules`, runs `setup.sh`, and tests about 40 of
 their own stickers with `evaluate.py`. `MODEL` in the env file is set to the model the owner picks.
 Then automatic naming is switched on, on both phones.
+**(step-7)** No line of `tools/sticker-namer/` has run yet. Stage 1 of `setup.sh` runs its tests. A
+failing test there is a fault in the tool and belongs fixed before the service is switched on.
+Work through the list *The sticker naming service on the PC* in `docs/BACKLOG.md`. Set
+`MIN_FREE_VRAM_MB` with `MODEL`: the default of 10000 fits the 12b model.
 
 ### Step 8 — Bug hunt over everything this plan built — model: max; budget: 60
 
@@ -754,6 +805,19 @@ and it looks for no bugs. This step is the correctness review. It adds no featur
      rules tests ran only in CI.
   4. The service: `tools/sticker-namer/`. A request that is answered twice. A crash in the middle
      of a batch. What a log line holds. Where the key can be read from.
+     **(step-7)** Run the tool's tests first (`python -m pytest tools/sticker-namer`, in an
+     environment with `requirements-dev.txt`). Step 7's session could run no Python, so a red
+     test is a finding of its own. `firebase_store.py` has no test: read `answer` (the
+     transaction and `namedAt`), `read` (`get_blob`, the size check) and `listen` against the
+     pinned `firebase-admin`. Look at `namer.py`'s loop: `wake` is cleared before a round and set
+     by the listener, also by the service's own answers. Look at the three ends of a request in
+     `Namer._answer_fields`, and at what makes an end final: a `skipped` cannot be undone by a
+     phone. Look at `engine.http_json`, which decides between `EngineDown` (the batch ends) and
+     `NoAnswer` (the request waits), and at a sticker the engine always refuses, which is asked
+     three times per round for ever. Look at `answer.fields_of` beside `StickerNameAnswer.of`
+     for a field the service writes and the phone drops: lengths are UTF-16 units on both sides.
+     Look at `picture.png_of` with a hostile WebP, and at `config.parse_env` beside what
+     `setup.sh`'s `write_env` writes. Step 7's `/code-review` was the standards-and-spec skill.
 - **A finding needs a failure path.** A reviewer reports the input or state, the path through the
   code with `file:line`, and the wrong outcome. The step session reads each path itself and keeps
   only what holds. Where a JVM test can show the failure, the test is written first.
