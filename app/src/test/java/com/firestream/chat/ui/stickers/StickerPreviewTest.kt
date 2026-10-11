@@ -1,4 +1,4 @@
-package com.firestream.chat.ui.chat
+package com.firestream.chat.ui.stickers
 
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.ui.test.assertHeightIsEqualTo
@@ -8,6 +8,7 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.unit.dp
 import com.firestream.chat.domain.model.StickerFormat
+import com.firestream.chat.ui.chat.STICKER_BUBBLE_SIZE
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test

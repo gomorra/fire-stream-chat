@@ -1,5 +1,8 @@
 package com.firestream.chat.ui.stickers
 
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.background
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -7,12 +10,18 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.items as listItems
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ViewList
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
@@ -22,12 +31,18 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import com.firestream.chat.domain.model.Sticker
 import com.firestream.chat.domain.util.StickerNameFilter
+import com.firestream.chat.domain.util.StickerPackMatches
 import com.firestream.chat.domain.util.StickerSearch
 import com.firestream.chat.ui.chat.picker.EmojiSearchData
+import com.firestream.chat.ui.components.LibraryStickerImage
 
 internal const val ALL_STICKERS_TAB_TAG = "all-stickers-tab"
 internal const val STICKER_SEARCH_TAG = "sticker-search"
@@ -57,23 +72,37 @@ internal fun AllStickersTab(uiState: StickerLibraryUiState, actions: StickerLibr
         )
     }
     val selected = uiState.selectedStickers
+    // A tap picks once a long press has started a selection. Before that it opens the sticker's sheet.
+    val isSelecting = selected.isNotEmpty()
     Column(modifier = modifier.fillMaxSize().testTag(ALL_STICKERS_TAB_TAG)) {
-        OutlinedTextField(
-            value = uiState.query,
-            onValueChange = actions.onSetQuery,
-            singleLine = true,
-            placeholder = { Text("Search by name, emoji or pack") },
-            leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
-            trailingIcon = {
-                if (uiState.query.isNotEmpty()) {
-                    IconButton(onClick = { actions.onSetQuery("") }) {
-                        Icon(Icons.Default.Close, contentDescription = "Clear search")
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp, top = 8.dp, bottom = 8.dp),
+        ) {
+            OutlinedTextField(
+                value = uiState.query,
+                onValueChange = actions.onSetQuery,
+                singleLine = true,
+                placeholder = { Text("Search by name, emoji or pack") },
+                leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                trailingIcon = {
+                    if (uiState.query.isNotEmpty()) {
+                        IconButton(onClick = { actions.onSetQuery("") }) {
+                            Icon(Icons.Default.Close, contentDescription = "Clear search")
+                        }
                     }
+                },
+                shape = MaterialTheme.shapes.extraLarge,
+                modifier = Modifier.weight(1f).testTag(STICKER_SEARCH_TAG),
+            )
+            IconButton(onClick = { actions.onSetListView(!uiState.isListView) }) {
+                if (uiState.isListView) {
+                    Icon(Icons.Default.GridView, contentDescription = SHOW_AS_GRID)
+                } else {
+                    Icon(Icons.AutoMirrored.Filled.ViewList, contentDescription = SHOW_AS_LIST)
                 }
-            },
-            shape = MaterialTheme.shapes.extraLarge,
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp).testTag(STICKER_SEARCH_TAG),
-        )
+            }
+        }
         Row(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
@@ -90,6 +119,23 @@ internal fun AllStickersTab(uiState: StickerLibraryUiState, actions: StickerLibr
             }
         }
         when {
+            sections.isNotEmpty() && uiState.isListView -> LazyColumn(modifier = Modifier.fillMaxSize()) {
+                sections.forEach { section ->
+                    val pack = section.pack
+                    item(key = "title:${pack.id}", contentType = "title") { SectionTitle(section) }
+                    listItems(section.stickers, key = { "${pack.id}/${it.id}" }, contentType = { "sticker" }) { sticker ->
+                        val entry = StickerEntry(pack.id, sticker.id)
+                        val onToggle = rememberEntryToggle(pack.id, actions.onToggleSticker)
+                        StickerListRow(
+                            sticker = sticker,
+                            isSelected = entry in selected,
+                            onClick = if (isSelecting) onToggle else actions.onOpenSticker,
+                            onLongClick = onToggle,
+                            tag = stickerEntryTag(entry),
+                        )
+                    }
+                }
+            }
             sections.isNotEmpty() -> LazyVerticalGrid(
                 columns = GridCells.Adaptive(SMALL_STICKER_CELL),
                 modifier = Modifier.fillMaxSize(),
@@ -98,12 +144,7 @@ internal fun AllStickersTab(uiState: StickerLibraryUiState, actions: StickerLibr
                 sections.forEach { section ->
                     val pack = section.pack
                     item(key = "title:${pack.id}", span = { GridItemSpan(maxLineSpan) }, contentType = "title") {
-                        Text(
-                            text = "${pack.label()} · ${section.stickers.size}",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.padding(start = 12.dp, end = 12.dp, top = 12.dp, bottom = 4.dp),
-                        )
+                        SectionTitle(section, inset = 12.dp)
                     }
                     items(section.stickers, key = { "${pack.id}/${it.id}" }, contentType = { "sticker" }) { sticker ->
                         val entry = StickerEntry(pack.id, sticker.id)
@@ -111,8 +152,7 @@ internal fun AllStickersTab(uiState: StickerLibraryUiState, actions: StickerLibr
                         StickerCell(
                             sticker = sticker,
                             isSelected = entry in selected,
-                            // A tap picks only once a long press has started a selection.
-                            onClick = if (selected.isNotEmpty()) onToggle else NO_TAP,
+                            onClick = if (isSelecting) onToggle else actions.onOpenSticker,
                             onLongClick = onToggle,
                             tag = stickerEntryTag(entry),
                             isSmall = true,
@@ -140,6 +180,73 @@ internal fun AllStickersTab(uiState: StickerLibraryUiState, actions: StickerLibr
                 body = "Tap + to make one from a photo, or to import some from WhatsApp or from files",
                 modifier = Modifier.fillMaxWidth().padding(vertical = 48.dp),
             )
+        }
+    }
+}
+
+internal const val SHOW_AS_LIST = "Show as a list with names"
+internal const val SHOW_AS_GRID = "Show as a grid"
+
+/** A pack's name and how many of its stickers are shown, over them. */
+@Composable
+private fun SectionTitle(section: StickerPackMatches, inset: Dp = 16.dp) {
+    Text(
+        text = "${section.pack.label()} · ${section.stickers.size}",
+        style = MaterialTheme.typography.labelMedium,
+        color = MaterialTheme.colorScheme.primary,
+        modifier = Modifier.padding(start = inset, end = inset, top = 12.dp, bottom = 4.dp),
+    )
+}
+
+/**
+ * One sticker of the list view: the picture, its names in one line and what
+ * else it is found by in a second (`nameLine`, `wordLine`). A sticker with
+ * neither says *No name*. The clicks hand the sticker's id back, as a grid's
+ * cell does.
+ */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun StickerListRow(
+    sticker: Sticker,
+    isSelected: Boolean,
+    onClick: (String) -> Unit,
+    onLongClick: (String) -> Unit,
+    tag: String,
+) {
+    val names = remember(sticker) { sticker.nameLine() }
+    val words = remember(sticker) { sticker.wordLine() }
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .testTag(tag)
+            .fillMaxWidth()
+            .background(if (isSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface)
+            .combinedClickable(onClick = { onClick(sticker.id) }, onLongClick = { onLongClick(sticker.id) })
+            .padding(horizontal = 16.dp, vertical = 4.dp),
+    ) {
+        LibraryStickerImage(sticker = sticker, modifier = Modifier.size(SMALL_STICKER_CELL))
+        Column(modifier = Modifier.weight(1f).padding(start = 12.dp)) {
+            // A sticker without a name shows its words in the first line. Only one with neither says so.
+            val first = names ?: words
+            Text(
+                text = first ?: NO_NAME_FILTER_LABEL,
+                style = MaterialTheme.typography.bodyLarge,
+                color = if (first != null) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            if (names != null && words != null) {
+                Text(
+                    text = words,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+        if (isSelected) {
+            Icon(Icons.Default.CheckCircle, contentDescription = "Selected", tint = MaterialTheme.colorScheme.primary)
         }
     }
 }

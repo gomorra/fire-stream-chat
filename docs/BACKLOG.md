@@ -38,6 +38,35 @@ Firestore questions. Nothing ran on a device. Check it by upgrading over an inst
 6. Delete a chat that the other person then writes into again. Its history comes back whole.
 7. Read the reads per day in the Firebase console before and after the update.
 
+### The sticker sheet and the list view (2026-10-11)
+
+`docs/plans/sticker-manager-and-names.md` step 7a. JVM and Robolectric tests cover what the sheet
+shows, its rows per host, the tap and the selection, and the list rows. Nothing ran on a device.
+1. A debug build opens a chat, the sticker manager and the sheet without a crash. `ChatScreen` and
+   `StickerLibraryScreen` gained code, and only a device runs the dex verifier. The register
+   check of `docs/GOTCHAS.md` did not run: the headless session may not start `unzip` or
+   `dexdump`. Run it on a debug APK for `ChatScreen`, `PackRow` and `AllStickersTab`. In the JVM
+   classes `ChatScreen` has 140 locals and the highest of the sticker files has 110.
+2. Chat: tap a sticker your library holds. The sheet shows it large, your names and emojis, and
+   *Found automatically* for a named one. A tap on the picture enlarges it, and the sheet scrolls.
+3. Chat: tap a received sticker that is in none of your packs. The picture, the star and
+   *View pack* show, and no words and no *Edit names and emojis*. `stickerNames/` gets no new
+   document.
+4. Chat: *Edit names and emojis* opens the edit in the sheet's place. *Save* keeps the names, and
+   the sheet shows them the next time. Back closes the edit and returns to the chat.
+5. Manager: a tap on a sticker inside a pack and in *All stickers* opens the same sheet, without
+   *View pack*. The star adds it to *Favourites* and takes it out. During a selection a tap picks.
+6. A sticker whose file is not on the phone yet (after a restore): its sheet shows a broken-image
+   mark until the grid has fetched the file. Decide whether that needs a placeholder.
+7. *All stickers*: the button beside the search field switches to the list and back. A row shows
+   the names in one line and the emojis, search words and text in a second, each cut at one line.
+   A sticker without a name shows its emojis and words in the first line, and a row with nothing
+   says *No name*. The search and both filters narrow the list like the grid.
+8. The list scrolls without a stutter with several hundred stickers. A long press starts a
+   selection there, and the top bar's actions work on it.
+9. Leave the manager's tab and come back: the list is still the view. Leave the manager and open
+   it again: the grid is back.
+
 ### The sticker naming service on the PC (2026-10-11)
 
 `docs/plans/sticker-manager-and-names.md` step 7, `tools/sticker-namer/`. Its tests pass on

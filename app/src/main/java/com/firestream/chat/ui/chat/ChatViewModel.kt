@@ -443,6 +443,12 @@ class ChatViewModel @Inject constructor(
             viewModelScope.launch { _snackbarEvent.emit(SnackbarEvent(line)) }
         }
 
+    /** Saves the emojis and names a library sticker was given in the sticker sheet's edit. */
+    fun saveStickerWords(stickerId: String, emojis: List<String>, names: List<String>, stopAutoNaming: Boolean) =
+        messageActions.saveStickerWords(stickerId, emojis, names, stopAutoNaming) { line ->
+            viewModelScope.launch { _snackbarEvent.emit(SnackbarEvent(line)) }
+        }
+
     // ── Image editing ──
 
     /**

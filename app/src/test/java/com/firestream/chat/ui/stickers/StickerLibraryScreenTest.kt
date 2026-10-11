@@ -2,7 +2,11 @@ package com.firestream.chat.ui.stickers
 
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.click
+import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
@@ -224,15 +228,138 @@ class StickerLibraryScreenTest {
     }
 
     @Test
-    fun `a long press in the grid of every sticker picks an entry, and a tap picks only during a selection`() {
+    fun `a long press in the grid of every sticker picks an entry, and a tap opens the sticker's sheet`() {
         val toggled = mutableListOf<StickerEntry>()
-        show(allStickers(cats, dogs), StickerLibraryActions(onToggleSticker = { toggled += it }))
+        val opened = mutableListOf<String>()
+        show(allStickers(cats, dogs), StickerLibraryActions(onToggleSticker = { toggled += it }, onOpenSticker = { opened += it }))
 
         composeTestRule.onNodeWithTag(stickerEntryTag(StickerEntry("Cats", "c1"))).performClick()
         assertEquals(emptyList<StickerEntry>(), toggled)
+        assertEquals(listOf("c1"), opened)
         composeTestRule.onNodeWithTag(stickerEntryTag(StickerEntry("Dogs", "shared"))).performTouchInput { longClick() }
 
         assertEquals(listOf(StickerEntry("Dogs", "shared")), toggled)
+        assertEquals(listOf("c1"), opened)
+    }
+
+    private fun assertTapPicksDuringSelection(isListView: Boolean) {
+        val toggled = mutableListOf<StickerEntry>()
+        val opened = mutableListOf<String>()
+        show(
+            allStickers(cats, dogs, selected = setOf(StickerEntry("Dogs", "d1"))).copy(isListView = isListView),
+            StickerLibraryActions(onToggleSticker = { toggled += it }, onOpenSticker = { opened += it }),
+        )
+
+        composeTestRule.onNodeWithTag(stickerEntryTag(StickerEntry("Cats", "c1"))).performClick()
+
+        assertEquals(listOf(StickerEntry("Cats", "c1")), toggled)
+        assertEquals(emptyList<String>(), opened)
+    }
+
+    @Test
+    fun `a tap during a selection picks and opens no sheet, in the grid`() = assertTapPicksDuringSelection(isListView = false)
+
+    @Test
+    fun `a tap during a selection picks and opens no sheet, in the list`() = assertTapPicksDuringSelection(isListView = true)
+
+    @Test
+    fun `a tap in a pack's grid opens the sticker's sheet`() {
+        val opened = mutableListOf<String>()
+        show(library(cats, dogs).copy(openPackId = "Cats"), StickerLibraryActions(onOpenSticker = { opened += it }))
+
+        composeTestRule.onNodeWithTag(stickerCellTag("shared")).performClick()
+
+        assertEquals(listOf("shared"), opened)
+    }
+
+    @Test
+    fun `the open sticker's sheet shows its words, its star and the edit, and no View pack`() {
+        val named = testSticker("c1").copy(names = listOf("Tabby"))
+        val pack = testStickerPack("Cats", StickerPackKind.USER, named)
+        val starred = testStickerPack("f", StickerPackKind.FAVOURITES, named)
+        val done = mutableListOf<String>()
+        show(
+            allStickers(pack, starred).copy(openStickerId = "c1"),
+            StickerLibraryActions(
+                onToggleStickerFavourite = { done += "star:$it" },
+                onEditSticker = { done += "edit:$it" },
+                onCloseSticker = { done += "close" },
+            ),
+        )
+
+        composeTestRule.onNodeWithText("Tabby").assertExists()
+        composeTestRule.onNodeWithText("View pack").assertDoesNotExist()
+        // By the click action: a touch misses a sheet that the test's small window cuts off.
+        composeTestRule.onNodeWithText(EDIT_STICKER_LABEL).performSemanticsAction(SemanticsActions.OnClick)
+        composeTestRule.onNodeWithText("Remove from favourites").performSemanticsAction(SemanticsActions.OnClick)
+
+        assertEquals(listOf("edit:c1", "star:c1", "close"), done)
+    }
+
+    @Test
+    fun `the button beside the search field switches between the grid and the list`() {
+        val set = mutableListOf<Boolean>()
+        show(allStickers(cats), StickerLibraryActions(onSetListView = { set += it }))
+
+        composeTestRule.onNodeWithContentDescription(SHOW_AS_LIST).performClick()
+
+        assertEquals(listOf(true), set)
+    }
+
+    @Test
+    fun `the list shows each sticker's names and words in the same sections, and a tap opens its sheet`() {
+        val named = testSticker("named", "😺").copy(names = listOf("Tabby"))
+        val zoo = testStickerPack("Zoo", StickerPackKind.USER, named, testSticker("nameless"))
+        val set = mutableListOf<Boolean>()
+        val opened = mutableListOf<String>()
+        val toggled = mutableListOf<StickerEntry>()
+        show(
+            allStickers(zoo, dogs).copy(isListView = true),
+            StickerLibraryActions(onSetListView = { set += it }, onOpenSticker = { opened += it }, onToggleSticker = { toggled += it }),
+        )
+
+        composeTestRule.onNodeWithText("Zoo · 2").assertIsDisplayed()
+        composeTestRule.onNodeWithText("Dogs · 2").assertIsDisplayed()
+        composeTestRule.onNodeWithText("Tabby").assertIsDisplayed()
+        composeTestRule.onNodeWithText("😺").assertIsDisplayed()
+        composeTestRule.onNodeWithTag(stickerEntryTag(StickerEntry("Zoo", "nameless"))).assertIsDisplayed()
+        composeTestRule.onNodeWithTag(stickerEntryTag(StickerEntry("Zoo", "named"))).performClick()
+        composeTestRule.onNodeWithTag(stickerEntryTag(StickerEntry("Zoo", "nameless"))).performTouchInput { longClick() }
+        composeTestRule.onNodeWithContentDescription(SHOW_AS_GRID).performClick()
+
+        assertEquals(listOf("named"), opened)
+        assertEquals(listOf(StickerEntry("Zoo", "nameless")), toggled)
+        assertEquals(listOf(false), set)
+    }
+
+    @Test
+    fun `a list row with no words says so, and the search narrows the list like the grid`() {
+        val zoo = testStickerPack("Zoo", StickerPackKind.USER, testSticker("named").copy(names = listOf("Tabby")), testSticker("nameless"))
+        show(allStickers(zoo, query = "tab").copy(isListView = true))
+
+        composeTestRule.onNodeWithText("Zoo · 1").assertIsDisplayed()
+        composeTestRule.onNodeWithText("Tabby").assertIsDisplayed()
+        // The filter chip says "No name" too, and no row does.
+        composeTestRule.onAllNodesWithText(NO_NAME_FILTER_LABEL).assertCountEquals(1)
+    }
+
+    @Test
+    fun `a list row of a sticker nothing is known about says No name`() {
+        val zoo = testStickerPack("Zoo", StickerPackKind.USER, testSticker("nameless"))
+        show(allStickers(zoo).copy(isListView = true))
+
+        // The filter chip and the row.
+        composeTestRule.onAllNodesWithText(NO_NAME_FILTER_LABEL).assertCountEquals(2)
+    }
+
+    @Test
+    fun `a list row of a sticker with emojis and no name shows them, and does not say No name`() {
+        val zoo = testStickerPack("Zoo", StickerPackKind.USER, testSticker("tagged", "😺"))
+        show(allStickers(zoo).copy(isListView = true))
+
+        composeTestRule.onNodeWithText("😺").assertIsDisplayed()
+        // The filter chip only.
+        composeTestRule.onAllNodesWithText(NO_NAME_FILTER_LABEL).assertCountEquals(1)
     }
 
     @Test

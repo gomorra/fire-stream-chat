@@ -1,5 +1,6 @@
 package com.firestream.chat.ui.stickers
 
+import androidx.lifecycle.SavedStateHandle
 import com.firestream.chat.domain.model.AppError
 import com.firestream.chat.domain.model.Sticker
 import com.firestream.chat.domain.model.StickerAutoNaming
@@ -64,7 +65,7 @@ class StickerLibraryViewModelTest {
 
     @Test
     fun `opening the manager looks for names, and the state follows the switch`() {
-        val viewModel = StickerLibraryViewModel(repository)
+        val viewModel = StickerLibraryViewModel(repository, SavedStateHandle())
 
         coVerify(exactly = 1) { repository.refreshAutoNames() }
         assertEquals(StickerAutoNaming(), viewModel.uiState.value.autoNaming)
@@ -78,7 +79,7 @@ class StickerLibraryViewModelTest {
 
     @Test
     fun `the switch and a pack's switch go to the repository`() {
-        val viewModel = StickerLibraryViewModel(repository)
+        val viewModel = StickerLibraryViewModel(repository, SavedStateHandle())
 
         viewModel.setAutoNaming(true)
         viewModel.setPackAutoNaming("a", false)
@@ -104,7 +105,7 @@ class StickerLibraryViewModelTest {
     @Test
     fun `naming a sticker whose pack is left out says which pack holds it back`() {
         packs.value = listOf(pack("a", "s1"), pack("closed", "s1").copy(autoNameAllowed = false))
-        val viewModel = StickerLibraryViewModel(repository).apply { selectTab(StickerManagerTab.ALL_STICKERS) }
+        val viewModel = StickerLibraryViewModel(repository, SavedStateHandle()).apply { selectTab(StickerManagerTab.ALL_STICKERS) }
         viewModel.toggleSticker(entry("a", "s1"))
 
         viewModel.nameSelectedNow()
@@ -141,11 +142,78 @@ class StickerLibraryViewModelTest {
 
     @Test
     fun `the name filter is kept in the state`() {
-        val viewModel = StickerLibraryViewModel(repository)
+        val viewModel = StickerLibraryViewModel(repository, SavedStateHandle())
 
         viewModel.setNameFilter(StickerNameFilter.NO_NAME)
 
         assertEquals(StickerNameFilter.NO_NAME, viewModel.uiState.value.nameFilter)
+    }
+
+    // --- The sticker sheet and the list view ---
+
+    @Test
+    fun `a tap opens a sticker's sheet, and the state says whether it has a star`() {
+        val viewModel = allStickers()
+
+        viewModel.openSticker("s1")
+
+        assertEquals("s1", viewModel.uiState.value.openSticker?.id)
+        assertTrue(viewModel.uiState.value.isFavourite("s1"))
+        assertFalse(viewModel.uiState.value.isFavourite("s2"))
+
+        viewModel.closeSticker()
+
+        assertNull(viewModel.uiState.value.openSticker)
+    }
+
+    @Test
+    fun `the sheet's star goes to the repository's toggle`() {
+        val viewModel = allStickers()
+
+        viewModel.toggleStickerFavourite("s2")
+
+        coVerify(exactly = 1) { repository.toggleFavourite("s2") }
+    }
+
+    @Test
+    fun `the sheet's edit puts the words sheet in its place, with no selection`() {
+        coEvery { repository.setStickerWords(any(), any(), any(), any()) } returns Result.success(Unit)
+        val viewModel = allStickers()
+        viewModel.openSticker("s2")
+
+        viewModel.editSticker("s2")
+
+        assertNull(viewModel.uiState.value.openStickerId)
+        assertEquals("s2", viewModel.uiState.value.editingSticker?.id)
+
+        viewModel.saveStickerWords(emptyList(), listOf("Cat"), stopAutoNaming = false)
+
+        coVerify(exactly = 1) { repository.setStickerWords("s2", emptyList(), listOf("Cat"), false) }
+    }
+
+    @Test
+    fun `a sticker that leaves the library closes its sheet`() {
+        val viewModel = allStickers()
+        viewModel.openSticker("s2")
+
+        packs.value = listOf(pack("a", "s1"))
+
+        assertNull(viewModel.uiState.value.openStickerId)
+    }
+
+    @Test
+    fun `the grid is the default, and the list view is kept in the saved state`() {
+        val saved = SavedStateHandle()
+        val viewModel = StickerLibraryViewModel(repository, saved)
+        assertFalse(viewModel.uiState.value.isListView)
+
+        viewModel.setListView(true)
+
+        assertTrue(viewModel.uiState.value.isListView)
+        // Another tab and back, and a ViewModel made again from the saved state.
+        viewModel.selectTab(StickerManagerTab.PACKS)
+        assertTrue(viewModel.uiState.value.isListView)
+        assertTrue(StickerLibraryViewModel(repository, saved).uiState.value.isListView)
     }
 
     private fun sticker(id: String) = Sticker(id, StickerFormat.WEBP, 512, 512, false, emptyList(), "/stickers/$id.webp")
@@ -180,7 +248,7 @@ class StickerLibraryViewModelTest {
             pack("b", "s2", "shared"),
             pack("c"),
         )
-        return StickerLibraryViewModel(repository).apply { selectTab(StickerManagerTab.ALL_STICKERS) }
+        return StickerLibraryViewModel(repository, SavedStateHandle()).apply { selectTab(StickerManagerTab.ALL_STICKERS) }
     }
 
     @Test
@@ -388,7 +456,7 @@ class StickerLibraryViewModelTest {
     @Test
     fun `the library is loading until the first emission and then shows the packs`() {
         packs.value = listOf(pack("a", "s1"))
-        val viewModel = StickerLibraryViewModel(repository)
+        val viewModel = StickerLibraryViewModel(repository, SavedStateHandle())
 
         assertFalse(viewModel.uiState.value.isLoading)
         assertEquals(listOf("a"), viewModel.uiState.value.packs.map { it.id })
@@ -397,7 +465,7 @@ class StickerLibraryViewModelTest {
     @Test
     fun `a pack that is deleted while open closes its grid`() {
         packs.value = listOf(pack("a", "s1"), pack("b"))
-        val viewModel = StickerLibraryViewModel(repository)
+        val viewModel = StickerLibraryViewModel(repository, SavedStateHandle())
         viewModel.openPack("a")
         viewModel.toggleSticker(entry("a", "s1"))
 
@@ -410,7 +478,7 @@ class StickerLibraryViewModelTest {
     @Test
     fun `a selected sticker that leaves the open pack leaves the selection`() {
         packs.value = listOf(pack("a", "s1", "s2"))
-        val viewModel = StickerLibraryViewModel(repository)
+        val viewModel = StickerLibraryViewModel(repository, SavedStateHandle())
         viewModel.openPack("a")
         viewModel.toggleSticker(entry("a", "s1"))
         viewModel.toggleSticker(entry("a", "s2"))
@@ -423,7 +491,7 @@ class StickerLibraryViewModelTest {
     @Test
     fun `toggling a sticker twice deselects it`() {
         packs.value = listOf(pack("a", "s1"))
-        val viewModel = StickerLibraryViewModel(repository)
+        val viewModel = StickerLibraryViewModel(repository, SavedStateHandle())
         viewModel.openPack("a")
 
         viewModel.toggleSticker(entry("a", "s1"))
@@ -435,7 +503,7 @@ class StickerLibraryViewModelTest {
     @Test
     fun `removing the selection removes it from the open pack and clears it`() {
         packs.value = listOf(pack("a", "s1", "s2"))
-        val viewModel = StickerLibraryViewModel(repository)
+        val viewModel = StickerLibraryViewModel(repository, SavedStateHandle())
         viewModel.openPack("a")
         viewModel.toggleSticker(entry("a", "s2"))
 
@@ -448,7 +516,7 @@ class StickerLibraryViewModelTest {
     @Test
     fun `moving the selection names the open pack as its source`() {
         packs.value = listOf(pack("a", "s1"), pack("b"))
-        val viewModel = StickerLibraryViewModel(repository)
+        val viewModel = StickerLibraryViewModel(repository, SavedStateHandle())
         viewModel.openPack("a")
         viewModel.toggleSticker(entry("a", "s1"))
 
@@ -463,7 +531,7 @@ class StickerLibraryViewModelTest {
         val write = CompletableDeferred<Result<Unit>>()
         coEvery { repository.reorderPacks(any()) } coAnswers { write.await() }
         packs.value = listOf(pack("a"), pack("b"), pack("c"))
-        val viewModel = StickerLibraryViewModel(repository)
+        val viewModel = StickerLibraryViewModel(repository, SavedStateHandle())
 
         viewModel.reorderPacks(listOf("c", "a", "b"))
 
@@ -476,7 +544,7 @@ class StickerLibraryViewModelTest {
     fun `a dropped order that cannot be saved goes back to the library's order`() {
         coEvery { repository.reorderPacks(any()) } returns Result.failure(IllegalStateException("boom"))
         packs.value = listOf(pack("a"), pack("b"))
-        val viewModel = StickerLibraryViewModel(repository)
+        val viewModel = StickerLibraryViewModel(repository, SavedStateHandle())
 
         viewModel.reorderPacks(listOf("b", "a"))
 
@@ -487,7 +555,7 @@ class StickerLibraryViewModelTest {
     @Test
     fun `a drop that changes nothing writes nothing`() {
         packs.value = listOf(pack("a"), pack("b"))
-        val viewModel = StickerLibraryViewModel(repository)
+        val viewModel = StickerLibraryViewModel(repository, SavedStateHandle())
 
         viewModel.reorderPacks(listOf("a", "b"))
 
@@ -505,7 +573,7 @@ class StickerLibraryViewModelTest {
     @Test
     fun `the switch writes the pack's row flag`() {
         packs.value = listOf(pack("a", shownInRow = false))
-        val viewModel = StickerLibraryViewModel(repository)
+        val viewModel = StickerLibraryViewModel(repository, SavedStateHandle())
 
         viewModel.setPackShownInRow("a", true)
 
@@ -515,7 +583,7 @@ class StickerLibraryViewModelTest {
     @Test
     fun `a merge names the selected packs in the order the list shows them and clears the selection`() {
         packs.value = listOf(pack("wa", shownInRow = false), pack("own"), pack("other"))
-        val viewModel = StickerLibraryViewModel(repository)
+        val viewModel = StickerLibraryViewModel(repository, SavedStateHandle())
         // Picked last to first. The list shows the packs with a thumbnail before the others.
         viewModel.togglePack("wa")
         viewModel.togglePack("other")
@@ -530,7 +598,7 @@ class StickerLibraryViewModelTest {
     @Test
     fun `a merge of one pack does not start`() {
         packs.value = listOf(pack("a"), pack("b"))
-        val viewModel = StickerLibraryViewModel(repository)
+        val viewModel = StickerLibraryViewModel(repository, SavedStateHandle())
         viewModel.togglePack("a")
 
         viewModel.mergeSelected("One")
@@ -542,7 +610,7 @@ class StickerLibraryViewModelTest {
     @Test
     fun `the unnamed packs cannot be selected`() {
         packs.value = listOf(pack("f", kind = StickerPackKind.FAVOURITES), pack("s", kind = StickerPackKind.SAVED), pack("a"))
-        val viewModel = StickerLibraryViewModel(repository)
+        val viewModel = StickerLibraryViewModel(repository, SavedStateHandle())
 
         viewModel.togglePack("f")
         viewModel.togglePack("s")
@@ -555,7 +623,7 @@ class StickerLibraryViewModelTest {
     @Test
     fun `a selected pack that leaves the library leaves the selection`() {
         packs.value = listOf(pack("a"), pack("b"), pack("c"))
-        val viewModel = StickerLibraryViewModel(repository)
+        val viewModel = StickerLibraryViewModel(repository, SavedStateHandle())
         viewModel.togglePack("a")
         viewModel.togglePack("b")
 
@@ -571,7 +639,7 @@ class StickerLibraryViewModelTest {
     fun `deleting the selection deletes each pack and stops at the first failure`() {
         coEvery { repository.deletePack("b") } returns Result.failure(IllegalStateException("boom"))
         packs.value = listOf(pack("a"), pack("b"), pack("c"))
-        val viewModel = StickerLibraryViewModel(repository)
+        val viewModel = StickerLibraryViewModel(repository, SavedStateHandle())
         viewModel.togglePack("a")
         viewModel.togglePack("b")
         viewModel.togglePack("c")
@@ -588,7 +656,7 @@ class StickerLibraryViewModelTest {
     @Test
     fun `changing the tab or opening a pack ends a pack selection`() {
         packs.value = listOf(pack("a"), pack("b"))
-        val viewModel = StickerLibraryViewModel(repository)
+        val viewModel = StickerLibraryViewModel(repository, SavedStateHandle())
 
         viewModel.togglePack("a")
         viewModel.selectTab(StickerManagerTab.ALL_STICKERS)
@@ -604,7 +672,7 @@ class StickerLibraryViewModelTest {
     fun `a failed edit shows the repository's message`() {
         coEvery { repository.renamePack("a", " ") } returns Result.failure(IllegalArgumentException("A pack needs a name"))
         packs.value = listOf(pack("a"))
-        val viewModel = StickerLibraryViewModel(repository)
+        val viewModel = StickerLibraryViewModel(repository, SavedStateHandle())
 
         viewModel.renamePack("a", " ")
 
@@ -619,7 +687,7 @@ class StickerLibraryViewModelTest {
     fun `importing files passes no pack name and reports the counts`() {
         coEvery { repository.importFrom(listOf("content://a", "content://b"), null, skipKnown = false) } returns
             Result.success(StickerImportResult(imported = 1, duplicates = 1, rejected = 0, packIds = listOf("p")))
-        val viewModel = StickerLibraryViewModel(repository)
+        val viewModel = StickerLibraryViewModel(repository, SavedStateHandle())
 
         viewModel.importFiles(listOf("content://a", "content://b"))
 
@@ -629,7 +697,7 @@ class StickerLibraryViewModelTest {
 
     @Test
     fun `a pick of no files imports nothing`() {
-        val viewModel = StickerLibraryViewModel(repository)
+        val viewModel = StickerLibraryViewModel(repository, SavedStateHandle())
 
         viewModel.importFiles(emptyList())
 
@@ -641,7 +709,7 @@ class StickerLibraryViewModelTest {
     fun `a second import is ignored while one is running`() = runTest {
         val running = CompletableDeferred<Result<StickerImportResult>>()
         coEvery { repository.importFrom(any(), any(), any()) } coAnswers { running.await() }
-        val viewModel = StickerLibraryViewModel(repository)
+        val viewModel = StickerLibraryViewModel(repository, SavedStateHandle())
 
         viewModel.importFiles(listOf("content://a"))
         assertTrue(viewModel.uiState.value.isImporting)
@@ -655,7 +723,7 @@ class StickerLibraryViewModelTest {
     @Test
     fun `a failed import shows an error and ends the progress`() {
         coEvery { repository.importFrom(any(), any(), any()) } returns Result.failure(IllegalStateException("boom"))
-        val viewModel = StickerLibraryViewModel(repository)
+        val viewModel = StickerLibraryViewModel(repository, SavedStateHandle())
 
         viewModel.importFiles(listOf("content://a"))
 
@@ -667,7 +735,7 @@ class StickerLibraryViewModelTest {
     @Test
     fun `opening the WhatsApp folder lists its files with nothing selected`() {
         coEvery { repository.listWhatsAppFolder("content://tree") } returns Result.success(listOf(file("x"), file("y")))
-        val viewModel = StickerLibraryViewModel(repository)
+        val viewModel = StickerLibraryViewModel(repository, SavedStateHandle())
 
         viewModel.openWhatsAppFolder("content://tree")
 
@@ -680,7 +748,7 @@ class StickerLibraryViewModelTest {
     @Test
     fun `a folder that cannot be listed closes the view with an error`() {
         coEvery { repository.listWhatsAppFolder(any()) } returns Result.failure(SecurityException("No access to that folder"))
-        val viewModel = StickerLibraryViewModel(repository)
+        val viewModel = StickerLibraryViewModel(repository, SavedStateHandle())
 
         viewModel.openWhatsAppFolder("content://tree")
 
@@ -692,7 +760,7 @@ class StickerLibraryViewModelTest {
     fun `a listing that returns after the view was closed does not reopen it`() = runTest {
         val listing = CompletableDeferred<Result<List<WhatsAppStickerFile>>>()
         coEvery { repository.listWhatsAppFolder(any()) } coAnswers { listing.await() }
-        val viewModel = StickerLibraryViewModel(repository)
+        val viewModel = StickerLibraryViewModel(repository, SavedStateHandle())
 
         viewModel.openWhatsAppFolder("content://tree")
         assertTrue(viewModel.uiState.value.whatsApp!!.isLoading)
@@ -705,7 +773,7 @@ class StickerLibraryViewModelTest {
     @Test
     fun `select all selects every file and a second tap selects none`() {
         coEvery { repository.listWhatsAppFolder(any()) } returns Result.success(listOf(file("x"), file("y")))
-        val viewModel = StickerLibraryViewModel(repository)
+        val viewModel = StickerLibraryViewModel(repository, SavedStateHandle())
         viewModel.openWhatsAppFolder("content://tree")
         viewModel.toggleWhatsAppFile("content://wa/x")
 
@@ -720,7 +788,7 @@ class StickerLibraryViewModelTest {
     fun `the WhatsApp import sends the selection in folder order under the WhatsApp pack name and closes the view`() {
         coEvery { repository.listWhatsAppFolder(any()) } returns Result.success(listOf(file("x"), file("y"), file("z")))
         coEvery { repository.importFrom(any(), any(), any()) } returns Result.success(StickerImportResult(2, 0, 0, listOf("p")))
-        val viewModel = StickerLibraryViewModel(repository)
+        val viewModel = StickerLibraryViewModel(repository, SavedStateHandle())
         viewModel.openWhatsAppFolder("content://tree")
         viewModel.toggleWhatsAppFile("content://wa/z")
         viewModel.toggleWhatsAppFile("content://wa/x")
@@ -736,7 +804,7 @@ class StickerLibraryViewModelTest {
     fun `a failed WhatsApp import keeps the view and its selection`() {
         coEvery { repository.listWhatsAppFolder(any()) } returns Result.success(listOf(file("x", lastModified = 300)))
         coEvery { repository.importFrom(any(), any(), any()) } returns Result.failure(IllegalStateException("boom"))
-        val viewModel = StickerLibraryViewModel(repository)
+        val viewModel = StickerLibraryViewModel(repository, SavedStateHandle())
         viewModel.openWhatsAppFolder("content://tree")
         viewModel.toggleWhatsAppFile("content://wa/x")
 
@@ -754,7 +822,7 @@ class StickerLibraryViewModelTest {
         coEvery { repository.listWhatsAppFolder(any()) } returns
             Result.success(listOf(file("new", lastModified = 300), file("seen", lastModified = 200), file("old", lastModified = 100)))
         coEvery { repository.importFrom(any(), any(), any()) } returns Result.success(StickerImportResult(1, 0, 0, listOf("p")))
-        return StickerLibraryViewModel(repository).apply { openWhatsAppFolder("content://tree") }
+        return StickerLibraryViewModel(repository, SavedStateHandle()).apply { openWhatsAppFolder("content://tree") }
     }
 
     private fun StickerLibraryViewModel.shownWhatsAppFiles() = uiState.value.whatsApp!!.shownFiles.map { it.name }
@@ -762,7 +830,7 @@ class StickerLibraryViewModelTest {
     @Test
     fun `before the first import every file is shown`() {
         coEvery { repository.listWhatsAppFolder(any()) } returns Result.success(listOf(file("x", lastModified = 300), file("y")))
-        val viewModel = StickerLibraryViewModel(repository)
+        val viewModel = StickerLibraryViewModel(repository, SavedStateHandle())
 
         viewModel.openWhatsAppFolder("content://tree")
 
@@ -825,7 +893,7 @@ class StickerLibraryViewModelTest {
     @Test
     fun `an import from files does not move the WhatsApp mark`() {
         coEvery { repository.importFrom(any(), any(), any()) } returns Result.success(StickerImportResult(1, 0, 0, listOf("p")))
-        val viewModel = StickerLibraryViewModel(repository)
+        val viewModel = StickerLibraryViewModel(repository, SavedStateHandle())
 
         viewModel.importFiles(listOf("content://a"))
 
@@ -835,7 +903,7 @@ class StickerLibraryViewModelTest {
     @Test
     fun `an import with nothing selected does not start`() {
         coEvery { repository.listWhatsAppFolder(any()) } returns Result.success(listOf(file("x")))
-        val viewModel = StickerLibraryViewModel(repository)
+        val viewModel = StickerLibraryViewModel(repository, SavedStateHandle())
         viewModel.openWhatsAppFolder("content://tree")
 
         viewModel.importSelectedWhatsApp()

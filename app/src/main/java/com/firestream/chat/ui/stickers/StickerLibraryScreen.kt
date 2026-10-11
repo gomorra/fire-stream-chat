@@ -133,6 +133,12 @@ internal data class StickerLibraryActions(
     val onNameSelectedNow: () -> Unit = {},
     val onStopNamingSelected: () -> Unit = {},
     val onSetNameFilter: (StickerNameFilter) -> Unit = {},
+    val onSetListView: (Boolean) -> Unit = {},
+    /** A tap on a sticker while no selection runs. Each of these four takes a sticker id. */
+    val onOpenSticker: (String) -> Unit = {},
+    val onCloseSticker: () -> Unit = {},
+    val onToggleStickerFavourite: (String) -> Unit = {},
+    val onEditSticker: (String) -> Unit = {},
 )
 
 @Composable
@@ -232,6 +238,11 @@ fun StickerLibraryScreen(
                 onNameSelectedNow = viewModel::nameSelectedNow,
                 onStopNamingSelected = viewModel::stopNamingSelected,
                 onSetNameFilter = viewModel::setNameFilter,
+                onSetListView = viewModel::setListView,
+                onOpenSticker = viewModel::openSticker,
+                onCloseSticker = viewModel::closeSticker,
+                onToggleStickerFavourite = viewModel::toggleStickerFavourite,
+                onEditSticker = viewModel::editSticker,
             )
         }
         StickerLibraryContent(uiState = uiState, actions = actions, snackbarHostState = snackbarHostState)
@@ -302,6 +313,7 @@ internal fun StickerLibraryContent(
                 pack = openPack,
                 selected = uiState.selectedStickers,
                 onToggleSticker = actions.onToggleSticker,
+                onOpenSticker = actions.onOpenSticker,
                 contentPadding = padding,
             )
         } else {
@@ -332,6 +344,24 @@ internal fun StickerLibraryContent(
     uiState.editingSticker?.let { sticker ->
         StickerWordsSheet(sticker = sticker, onSave = actions.onSaveStickerWords, onDismiss = actions.onCloseStickerEdit)
     }
+    uiState.openSticker?.let { sticker -> OpenStickerSheet(sticker, uiState.isFavourite(sticker.id), actions) }
+}
+
+/** The sheet of the sticker a tap opened, in a pack's grid and in *All stickers*. The manager has no *View pack*. */
+@Composable
+private fun OpenStickerSheet(sticker: Sticker, isFavourite: Boolean, actions: StickerLibraryActions) {
+    val callbacks = remember(sticker.id, actions) {
+        StickerDetailCallbacks(
+            onToggleFavourite = { actions.onToggleStickerFavourite(sticker.id) },
+            onEdit = { actions.onEditSticker(sticker.id) },
+            onDismiss = actions.onCloseSticker,
+        )
+    }
+    StickerDetailSheet(
+        // A library sticker is drawn from its own file.
+        state = StickerDetailState(model = sticker.localPath, format = sticker.format, sticker = sticker, isFavourite = isFavourite),
+        callbacks = callbacks,
+    )
 }
 
 /** The menu entry of a selection of one sticker that opens the edit of its emojis and names. */
@@ -775,6 +805,7 @@ private fun PackGrid(
     pack: StickerPack,
     selected: Set<StickerEntry>,
     onToggleSticker: (StickerEntry) -> Unit,
+    onOpenSticker: (String) -> Unit,
     contentPadding: PaddingValues,
 ) {
     val onToggle = rememberEntryToggle(pack.id, onToggleSticker)
@@ -793,16 +824,13 @@ private fun PackGrid(
             StickerCell(
                 sticker = sticker,
                 isSelected = StickerEntry(pack.id, sticker.id) in selected,
-                // A tap picks only once a long press has started a selection.
-                onClick = if (selected.isNotEmpty()) onToggle else NO_TAP,
+                // A tap picks once a long press has started a selection. Before that it opens the sticker's sheet.
+                onClick = if (selected.isNotEmpty()) onToggle else onOpenSticker,
                 onLongClick = onToggle,
             )
         }
     }
 }
-
-/** What a tap on a cell does while no selection runs. */
-internal val NO_TAP: (String) -> Unit = {}
 
 /**
  * The toggle of a cell in the pack [packId]. A cell hands its sticker's id
