@@ -1,6 +1,6 @@
 # Sticker manager and sticker names
 
-Status: approved by the owner on 2026-10-10. Steps 1 to 7 are shipped.
+Status: approved by the owner on 2026-10-10. Steps 1 to 7a are shipped.
 
 ## Context
 
@@ -772,6 +772,48 @@ deep. Nobody can look through a few hundred stickers to judge what the model wro
 - Docs: `FEATURE-MAP.md`, a checklist in `docs/BACKLOG.md` § *Pending on-device verification*,
   CHANGELOG `Added`.
 
+**Approach**
+
+- Order: a new `ui/stickers/StickerDetailSheet.kt` (the sheet, its state and callbacks, with
+  `StickerPreview` and `StickerActionRows` moved in from `ui/chat/StickerActionsSheet.kt`), then
+  `StickerWordsEditor.kt` (the automatic group drawn by one function), `StickerLabels.kt` (the two
+  lines of a list row), `StickerLibraryViewModel.kt` (the open sticker, the list view), then
+  `AllStickersTab.kt` and `StickerLibraryScreen.kt`, and last the chat: `StickerActionsSheet.kt`,
+  `ChatMessageActions.kt`, `ChatViewModel.kt`, `ChatScreen.kt`.
+- In a chat the library row is looked up in `ChatOverlaysState.stickerPacks`, which `ChatInfoManager`
+  already mirrors from Room. "In the library" is "some pack holds it". Nothing new is read.
+- `StickerActionsSheet` takes the overlays slice and keeps the "is the edit open" flag itself, so
+  `ChatScreen` gains one lambda and loses one expression. A save from a chat needs a new
+  `ChatViewModel.saveStickerWords`, through `ChatMessageActions`.
+- *Edit names and emojis* closes the detail sheet and opens `StickerWordsSheet` in its place. The two
+  other rows act and close the sheet, as they do today.
+- The list view's choice is one key in `SavedStateHandle`. The constructor argument has a default,
+  so the tests that build the ViewModel stay as they are.
+- Tests: `StickerDetailSheetTest` (both groups, no words, not in the library, the rows per host),
+  `StickerLabelsTest` (the two lines), additions to `StickerLibraryViewModelTest` and
+  `StickerLibraryScreenTest`, and `ChatMessageActions`' save. `StickerPreviewTest` moves with the
+  composable. `StickerPackSheetTest` keeps its two cases of the rows.
+- Nothing in the code contradicts a §0 decision. Skills beyond the floor: `code-review`, because two
+  ViewModels change, and `simplify` if the diff passes 600 lines.
+
+**Shipped** `bc5d3042` (2026-10-11) — tier: mid, tagged mid. skills: simplify, code-review. Reviewer models: simplify: sonnet, sonnet, sonnet, sonnet; code-review: sonnet, opus. CHANGELOG entry (`Added`, under `[UNRELEASED] [1.44.0]`) is in `bc5d3042`, and its hash was added in the `docs(plan):` commit.
+Departures (for sign-off):
+- **The register check did not run.** The headless session may not start `unzip` or `dexdump`. `javap` on the compiled classes gives the JVM's count of locals, which is not the dex count: `ChatScreen` 140 (with a stack of 59), and 110 for the highest method of the touched sticker files, which is the one the plan gives as 127 in dex. `ChatScreen` gained one argument of one call and lost one expression. The dex check and a debug build on a device are item 1 of the new checklist in `docs/BACKLOG.md`.
+- The CHANGELOG got a new section, `[UNRELEASED] [1.44.0]`. `[1.43.0]` is released.
+- In a chat, "in the library" is "some pack on this phone holds the sticker". The row comes from `ChatOverlaysState.stickerPacks`. A sticker that was only received has a row in `stickers` and no pack, and shows no words.
+- *Edit names and emojis* closes the sticker sheet and opens the edit in its place. After *Save* or back, the person is in the chat or the grid again, not in the sheet. A save from a chat is `ChatViewModel.saveStickerWords`, through `ChatMessageActions`. Only a failed save says something, as a snackbar.
+- The star and *View pack* close the sheet, in the manager as in a chat.
+- The person's group has the title *Your names and emojis*. The names are one line and the emojis the next.
+- The sheet scrolls. The enlarged sticker, both groups and three rows do not fit a small phone.
+- In the manager the sheet draws the sticker from its file. A sticker whose file is not on the phone yet shows a broken-image mark there (`docs/BACKLOG.md`, item 6).
+- A list row's second line holds more than the search words: the emojis of both groups, the search words, and the text on the sticker in quotation marks. A name that is both yours and automatic shows once.
+- A list row without a name shows that second line as its first. Only a row with neither says *No name* (found by `/code-review`). The plan said a row with no words says it.
+- A selected list row has the grid cell's background and a check mark at its end.
+- `SavedStateHandle` is a plain constructor argument, without the default the Approach block planned. The tests pass one (from `/simplify`).
+- `findSticker` moved from the ViewModel's file to `domain/model/StickerPack.kt`, because the chat needs it too. `NO_TAP` is gone.
+- `StickerPreviewTest` moved to `ui/stickers` with the composable. `StickerPackSheetTest` keeps its two cases of the rows.
+- Not done, from `/simplify` and `/code-review`: one section loop for the grid and the list, one selected look, one join of a sticker's word lines, one state for the two sheets (`TECH_DEBT.md`). `ui.stickers` reads `STICKER_BUBBLE_SIZE` from `ui.chat`. The two packages already knew each other.
+
 ### Step 8 — Bug hunt over everything this plan built — model: max; budget: 60
 
 `/code-review` is the standards-and-spec skill while `.claude/skills/code-review` is a symlink,
@@ -816,6 +858,16 @@ and it looks for no bugs. This step is the correctness review. It adds no featur
      of a part of the new files, at a file with `lastModified` 0, and at a phone whose clock or
      whose folder was restored. `WhatsAppImportState.shownFiles` and `setShowAllWhatsApp` decide
      what an import can take. Step 4 had `/simplify` only.
+     **(step-7a)** Also the sticker sheet: `ui/stickers/StickerDetailSheet.kt`,
+     `ui/chat/StickerActionsSheet.kt` and the list view in `AllStickersTab.kt`. Look at a sticker
+     that leaves the library while its sheet or its edit is open, in the manager
+     (`openStickerId`, `editingStickerId`) and in a chat, where `StickerActionsSheet` falls back
+     from the edit to the sheet without words. Look at a save from a chat
+     (`ChatMessageActions.saveStickerWords`) for a sticker that left the library meanwhile, and
+     at the star of a sticker that only *Favourites* holds, which takes it out of the library.
+     Look at a selection made in the grid and carried into the list. Run the register check of
+     `docs/GOTCHAS.md` on a debug APK first: step 7a could not, and `ChatScreen` gained code.
+     Step 7a's `/code-review` was the standards-and-spec skill.
   3. Names in the app: `StickerSearch`, `StickerNameSync`, `StickerNameWorker`, the name sources,
      `firestore.rules`. Nothing is asked for while the switch is off. A made sticker, a pack that
      is switched off and a sticker that is switched off are never asked for. No answer changes
