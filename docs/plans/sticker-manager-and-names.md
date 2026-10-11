@@ -1,6 +1,6 @@
 # Sticker manager and sticker names
 
-Status: approved by the owner on 2026-10-10. Steps 1 to 5 are shipped.
+Status: approved by the owner on 2026-10-10. Steps 1 to 6 are shipped.
 
 ## Context
 
@@ -558,6 +558,56 @@ Departures (for sign-off):
   CHANGELOG `Added`. `TECH_DEBT.md`: Lottie stickers get no automatic name, and anyone signed in
   can ask for any id.
 
+**Approach**
+
+- Order: `firestore.rules` and `firestore-rules-tests/stickerNames.test.js`, then
+  `StickerNameSource` with its Firestore and pocketbase implementations and both DI modules, then
+  `StickerDao` (the candidates, the answer, the two switches), `PreferencesDataStore`,
+  `StickerNameAnswer` (the check), `StickerNameSync`, `StickerNameScheduler` + `StickerNameWorker`,
+  `StickerSyncWorker` and `StickerLibrarySync` (the trigger and the sign-out), `StickerRepository` +
+  `StickerRepositoryImpl`, `StickerSearch` (the filter), and last the manager's UI.
+- A run looks a sticker up before it asks: one `get`, and a create only when the backend has no
+  document. A second phone then finds the first phone's request or answer and writes nothing. The
+  create is a transaction that writes only when the document is absent, because the rules refuse a
+  second write and that refusal must not read as "naming is not available".
+- `nameRequestedAt` is when this phone last asked for, or found, a record without a usable answer.
+  Within a day of it the sticker is only looked up. A `skipped` or malformed record therefore costs
+  one read per run and is never asked for twice.
+- The spec's "growing delay, up to a day" is WorkManager's own backoff here, which stops growing at
+  five hours. A trigger replaces a waiting run, so *Name now* is not held up by a backoff.
+- The phone asks for WebP stickers only, and only for a sticker that some pack holds. The switch,
+  the packs and the stickers are read again before every batch.
+- Made stickers that an older build's manifest does not mark (step 5's note): no rule can tell them
+  from imported ones. Nothing is added. The device checklist tells the owner to close them by hand.
+- Tests: `StickerNameSyncTest` (the table, the answers, a refusal), `StickerNameAnswerTest`,
+  `StickerNameWorkerTest`, `StickerNameSchedulerTest`, `FirestoreStickerNameSourceTest`, the rules
+  tests, and additions to `StickerDaoTest`, `StickerRepositoryImplTest`, `StickerSyncWorkerTest`,
+  `StickerSearchTest`, `StickerLibraryViewModelTest`, `StickerLibraryScreenTest` and
+  `StickerWordsEditorTest`.
+- Nothing in the code contradicts a §0 decision. Skills beyond the floor: `simplify`, because the
+  diff will pass 600 lines.
+
+**Shipped** `db3d6b82` (2026-10-11) — tier: max, tagged max. skills: simplify, code-review. Reviewer models: simplify: sonnet, sonnet, sonnet, sonnet; code-review: opus, sonnet. CHANGELOG entry (`Added`, under `[UNRELEASED] [1.43.0]`) is in `db3d6b82`, and its hash was added in the `docs(plan):` commit.
+Departures (for sign-off):
+- A run comes back by WorkManager's own backoff: after 1, 2, 4 … minutes, and at the latest every five hours. The plan said up to a day, and WorkManager grows no further (`docs/GOTCHAS.md`). A new trigger replaces a waiting run, so *Name now* and an open manager do not wait.
+- The phone looks a sticker up before it asks: one `get`, and a create only when there is no document, inside a transaction. A second phone that holds the sticker creates nothing.
+- "Its file is on the backend" is `remoteUrl`, or a synced pack that holds the sticker. A restored row has no `remoteUrl` until the sticker is first sent. With the plan's test alone, nothing was asked for after the update or on a second phone (found by `/code-review`).
+- `nameRequestedAt` is also set by a look that finds a request, a `skipped` record or a malformed answer. Such a sticker is read once per run and never asked for twice. `skipped` is final for the phones, because the rules let no phone write over a document.
+- The phone asks for WebP stickers only, and only for a sticker that some pack holds.
+- An answer is taken whole or not at all. The limits are a name of 80 characters, 16 words of 40, a text of 128 and 3 emojis. An emoji has no letter and no space.
+- An answer is written by a transaction that reads the row and writes it back with the `auto…` columns changed, not by one `UPDATE` query. The lists go through Room's converter that way.
+- A sticker that leaves a pack left out of naming is closed itself: by a move, a removal, a merge, the pack's delete, and a star taken off in a *Favourites* that is left out. Without this, a merge opened what its owner had closed (found by `/code-review`). The owner opens such a sticker again with *Name now*.
+- *Name now* opens the stickers and asks. For a sticker in a pack that is left out it only says which pack holds it back, and the pack stays as it is. *Name now* is offered only while the switch is on.
+- *Use as mine* adds the German name, the English name and the words to the names, up to eight in all. Its save closes the sticker to naming in the same write (`setStickerWords(stopAutoNaming)`).
+- *No name* shows a sticker with no name of a person's and nothing found automatically. *Named automatically* shows every sticker the service named, also after *Use as mine*.
+- The switch is the first row of the *Packs* tab. It is kept per device and cleared at sign-out, where the naming work is cancelled too. The three consent writes finish although their caller is cancelled (`docs/PATTERNS.md`).
+- A refusal is kept in `PreferencesDataStore` (`sticker_naming_refused`), so the manager can show it after the worker's process is gone. The next run that reaches the backend takes it back.
+- The rules also cap `format` at 16 characters. `ConsentNotice` is new, and `OnlineMediaNotice` draws with it (from `/simplify`).
+- No rule was added for a made sticker that an older manifest does not mark. The device checklist in `docs/BACKLOG.md` tells the owner to close such stickers by hand before switching on.
+- The rules tests did not run on this machine: `npm ci` needs an approval that a headless run cannot give. `.github/workflows/firestore-rules.yml` runs them on the push. Look at that run before `firestore.rules` is deployed.
+- `/code-review` was the standards-and-spec skill. It hunted no bugs beyond the two it found on the way, and step 8 carries the notes.
+- Not done, from `/simplify`: one write per batch in a naming run, a shared helper for the two schedulers' enqueue, and a naming trigger at every first upload (`TECH_DEBT.md`).
+
 ### Step 7 — The naming service on the owner's PC — skills: code-review; model: strong
 
 - `tools/sticker-namer/`, Python 3, with `firebase-admin` and `Pillow` pinned in
@@ -599,6 +649,31 @@ Departures (for sign-off):
   answered while it waits.
 - Docs: `tools/sticker-namer/README.md`, `FEATURE-MAP.md`, `ARCHITECTURE.md` (one paragraph on the
   service), CHANGELOG is not owed (nothing in the app changes).
+- **(step-6)** The document is `stickerNames/{stickerId}`, and its shape is in
+  `docs/SCHEMA-FIRESTORE.md`. A request's `format` is the name of the sticker's format, `WEBP`, and
+  not a file extension. Map `WEBP` to `webp` and answer every other value `skipped`. It is typed
+  by a client, so treat it as untrusted. The rules cap it at 16 characters.
+- **(step-6)** The answer's fields are `nameEn`, `nameDe`, `words`, `text`, `emojis`, `model` and
+  `namedAt`, with `status: "done"`. `words` is one list: `words_en` and `words_de` of the model's
+  answer joined. Keep `format` and `requestedAt` in the document.
+- **(step-6)** The phone's limits are in `StickerNameAnswer`: a name of at most 80 characters, at
+  most 16 words of at most 40 characters, a text of at most 128 characters, at most 3 emojis. An
+  emoji has no letter and no space, and at least one character outside ASCII. One field over a
+  limit makes the phone drop the whole answer. So the service cuts a long `text`, drops a word or
+  an emoji that does not fit, and asks the model again for a name that is too long. It never
+  writes a field that breaks a limit.
+- **(step-6)** `skipped` is final for the phones. The rules let no phone create a second request
+  over a document, and a phone only reads a skipped one again. Answer `skipped` only for a
+  failure that will not pass. To have a sticker named after all, the service or the owner deletes
+  its document, and a phone asks again within a day.
+- **(step-6)** The phone asks for WebP stickers only. A request for a Lottie sticker can still
+  come from another client, so the `skipped` answer for one stays.
+- **(step-6)** A phone fetches answers when the manager opens, and otherwise after 1, 2, 4 …
+  minutes, up to five hours. For the end-to-end check in `setup.sh`, tell the owner to open the
+  manager. The listener's query (`status == "pending"`) needs no composite index. The rules tests
+  in `firestore-rules-tests/stickerNames.test.js` did not run on the machine that wrote them:
+  `.github/workflows/firestore-rules.yml` runs them on the push. Look at that run before the
+  rules are deployed.
 
 **‖ Checkpoint.** The owner deploys `firestore.rules`, runs `setup.sh`, and tests about 40 of
 their own stickers with `evaluate.py`. `MODEL` in the env file is set to the model the owner picks.
@@ -661,6 +736,22 @@ and it looks for no bugs. This step is the correctness review. It adds no featur
      running restore, at `StickerManifest.stickersOf` for an entry without `autoNameAllowed`, and
      at `StickerSearch` with a query of many words on a large library, which runs in composition.
      Step 5's `/code-review` was the standards-and-spec skill, and its `/simplify` hunted no bugs.
+     **(step-6)** Also the naming run. `StickerNameScheduler` queues it with `REPLACE`, so a run
+     is cancelled in the middle by every new trigger. Look at a cancel between
+     `StickerNameSource.request` and `StickerDao.setNameRequestedAt`, at two runs that overlap on
+     `StickerNameSync.runLock`, and at the `looked` set when rows change between two batches.
+     Look at the consent writes in `StickerRepositoryImpl`, which run under `NonCancellable`.
+     Look at a restore that opens a sticker again its owner had closed
+     (`mergeStickers(takeWords)`), which the next run then asks for. Look at
+     `StickerDao.keepOutOfNaming`: every way a sticker leaves a pack that is left out has to
+     pass it, and `applyRemotePack`, `removeFromEveryPack` and `createPack` do not call it. Look
+     at `StickerDao.getNameCandidates`, which takes a synced pack as proof that a file is on the
+     backend, for a pack added through *View pack* whose files were never uploaded. Look at `PreferencesDataStore.stickerNamingRefusedFlow` after a sign-out in
+     the middle of a run, at `StickerSyncWorker.uploadedFiles` when an upload fails half-way, and
+     at `StickerNameAnswer` with an answer written to pass the check and still mislead a search.
+     The rules: a `get` of any sticker's name by anyone signed in, and whether any write other
+     than the request passes. Step 6's `/code-review` was the standards-and-spec skill, and the
+     rules tests ran only in CI.
   4. The service: `tools/sticker-namer/`. A request that is answered twice. A crash in the middle
      of a batch. What a log line holds. Where the key can be read from.
 - **A finding needs a failure path.** A reviewer reports the input or state, the path through the
