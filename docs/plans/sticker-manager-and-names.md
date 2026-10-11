@@ -865,9 +865,13 @@ and it looks for no bugs. This step is the correctness review. It adds no featur
      from the edit to the sheet without words. Look at a save from a chat
      (`ChatMessageActions.saveStickerWords`) for a sticker that left the library meanwhile, and
      at the star of a sticker that only *Favourites* holds, which takes it out of the library.
-     Look at a selection made in the grid and carried into the list. Run the register check of
-     `docs/GOTCHAS.md` on a debug APK first: step 7a could not, and `ChatScreen` gained code.
+     Look at a selection made in the grid and carried into the list. The register check of
+     `docs/GOTCHAS.md` ran after the step: `ChatScreen` 179, `PackRow` 127, of 255.
      Step 7a's `/code-review` was the standards-and-spec skill.
+     **(after step-7a, `5a03e031`)** A name still in the field is saved by *Save*. The typed name
+     is the caller's now (`StickerWordChips(nameDraft)`, `StickerCreateUiState.nameDraft`, a
+     `rememberSaveable` in `StickerWordsEditor`). Look at a draft that outlives its field: *Use as
+     mine* or an add that brings the names to the limit of eight while a name is typed.
   3. Names in the app: `StickerSearch`, `StickerNameSync`, `StickerNameWorker`, the name sources,
      `firestore.rules`. Nothing is asked for while the switch is off. A made sticker, a pack that
      is switched off and a sticker that is switched off are never asked for. No answer changes
