@@ -344,7 +344,7 @@ check "malformed variant file exits 1"        "1" "$(PLAN_RUNNER_VARIANTS_DIR=$F
 check "fixture variant ok.env loads (ESCALATE=0 shows as blocked)" "1" "$(PLAN_RUNNER_RUNS_DIR=$TMP/runs PLAN_RUNNER_VARIANTS_DIR=$F/variants "$HERE/../run-plan.sh" "$PLAN" --dry-run --variant ok 2>/dev/null | grep -c 'after a failed nudge: blocked | judge: opus/high' | sed 's/^[1-9][0-9]*$/1/')"
 check "bad --base exits 1"                    "1" "$("$HERE/../run-plan.sh" "$PLAN" --dry-run --base no-such-ref >/dev/null 2>&1; echo $?)"
 check "usage exits 1 without a plan"          "1" "$("$HERE/../run-plan.sh" >/dev/null 2>&1; echo $?)"
-check "--help prints the usage block with the new flags" "4" "$("$HERE/../run-plan.sh" --help 2>/dev/null | grep -cE '^  --(variant|base|to|sync-from) ' || true)"
+check "--help prints the usage block with the new flags" "5" "$("$HERE/../run-plan.sh" --help 2>/dev/null | grep -cE '^  --(variant|base|to|sync-from|no-keep-awake) ' || true)"
 check "--help names exit 5"                   "1" "$("$HERE/../run-plan.sh" --help 2>/dev/null | grep -c '5 stopped for the owner' || true)"
 check "--help names exit 130"                 "1" "$("$HERE/../run-plan.sh" --help 2>/dev/null | grep -c '130 interrupted' || true)"
 check "the dry run shows the stream format the driver reads" "4" "$(grep -c -- '--output-format stream-json --verbose' <<< "$dry" || true)"
