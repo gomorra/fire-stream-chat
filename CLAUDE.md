@@ -128,7 +128,7 @@ Do not reimplement either with a custom review prompt.
 Multi-step plans run unattended from a terminal, not from inside a Claude session:
 
 ```bash
-scripts/run-plan.sh <plan-path> [--from N] [--to N] [--dry-run] [--cap <tier>] [--budget <USD>] [--variant <name>] [--base <ref>] [--sync-from <ref>|none]
+scripts/run-plan.sh <plan-path> [--from N] [--to N] [--dry-run] [--cap <tier>] [--budget <USD>] [--variant <name>] [--base <ref>] [--sync-from <ref>|none] [--no-keep-awake]
 ```
 
 - **One session per step.** Each step gets a fresh headless session in a dedicated worktree on `plan/<name>`.
@@ -138,6 +138,7 @@ scripts/run-plan.sh <plan-path> [--from N] [--to N] [--dry-run] [--cap <tier>] [
 - **Pause.** Create `docs/plans/.runs/<run-id>.pause` to stop the run before its next step, or during a usage-limit wait (exit 5). Run again to continue.
 - **Usage limit.** The driver reads every session's stream while it runs. At the usage limit it stops the session, because a cloud session would go on on cloud credits. It waits for the reset and resumes the same session. A reset over six hours away, or a seventh wait in one step, blocks the step (exit 3). Run again after the reset to resume it.
 - **Ctrl-C** stops the running session and exits 130.
+- **Keep awake.** A run blocks the host's sleep and idle suspend for as long as the driver lives (`systemd-inhibit`). `--no-keep-awake` turns that off for one run, and the `KEEP_AWAKE` tunable sets the default. A host without `systemd-inhibit` gets a note and runs unblocked.
 - **Partly hand-finished plans** need `**Shipped**` lines for their done steps, or `--from N`. Always `--dry-run` first.
 - **Retries.** A step that is still invalid after its one nudge, or gives up on the gate, re-runs once at the next effort level. The failed attempt is kept on a `plan-attempts/` branch. A fresh review session repairs a missed skill.
 - **`--variant NAME`** runs under `scripts/plan-runner/variants/NAME.env` on its own branch, worktree and log. Pass it on every re-run.

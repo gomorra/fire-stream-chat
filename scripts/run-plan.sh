@@ -6,6 +6,7 @@
 #
 #   scripts/run-plan.sh <plan.md> [--from N] [--to N] [--dry-run] [--cap max|strong|mid] [--budget USD]
 #                                 [--variant NAME] [--base REF] [--sync-from REF|none]
+#                                 [--keep-awake|--no-keep-awake]
 #
 #   --variant NAME  load scripts/plan-runner/variants/NAME.env over the tunables below and run
 #                   on plan/<name>-NAME (own worktree, own log) — two configurations of one
@@ -17,6 +18,11 @@
 #                   boundary the plan file, and nothing else, is merged from REF into the branch's
 #                   copy. A remote-tracking REF is fetched first: pass origin/main in a cloud
 #                   container, whose local main never moves. none = no sync.
+#   --no-keep-awake let the host suspend during the run. By default (KEEP_AWAKE=1) a run holds a
+#                   systemd block on sleep and idle for as long as the driver lives, so a session
+#                   or a usage-limit wait is not cut by the desktop's idle suspend. --keep-awake
+#                   turns it on where the tunable is 0. A host without a working systemd-inhibit
+#                   (a cloud container) gets a note and runs unblocked.
 #
 # Step boundary: before each launch, a pause file docs/plans/.runs/<run-id>.pause stops the run
 # (exit 5; the file is removed, and running again continues), then the plan is synced from REF.
@@ -67,6 +73,7 @@ USAGE_RESUME_MAX=6         # limit stops waited out per step, over its step, nud
 USAGE_SLICE_S=60           # a wait sleeps in slices against the wall clock, and looks for the pause file in each
 GATE_TASKS=":app:testFirebaseDebugUnitTest :app:assembleFirebaseDebug"
 NOTIFY_CMD=notify-send     # <cmd> "<title>" "<body>"; point at a phone bridge later
+KEEP_AWAKE=1               # 1 = a run blocks the host's sleep and idle suspend (systemd-inhibit); --keep-awake / --no-keep-awake override
 PERMISSION_MODE=acceptEdits
 # Tuned from the run log's permission_denials (§0 Permissions). No interpreter
 # (python3 & co.) — one would route around every deny pattern below.
@@ -124,6 +131,8 @@ while [ $# -gt 0 ]; do
         --variant) need_arg "$@"; VARIANT=$2; shift 2 ;;
         --base)    need_arg "$@"; BASE_REF=$2; shift 2 ;;
         --sync-from) need_arg "$@"; SYNC_FROM=$2; shift 2 ;;
+        --keep-awake)    KEEP_AWAKE=1; shift ;;
+        --no-keep-awake) KEEP_AWAKE=0; shift ;;
         -h|--help) usage 0 ;;
         -*)        echo "unknown flag $1" >&2; usage 1 ;;
         *)         [ -z "$PLAN_ARG" ] || usage 1; PLAN_ARG=$1; shift ;;
@@ -331,6 +340,21 @@ log_result() {
         --argjson models "$(pr_result_json "$f" '.modelUsage | map_values(.costUSD)' '{}')" \
         --argjson consults "$(pr_result_json "$f" .structured_output.advisorConsults null)" \
         --arg file "$(rel "$f")"
+}
+
+# keep_awake  → holds a systemd block on sleep and idle for as long as this driver lives. The holder
+# watches the driver's pid, so it ends with the driver however that dies, and no trap has to stop it.
+# The probe comes first because a refused block (no logind, no polkit grant) only shows as an exit code.
+keep_awake() {
+    [ "$KEEP_AWAKE" = 1 ] || return 0
+    if ! command -v systemd-inhibit >/dev/null 2>&1 \
+        || ! systemd-inhibit --what=sleep:idle --who=plan-runner --why="plan run $RUN_ID" true >/dev/null 2>&1; then
+        say "note: cannot keep this host awake (no working systemd-inhibit) — a suspend holds the run up until the host wakes"
+        return 0
+    fi
+    systemd-inhibit --what=sleep:idle --who=plan-runner --why="plan run $RUN_ID" \
+        tail --pid=$$ -f /dev/null < /dev/null > /dev/null 2>&1 &
+    say "keeping this host awake for the run (a systemd block on sleep and idle; --no-keep-awake turns it off)"
 }
 
 # ---- sessions and the usage limit ------------------------------------------------
@@ -1168,6 +1192,7 @@ if [ "$DRY_RUN" = 0 ]; then
     trap on_signal INT TERM
     # A driver that dies on its ERR trap must not leave a session running in the worktree.
     trap '[ -z "$SESSION_PID" ] || stop_session' EXIT
+    keep_awake
     # The newest known window state at start-up is the log's last usage_limit: a run stopped during a
     # wait, or blocked past the ceiling, waits out a reset that still lies ahead before its first launch.
     last_limit=$(jq -r 'select(.event == "usage_limit") | "\(.resets_at // "") \(.session)"' "$LOG" 2>/dev/null | tail -1 || true)

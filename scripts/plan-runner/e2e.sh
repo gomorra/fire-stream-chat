@@ -141,6 +141,15 @@ case "$beh" in
 esac
 STUB_CLAUDE
 chmod +x "$STUB/bin/claude"
+# Stands in for systemd-inhibit: records each call and the pid of the command it runs, then runs it.
+cat > "$STUB/bin/systemd-inhibit" <<'STUB_INHIBIT'
+#!/usr/bin/env bash
+echo "$*" >> "$STUB/inhibits"
+while [ $# -gt 0 ]; do case "$1" in --*) shift ;; *) break ;; esac; done
+[ "$1" != tail ] || echo $$ > "$STUB/inhibit-pid"
+exec "$@"
+STUB_INHIBIT
+chmod +x "$STUB/bin/systemd-inhibit"
 export STUB PATH="$STUB/bin:$PATH"
 
 # new_repo <dir>  → a scratch repo on `main` with the runner, a stub gradlew and a one-step plan.
@@ -168,7 +177,7 @@ scenario() {
     R=$TMP/repo-$n-$RANDOM; RUNS=$R/runs; new_repo "$R"
     : > "$STUB/calls"; : > "$STUB/steps"; : > "$STUB/saw-attempt-block"; : > "$STUB/saw-decision"; rm -f "$STUB/judge-cwd" "$STUB"/during.*
     : > "$STUB/cwds"; : > "$STUB/resumes"; : > "$STUB/budgets"; : > "$STUB/saw-interrupted-block"; : > "$STUB/signals"; rm -f "$STUB/started" "$STUB/reset-in"
-    rm -rf "$PLAN_RUNNER_CLAUDE_HOME"
+    rm -rf "$PLAN_RUNNER_CLAUDE_HOME"; : > "$STUB/inhibits"; rm -f "$STUB/inhibit-pid"
     echo green > "$STUB/gate"
     printf '%s\n' "$@" > "$STUB/queue"
 }
@@ -208,6 +217,15 @@ check "events"                                   "launched result validated" "$(
 check "one session, default config, no advisor"  "step:done-valid:medium:none" "$(calls)"
 check "validated event carries the @Test delta"  "1 2" "$(jq -r 'select(.event=="validated") | "\(.tests_before) \(.tests_after)"' "$RUNS/mini.log")"
 check "the launch records the base it forked from" "$(git -C "$R" rev-parse main | cut -c1-8)" "$(jq -r 'select(.event=="launched") | .base' "$RUNS/mini.log")"
+
+check "the run held one block on sleep and idle" "1" "$(grep -c -- '--what=sleep:idle .* tail --pid=' "$STUB/inhibits" || true)"
+for _ in $(seq 1 30); do kill -0 "$(cat "$STUB/inhibit-pid")" 2>/dev/null || break; sleep 0.1; done
+check "the block ends with the driver"           "gone" "$(kill -0 "$(cat "$STUB/inhibit-pid")" 2>/dev/null && echo held || echo gone)"
+
+scenario "--no-keep-awake holds no block" done-valid
+run --no-keep-awake
+check "exit 0"                                   "0" "$rc"
+check "systemd-inhibit was not called"           "0" "$(wc -l < "$STUB/inhibits" | tr -d ' ')"
 
 scenario "--to stops cleanly before the next step" done-valid
 write_plan "1 → 2" 1 2

@@ -49,6 +49,9 @@ stops the run there, and running again continues. The plan sync merges the plan 
 else, from `--sync-from` (default `main`; pass `origin/main` in a cloud container) and commits it as
 `docs(plan): sync …` with a `Plan-Synced-From:` trailer. It is the only commit the runner makes.
 
+A run keeps the host awake. The driver holds a `systemd-inhibit` block on sleep and idle from its
+first step to its exit, through sessions and usage-limit waits. `--no-keep-awake` turns it off.
+
 ## One step
 
 A step gets at most three kinds of help, each once — per step, across re-runs of the driver: a
