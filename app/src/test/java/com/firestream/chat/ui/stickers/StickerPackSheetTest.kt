@@ -15,7 +15,6 @@ import com.firestream.chat.domain.model.AppError
 import com.firestream.chat.domain.model.Sticker
 import com.firestream.chat.domain.model.StickerPackPreview
 import com.firestream.chat.test.fakes.testSticker
-import com.firestream.chat.ui.chat.StickerActionRows
 import com.firestream.chat.ui.components.LibraryStickerImage
 import com.firestream.chat.ui.components.LocalStickerFetcher
 import org.junit.Assert.assertEquals

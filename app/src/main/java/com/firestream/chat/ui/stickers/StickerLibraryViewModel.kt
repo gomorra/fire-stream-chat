@@ -1,5 +1,6 @@
 package com.firestream.chat.ui.stickers
 
+import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.firestream.chat.domain.model.AppError
@@ -8,6 +9,7 @@ import com.firestream.chat.domain.model.StickerAutoNaming
 import com.firestream.chat.domain.model.StickerPack
 import com.firestream.chat.domain.model.StickerPackKind
 import com.firestream.chat.domain.model.WhatsAppStickerFile
+import com.firestream.chat.domain.model.findSticker
 import com.firestream.chat.domain.repository.StickerRepository
 import com.firestream.chat.domain.util.StickerNameFilter
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -43,10 +45,6 @@ data class WhatsAppImportState(
     val allSelected: Boolean get() = shownFiles.isNotEmpty() && shownFiles.all { it.uri in selected }
 }
 
-/** The sticker [id] as the first pack that holds it has it, or `null` when no pack does. */
-private fun List<StickerPack>.findSticker(id: String): Sticker? =
-    firstNotNullOfOrNull { pack -> pack.stickers.firstOrNull { it.id == id } }
-
 /** One sticker in one pack. A sticker that two packs hold is two entries. */
 data class StickerEntry(val packId: String, val stickerId: String)
 
@@ -75,6 +73,10 @@ data class StickerLibraryUiState(
     val nameFilter: StickerNameFilter = StickerNameFilter.ALL,
     /** Automatic sticker names: offered or not, switched on or not, refused by the backend or not. */
     val autoNaming: StickerAutoNaming = StickerAutoNaming(),
+    /** Whether the *All stickers* tab is a list with each sticker's words beside it, and not the grid. */
+    val isListView: Boolean = false,
+    /** The sticker whose sheet is open, or `null`. */
+    val openStickerId: String? = null,
     /** The sticker whose emojis and names are being edited, or `null`. */
     val editingStickerId: String? = null,
     /** The WhatsApp folder view, shown over everything else while it is not `null`. */
@@ -108,6 +110,13 @@ data class StickerLibraryUiState(
     val editingSticker: Sticker?
         get() = editingStickerId?.let(packs::findSticker)
 
+    val openSticker: Sticker?
+        get() = openStickerId?.let(packs::findSticker)
+
+    /** Whether the sticker [id] has a star, which is being in *Favourites*. */
+    fun isFavourite(id: String): Boolean =
+        packs.any { pack -> pack.kind == StickerPackKind.FAVOURITES && pack.stickers.any { it.id == id } }
+
     /**
      * The packs the selection can move to. Not *Favourites*, which has its own
      * action, and not the pack that all of the selection is in.
@@ -127,9 +136,11 @@ data class StickerLibraryUiState(
 @HiltViewModel
 class StickerLibraryViewModel @Inject constructor(
     private val stickerRepository: StickerRepository,
+    // Keeps the grid-or-list choice while the manager is open, a process death included.
+    private val savedStateHandle: SavedStateHandle,
 ) : ViewModel() {
 
-    private val _uiState = MutableStateFlow(StickerLibraryUiState())
+    private val _uiState = MutableStateFlow(StickerLibraryUiState(isListView = savedStateHandle[KEY_LIST_VIEW] ?: false))
     val uiState: StateFlow<StickerLibraryUiState> = _uiState.asStateFlow()
 
     /**
@@ -154,7 +165,8 @@ class StickerLibraryViewModel @Inject constructor(
                             openPackId = open?.id,
                             selectedStickers = state.selectedStickers.heldBy(packs),
                             selectedPackIds = state.selectedPackIds.filterTo(LinkedHashSet()) { it in selectable },
-                            // A sticker that left the library while its sheet was open has nothing to edit.
+                            // A sticker that left the library while its sheet was open has nothing to show or edit.
+                            openStickerId = state.openStickerId?.takeIf { packs.findSticker(it) != null },
                             editingStickerId = state.editingStickerId?.takeIf { packs.findSticker(it) != null },
                         )
                     }
@@ -300,6 +312,23 @@ class StickerLibraryViewModel @Inject constructor(
 
     fun closeStickerEdit() = _uiState.update { it.copy(editingStickerId = null) }
 
+    /** Shows the *All stickers* tab as a list with each sticker's words, or as the grid again. */
+    fun setListView(isListView: Boolean) {
+        savedStateHandle[KEY_LIST_VIEW] = isListView
+        _uiState.update { it.copy(isListView = isListView) }
+    }
+
+    /** Opens the sheet of one sticker: the picture, what it is found by, and its rows. */
+    fun openSticker(stickerId: String) = _uiState.update { it.copy(openStickerId = stickerId) }
+
+    fun closeSticker() = _uiState.update { it.copy(openStickerId = null) }
+
+    /** Gives the sticker a star, or takes it off. */
+    fun toggleStickerFavourite(stickerId: String) = edit { stickerRepository.toggleFavourite(stickerId).map { } }
+
+    /** Puts the edit of the sticker's emojis and names in the place of its sheet. */
+    fun editSticker(stickerId: String) = _uiState.update { it.copy(editingStickerId = stickerId, openStickerId = null) }
+
     /**
      * Gives the sticker being edited these emojis and names, and closes the
      * edit. With [stopAutoNaming] the sticker is also left out of automatic
@@ -435,5 +464,7 @@ class StickerLibraryViewModel @Inject constructor(
          * `StickerPackEntity.LOOSE_WHATSAPP_KEY` is the key it makes.
          */
         const val WHATSAPP_PACK_NAME = "WhatsApp"
+
+        private const val KEY_LIST_VIEW = "all_stickers_list_view"
     }
 }

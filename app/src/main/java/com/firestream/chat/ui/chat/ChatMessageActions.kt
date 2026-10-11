@@ -142,6 +142,26 @@ internal class ChatMessageActions(
         }
     }
 
+    /**
+     * Gives a library sticker these emojis and names. With [stopAutoNaming] it
+     * is also left out of automatic naming, in the same write.
+     *
+     * [onFailed] gets the line to show when the write fails. A save that worked
+     * says nothing: the sheet shows the new words the next time it opens.
+     */
+    fun saveStickerWords(
+        stickerId: String,
+        emojis: List<String>,
+        names: List<String>,
+        stopAutoNaming: Boolean,
+        onFailed: (String) -> Unit,
+    ) {
+        scope.launch {
+            stickerRepository.setStickerWords(stickerId, emojis, names, stopAutoNaming)
+                .onFailure { onFailed("Couldn't save the names") }
+        }
+    }
+
     fun toggleStar(message: Message) {
         scope.launch {
             messageRepository.starMessage(message.id, !message.isStarred)

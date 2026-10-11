@@ -249,21 +249,7 @@ internal const val USE_AS_MINE_LABEL = "Use as mine"
 /** What the naming service found, read-only, with the button that takes it over. */
 @Composable
 private fun AutomaticWords(autoName: StickerAutoName, usedAsMine: Boolean, onUseAsMine: () -> Unit) {
-    WordsTitle("Found automatically")
-    val lines = listOfNotNull(
-        listOf(autoName.nameDe, autoName.nameEn).filter { it.isNotEmpty() }.joinToString(" · ").ifEmpty { null },
-        autoName.words.joinToString(", ").ifEmpty { null },
-        autoName.text.ifEmpty { null }?.let { "Text: $it" },
-        autoName.emojis.joinToString(" ").ifEmpty { null },
-    )
-    lines.forEach { line ->
-        Text(
-            text = line,
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.fillMaxWidth(),
-        )
-    }
+    AutomaticWordLines(autoName)
     if (usedAsMine) {
         Text(
             text = "Added to your names. Saving also stops automatic naming for this sticker.",
@@ -276,8 +262,41 @@ private fun AutomaticWords(autoName: StickerAutoName, usedAsMine: Boolean, onUse
     }
 }
 
+internal const val AUTOMATIC_WORDS_TITLE = "Found automatically"
+
+/**
+ * What the naming service found, read-only, under its title: the German and the
+ * English name, the search words, the text on the sticker and the emojis. The
+ * edit sheet and the sticker sheet both draw the group with this.
+ */
 @Composable
-private fun WordsTitle(text: String) {
+internal fun AutomaticWordLines(autoName: StickerAutoName) {
+    WordsTitle(AUTOMATIC_WORDS_TITLE)
+    WordLines(
+        listOfNotNull(
+            listOf(autoName.nameDe, autoName.nameEn).filter { it.isNotEmpty() }.joinToString(" · ").ifEmpty { null },
+            autoName.words.joinToString(", ").ifEmpty { null },
+            autoName.text.ifEmpty { null }?.let { "Text: $it" },
+            autoName.emojis.joinToString(" ").ifEmpty { null },
+        )
+    )
+}
+
+/** The lines of one group of a sticker's words, read-only. */
+@Composable
+internal fun WordLines(lines: List<String>) {
+    lines.forEach { line ->
+        Text(
+            text = line,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.fillMaxWidth(),
+        )
+    }
+}
+
+@Composable
+internal fun WordsTitle(text: String) {
     Text(
         text = text,
         style = MaterialTheme.typography.labelMedium,

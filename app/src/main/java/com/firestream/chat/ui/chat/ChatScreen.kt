@@ -2403,9 +2403,10 @@ fun ChatScreen(
         val stickerId = target.stickerId
         StickerActionsSheet(
             message = target,
-            isFavourite = stickerId != null && stickerId in uiState.overlays.favouriteStickerIds,
+            overlays = uiState.overlays,
             onToggleFavourite = { if (stickerId != null) viewModel.toggleStickerFavourite(stickerId, target) },
             onViewPack = target.stickerPackId?.let { packId -> { viewedStickerPackId = packId } },
+            onSaveWords = viewModel::saveStickerWords,
             onDismiss = { stickerSheetMessage = null },
         )
     }

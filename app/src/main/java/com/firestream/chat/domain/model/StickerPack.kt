@@ -58,6 +58,10 @@ data class StickerPack(
         get() = !kind.isNamed || shownInRow
 }
 
+/** The sticker [id] as the first pack that holds it has it, or `null` when no pack does. */
+fun List<StickerPack>.findSticker(id: String): Sticker? =
+    firstNotNullOfOrNull { pack -> pack.stickers.firstOrNull { it.id == id } }
+
 /**
  * A pack someone else may own, as it is offered for adding to the library.
  *

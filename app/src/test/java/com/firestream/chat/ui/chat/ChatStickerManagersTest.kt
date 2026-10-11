@@ -230,4 +230,22 @@ class ChatStickerManagersTest {
 
             assertEquals("Couldn't update favourites", line)
         }
+
+    @Test
+    fun `the words edited in the sticker sheet are saved in one write, and only a failure says something`() =
+        runTest(mainDispatcherRule.testDispatcher) {
+            coEvery { stickerRepository.setStickerWords("cat", any(), any(), any()) } returns Result.success(Unit)
+            coEvery { stickerRepository.setStickerWords("dog", any(), any(), any()) } returns
+                Result.failure(NoSuchElementException("not in the library"))
+            val lines = mutableListOf<String>()
+
+            actions().saveStickerWords("cat", listOf("😺"), listOf("Cat"), stopAutoNaming = true) { lines += it }
+            advanceUntilIdle()
+            coVerify(exactly = 1) { stickerRepository.setStickerWords("cat", listOf("😺"), listOf("Cat"), true) }
+            assertEquals(emptyList<String>(), lines)
+
+            actions().saveStickerWords("dog", emptyList(), emptyList(), stopAutoNaming = false) { lines += it }
+            advanceUntilIdle()
+            assertEquals(listOf("Couldn't save the names"), lines)
+        }
 }

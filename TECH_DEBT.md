@@ -371,6 +371,16 @@ Known refactors and code smells that have been consciously deferred or declined.
 
 ---
 
+### The sticker manager's grid and list repeat their section loop
+
+**The smell.** `AllStickersTab` draws its sections twice: once as a `LazyVerticalGrid` and once as a `LazyColumn`. Both loops build the title, the `StickerEntry`, the toggle and the tap rule. `StickerListRow` also repeats the selected look of `StickerCellFrame` (the background and the check mark). The lines of a sticker's words are joined in three places: `nameLine` and `wordLine` in `StickerLabels.kt`, `AutomaticWordLines` in `StickerWordsEditor.kt`, and `StickerWords` in `StickerDetailSheet.kt`. The manager also keeps two ids that are never both set, `openStickerId` and `editingStickerId`.
+
+**Why we haven't fixed it.** A grid and a list have different item scopes, so one loop needs a lambda per cell and a helper per scope. The three joins differ in what they show: a list row is cut at one line, and the sheet gives each field its own. Flagged by `/simplify` and `/code-review` on step 7a of `docs/plans/sticker-manager-and-names.md`.
+
+**When to revisit.** When a third view of *All stickers* is added, or when the tap rule or the selected look changes and one of the two copies is missed.
+
+---
+
 ### A sticker's names travel with its packs, not with the sticker
 
 **The smell.** A sticker's emojis and names are one row in `stickers`, and the backup is per pack. `StickerDao.setStickerWords` therefore marks every pack that holds the sticker, and each manifest carries its own copy of the words. A second device takes them from a manifest only when that manifest is newer than its own row of the same pack (`StickerDao.applyRemotePack`, `mergeStickers(takeWords = true)`). Three things follow.

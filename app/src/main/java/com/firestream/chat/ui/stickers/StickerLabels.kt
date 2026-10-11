@@ -1,5 +1,6 @@
 package com.firestream.chat.ui.stickers
 
+import com.firestream.chat.domain.model.Sticker
 import com.firestream.chat.domain.model.StickerImportResult
 import com.firestream.chat.domain.model.StickerPack
 import com.firestream.chat.domain.model.StickerPackKind
@@ -25,6 +26,27 @@ internal fun importSummary(result: StickerImportResult): String {
         if (result.rejected > 0) add("${result.rejected} could not be imported")
     }
     return if (parts.isEmpty()) "Nothing to import" else parts.joinToString(" · ")
+}
+
+/**
+ * The names a list row shows for the sticker: the person's first, then the
+ * German and the English name that were found. `null` for a sticker with none.
+ */
+internal fun Sticker.nameLine(): String? =
+    (names + listOfNotNull(autoName?.nameDe, autoName?.nameEn)).filter { it.isNotEmpty() }.distinct()
+        .joinToString(" · ").ifEmpty { null }
+
+/**
+ * What else a list row shows the sticker is found by: its emojis, the search
+ * words that were found, and the text read off it. `null` for a sticker with none.
+ */
+internal fun Sticker.wordLine(): String? {
+    val found = autoName
+    return listOfNotNull(
+        (emojis + found?.emojis.orEmpty()).distinct().joinToString(" ").ifEmpty { null },
+        found?.words?.joinToString(", ")?.ifEmpty { null },
+        found?.text?.ifEmpty { null }?.let { "“$it”" },
+    ).joinToString(" · ").ifEmpty { null }
 }
 
 internal fun stickers(count: Int): String = if (count == 1) "sticker" else "stickers"
