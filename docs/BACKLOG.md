@@ -44,9 +44,8 @@ Firestore questions. Nothing ran on a device. Check it by upgrading over an inst
 shows, its rows per host, the tap and the selection, and the list rows. Nothing ran on a device.
 1. A debug build opens a chat, the sticker manager and the sheet without a crash. `ChatScreen` and
    `StickerLibraryScreen` gained code, and only a device runs the dex verifier. The register
-   check of `docs/GOTCHAS.md` did not run: the headless session may not start `unzip` or
-   `dexdump`. Run it on a debug APK for `ChatScreen`, `PackRow` and `AllStickersTab`. In the JVM
-   classes `ChatScreen` has 140 locals and the highest of the sticker files has 110.
+   check of `docs/GOTCHAS.md` on the debug APK gives `ChatScreen` 179, `PackRow` 127 and
+   `AllStickersTab` 109, of 255.
 2. Chat: tap a sticker your library holds. The sheet shows it large, your names and emojis, and
    *Found automatically* for a named one. A tap on the picture enlarges it, and the sheet scrolls.
 3. Chat: tap a received sticker that is in none of your packs. The picture, the star and

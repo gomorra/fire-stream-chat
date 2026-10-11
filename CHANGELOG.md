@@ -10,7 +10,7 @@ All notable changes to FireStream Chat. Format follows [Keep a Changelog](https:
 
 ### Fixed
 
-- **Save keeps the name you are typing.** In the sticker maker and in *Edit names and emojis*, a name that was still in the field was dropped by *Save*, unless the field's check button was pressed first. *Save* now takes it as a name.
+- **Save keeps the name you are typing.** In the sticker maker and in *Edit names and emojis*, a name that was still in the field was dropped by *Save*, unless the field's check button was pressed first. *Save* now takes it as a name. (`5a03e031`)
 
 ## [1.43.0] — 2026-10-11
 
