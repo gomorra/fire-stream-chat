@@ -361,6 +361,31 @@ Known refactors and code smells that have been consciously deferred or declined.
 
 ---
 
+### The sticker search folds every sticker's words on every keystroke
+
+**The smell.** `StickerSearch.find` and `sections` cut each sticker's names and automatic words into folded words (`wordsOf`: lowercase, strip accents, a regex split) each time the query changes. Both run in composition, in `StickerLibraryTab` and `AllStickersTab`, behind `remember(packs, query)`. The words of a sticker change only when the library changes.
+
+**Why we haven't fixed it.** The owner's library is a few hundred stickers, where one search is a few thousand short strings. An index built once per library emission is a second data structure with its own invalidation. Flagged by `/simplify` on step 5 of `docs/plans/sticker-manager-and-names.md`.
+
+**When to revisit.** When typing in the sticker search drops frames on a phone, or a library passes a few thousand stickers. Then build the folded words once per `packs` emission (`StickerSearch.index(packs)`) and let a keystroke run `startsWith` over it.
+
+---
+
+### A sticker's names travel with its packs, not with the sticker
+
+**The smell.** A sticker's emojis and names are one row in `stickers`, and the backup is per pack. `StickerDao.setStickerWords` therefore marks every pack that holds the sticker, and each manifest carries its own copy of the words. A second device takes them from a manifest only when that manifest is newer than its own row of the same pack (`StickerDao.applyRemotePack`, `mergeStickers(takeWords = true)`). Three things follow.
+
+- Two devices that edit the same sticker at about the same time can end with different words. Which pack's manifest is applied last decides, and it can differ per device.
+- A pack change on a device that has not seen an edit yet takes the edit back. The sticker is in packs A and B. Phone 1 renames it and uploads both. Phone 2 reorders pack B before it has applied them, and uploads B with the old names and a later `updatedAt`. Phone 1 applies that B and the names go back, while A's manifest still holds the new ones.
+- A sticker that is in no pack is in no manifest. Its names do not survive a reinstall.
+- A manifest without `autoNameAllowed` does not say which stickers were made in the app. A restore of one closes a pack to automatic naming by its import key (`StickerPackEntity.autoNameAllowedByDefault`), and each of its stickers takes the pack's answer (`StickerManifest.stickersOf`). A made sticker that sits in an imported pack of such a manifest reads as allowed.
+
+**Why we haven't fixed it.** One record of words per sticker is a second synced collection with its own merge rule, which the plan refused for the list of deleted stickers too (`docs/plans/sticker-manager-and-names.md`, §0). The owner edits names on one phone at a time. The third point matters only once step 6 of that plan asks for names, and step 6 carries a note.
+
+**When to revisit.** When names are seen to differ between two phones, or when a made sticker is found to have been sent to the naming service. Step 8 of the plan reviews this path.
+
+---
+
 ### Calls — the known limits
 
 **The smell.**

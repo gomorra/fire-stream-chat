@@ -81,7 +81,12 @@ class StickerLibrarySync @Inject constructor(
         changes.upserted.forEach { remote ->
             // The listener asks for this user's packs only. A manifest that says otherwise is not one of them.
             if (remote.ownerId != ownerId || !StickerManifest.isValidPackId(remote.id)) return@forEach
-            stickerDao.applyRemotePack(StickerManifest.packOf(remote), StickerManifest.stickersOf(remote, now), now)
+            stickerDao.applyRemotePack(
+                remote = StickerManifest.packOf(remote),
+                stickers = StickerManifest.stickersOf(remote, now),
+                now = now,
+                statesWords = StickerManifest.statesWords(remote),
+            )
         }
         changes.removedIds.forEach { stickerDao.removeIfSynced(it) }
         // Two packs merged into one leave a tombstone, and a survivor that gained stickers.

@@ -106,6 +106,7 @@ internal fun stickerPackToDocument(pack: RemoteStickerPack): Map<String, Any?> =
     "createdAt" to pack.createdAt,
     "updatedAt" to pack.updatedAt,
     "shownInRow" to pack.shownInRow,
+    "autoNameAllowed" to pack.autoNameAllowed,
     "stickers" to pack.stickers.map { sticker ->
         mapOf(
             "id" to sticker.id,
@@ -114,6 +115,8 @@ internal fun stickerPackToDocument(pack: RemoteStickerPack): Map<String, Any?> =
             "height" to sticker.height,
             "animated" to sticker.isAnimated,
             "emojis" to sticker.emojis,
+            "names" to sticker.names,
+            "autoNameAllowed" to sticker.autoNameAllowed,
         )
     },
 )
@@ -137,6 +140,7 @@ internal fun stickerPackFromDocument(id: String, data: Map<String, Any?>): Remot
         createdAt = (data["createdAt"] as? Number)?.toLong() ?: 0L,
         updatedAt = (data["updatedAt"] as? Number)?.toLong() ?: 0L,
         shownInRow = data["shownInRow"] as? Boolean,
+        autoNameAllowed = data["autoNameAllowed"] as? Boolean,
         stickers = (data["stickers"] as? List<*>).orEmpty().mapNotNull { entry ->
             val sticker = entry as? Map<*, *> ?: return@mapNotNull null
             RemoteSticker(
@@ -146,6 +150,8 @@ internal fun stickerPackFromDocument(id: String, data: Map<String, Any?>): Remot
                 height = (sticker["height"] as? Number)?.toInt() ?: 0,
                 isAnimated = sticker["animated"] as? Boolean ?: false,
                 emojis = (sticker["emojis"] as? List<*>).orEmpty().filterIsInstance<String>(),
+                names = (sticker["names"] as? List<*>)?.filterIsInstance<String>(),
+                autoNameAllowed = sticker["autoNameAllowed"] as? Boolean,
             )
         },
     )

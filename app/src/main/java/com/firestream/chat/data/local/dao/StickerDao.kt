@@ -11,6 +11,7 @@ import com.firestream.chat.data.local.entity.StickerEntity
 import com.firestream.chat.data.local.entity.StickerPackEntity
 import com.firestream.chat.data.local.entity.StickerPackItemEntity
 import com.firestream.chat.data.local.entity.StickerSyncState
+import com.firestream.chat.domain.util.StickerWords
 import kotlinx.coroutines.flow.Flow
 
 /**
@@ -178,16 +179,60 @@ interface StickerDao {
 
     /**
      * Inserts the stickers the library does not have yet. A sticker it already
-     * has keeps its row, and gains [StickerEntity.emojis] only when it had none.
+     * has keeps its row. It gains [StickerEntity.emojis] only when it had none,
+     * and [StickerEntity.names] only when it had none.
+     *
+     * With [takeWords], a sticker the library has takes the emojis, the names
+     * and `autoNameAllowed` of [stickers] instead. That is for the owner's own
+     * newer manifest, which is how an edit made on another device arrives.
+     * What the naming service found stays in either case.
      */
     @Transaction
-    suspend fun mergeStickers(stickers: List<StickerEntity>) {
+    suspend fun mergeStickers(stickers: List<StickerEntity>, takeWords: Boolean = false) {
         val known = getStickers(stickers.map { it.id }).associateBy { it.id }
         insertStickers(stickers.filter { it.id !in known })
         stickers.forEach { sticker ->
             val existing = known[sticker.id] ?: return@forEach
-            if (existing.emojis.isEmpty() && sticker.emojis.isNotEmpty()) updateSticker(existing.copy(emojis = sticker.emojis))
+            val merged = if (takeWords) {
+                existing.copy(emojis = sticker.emojis, names = sticker.names, autoNameAllowed = sticker.autoNameAllowed)
+            } else {
+                existing.copy(
+                    emojis = existing.emojis.ifEmpty { sticker.emojis },
+                    names = existing.names.ifEmpty { sticker.names },
+                )
+            }
+            if (merged != existing) updateSticker(merged)
         }
+    }
+
+    /**
+     * Gives the sticker [emojis] and [names], and marks every pack that holds it
+     * for a backup, because a manifest lists both. Returns false, and writes
+     * nothing, when the library has no such sticker.
+     */
+    @Transaction
+    suspend fun setStickerWords(stickerId: String, emojis: List<String>, names: List<String>, now: Long): Boolean {
+        val sticker = getSticker(stickerId) ?: return false
+        if (sticker.emojis == emojis && sticker.names == names) return true
+        updateSticker(sticker.copy(emojis = emojis, names = names))
+        getPackIdsHolding(listOf(stickerId)).forEach { touchPack(it, now) }
+        return true
+    }
+
+    /**
+     * Marks [stickerId] as made in the app: closed to automatic naming, with
+     * [names] after the names it has. [mergeStickers] keeps the row of a
+     * sticker whose bytes the library already had, so a sticker that is made a
+     * second time would lose the names typed for it. A row that already says
+     * all of this is not written, and then no pack is marked.
+     */
+    @Transaction
+    suspend fun markMade(stickerId: String, names: List<String>, now: Long) {
+        val row = getSticker(stickerId) ?: return
+        val made = row.copy(names = StickerWords.cleanNames(row.names + names), autoNameAllowed = false)
+        if (made == row) return
+        updateSticker(made)
+        getPackIdsHolding(listOf(stickerId)).forEach { touchPack(it, now) }
     }
 
     /**
@@ -423,9 +468,18 @@ interface StickerDao {
      *   one. It gains the other's stickers and the other becomes a tombstone,
      *   which deletes its backend copy.
      * - **Neither.** [remote] is inserted as it is, already synced.
+     *
+     * [statesWords] says the manifest carries its stickers' names, which one
+     * of an older build does not. Only the first case takes them over a
+     * sticker the library has: there the backend's copy is the later edit.
      */
     @Transaction
-    suspend fun applyRemotePack(remote: StickerPackEntity, stickers: List<StickerEntity>, now: Long): Boolean {
+    suspend fun applyRemotePack(
+        remote: StickerPackEntity,
+        stickers: List<StickerEntity>,
+        now: Long,
+        statesWords: Boolean = false,
+    ): Boolean {
         val synced = remote.copy(syncState = StickerSyncState.SYNCED.name)
         val local = getPackRow(remote.id)
         if (local != null) {
@@ -433,7 +487,7 @@ interface StickerDao {
             // The key is unique. A row cannot take one that another pack holds.
             val keyHolder = remote.importKey?.let { getPackByImportKey(it) }
             val importKey = if (keyHolder == null || keyHolder.id == remote.id) remote.importKey else local.importKey
-            mergeStickers(stickers)
+            mergeStickers(stickers, takeWords = statesWords)
             updatePack(synced.copy(importKey = importKey))
             deleteItemsOf(remote.id)
             insertItems(stickers.toItems(remote.id))

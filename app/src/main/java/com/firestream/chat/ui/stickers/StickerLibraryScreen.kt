@@ -121,6 +121,9 @@ internal data class StickerLibraryActions(
     val onNewPackFromSelected: (name: String) -> Unit = {},
     val onFavouriteSelected: () -> Unit = {},
     val onDeleteSelectedStickers: () -> Unit = {},
+    val onEditSelectedSticker: () -> Unit = {},
+    val onCloseStickerEdit: () -> Unit = {},
+    val onSaveStickerWords: (emojis: List<String>, names: List<String>) -> Unit = { _, _ -> },
 )
 
 @Composable
@@ -162,6 +165,7 @@ fun StickerLibraryScreen(
 
     val whatsApp = uiState.whatsApp
     BackHandler(
+        // The edit sheet closes itself on back.
         enabled = whatsApp != null || uiState.openPackId != null ||
             uiState.selectedPackIds.isNotEmpty() || uiState.selectedStickers.isNotEmpty(),
     ) {
@@ -211,6 +215,9 @@ fun StickerLibraryScreen(
                 onNewPackFromSelected = viewModel::newPackFromSelected,
                 onFavouriteSelected = viewModel::favouriteSelected,
                 onDeleteSelectedStickers = viewModel::deleteSelectedStickers,
+                onEditSelectedSticker = viewModel::editSelectedSticker,
+                onCloseStickerEdit = viewModel::closeStickerEdit,
+                onSaveStickerWords = viewModel::saveStickerWords,
             )
         }
         StickerLibraryContent(uiState = uiState, actions = actions, snackbarHostState = snackbarHostState)
@@ -255,6 +262,7 @@ internal fun StickerLibraryContent(
                         selectedCount > 0 -> StickerSelectionActions(
                             // Only a pack's own grid can take a sticker out of that pack alone.
                             canRemoveFromPack = openPack != null,
+                            canEdit = uiState.canEditSelected,
                             actions = actions,
                             onAsk = { dialog = it },
                         )
@@ -305,7 +313,13 @@ internal fun StickerLibraryContent(
     dialog?.let { asked ->
         SelectionDialogs(asked = asked, uiState = uiState, actions = actions, onClose = { dialog = null })
     }
+    uiState.editingSticker?.let { sticker ->
+        StickerWordsSheet(sticker = sticker, onSave = actions.onSaveStickerWords, onDismiss = actions.onCloseStickerEdit)
+    }
 }
+
+/** The menu entry of a selection of one sticker that opens the edit of its emojis and names. */
+internal const val EDIT_STICKER_LABEL = "Edit names and emojis"
 
 /** A question the top bar of a selection asks before it acts. */
 internal enum class SelectionDialog { MERGE_PACKS, DELETE_PACKS, MOVE_STICKERS, NEW_PACK, DELETE_STICKERS }
@@ -314,6 +328,7 @@ internal enum class SelectionDialog { MERGE_PACKS, DELETE_PACKS, MOVE_STICKERS, 
 @Composable
 private fun StickerSelectionActions(
     canRemoveFromPack: Boolean,
+    canEdit: Boolean,
     actions: StickerLibraryActions,
     onAsk: (SelectionDialog) -> Unit,
 ) {
@@ -329,6 +344,13 @@ private fun StickerSelectionActions(
             Icon(Icons.Default.MoreVert, contentDescription = "More for the selection")
         }
         DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+            // One sticker at a time: its emojis and names are its own.
+            if (canEdit) {
+                DropdownMenuItem(
+                    text = { Text(EDIT_STICKER_LABEL) },
+                    onClick = { menuOpen = false; actions.onEditSelectedSticker() },
+                )
+            }
             DropdownMenuItem(
                 text = { Text("New pack from these") },
                 onClick = { menuOpen = false; onAsk(SelectionDialog.NEW_PACK) },

@@ -36,8 +36,11 @@ enum class StickerFormat(val extension: String, val mimeType: String) {
  * sticker. [localPath] is where the file lives on this device. A sticker that
  * came back with a restored pack, or with a pack added from someone else, has
  * its row before its file, so the path may name a file that is not there yet.
- * [emojis] are the tags the sticker was imported with, the first of which
- * stands for it in text.
+ * [emojis] are the tags the sticker was imported with or a person gave it, the
+ * first of which stands for it in text. [names] are the names a person typed.
+ * [autoName] is what the naming service found, and never changes those two.
+ * A search reads all three. [autoNameAllowed] is false for a sticker the
+ * service must not be asked about, such as one made in the app.
  */
 data class Sticker(
     val id: String,
@@ -47,8 +50,27 @@ data class Sticker(
     val isAnimated: Boolean,
     val emojis: List<String>,
     val localPath: String,
+    val names: List<String> = emptyList(),
+    val autoName: StickerAutoName? = null,
+    val autoNameAllowed: Boolean = true,
 ) {
     /** The file a grid draws: the sticker itself, or the first frame of a Lottie sticker. */
     val stillPath: String
         get() = format.stillPathOf(localPath)
+}
+
+/**
+ * What the naming service found on a sticker: a name in English and one in
+ * German, search [words] in both languages, the [text] written on the sticker,
+ * and [emojis] that fit it. A part it did not find is empty.
+ */
+data class StickerAutoName(
+    val nameEn: String = "",
+    val nameDe: String = "",
+    val words: List<String> = emptyList(),
+    val text: String = "",
+    val emojis: List<String> = emptyList(),
+) {
+    val isEmpty: Boolean
+        get() = nameEn.isEmpty() && nameDe.isEmpty() && words.isEmpty() && text.isEmpty() && emojis.isEmpty()
 }

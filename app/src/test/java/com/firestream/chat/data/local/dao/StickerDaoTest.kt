@@ -109,6 +109,84 @@ class StickerDaoTest {
     }
 
     @Test
+    fun `a known sticker gains names only when it had none, and keeps what was found automatically`() = runTest {
+        val found = sticker("bare").copy(autoNameEn = "Sleepy bear", autoWords = listOf("tired"), nameRequestedAt = 7L)
+        dao.insertStickers(listOf(found, sticker("named").copy(names = listOf("Mine"), autoNameAllowed = false)))
+
+        dao.mergeStickers(
+            listOf(
+                sticker("bare").copy(names = listOf("Theirs")),
+                sticker("named").copy(names = listOf("Theirs"), autoNameAllowed = true),
+            )
+        )
+
+        val rows = dao.getStickers(listOf("bare", "named")).associateBy { it.id }
+        assertEquals(found.copy(names = listOf("Theirs")), rows["bare"])
+        assertEquals(sticker("named").copy(names = listOf("Mine"), autoNameAllowed = false), rows["named"])
+    }
+
+    @Test
+    fun `an edit of a sticker's words marks every pack that holds it, and no other`() = runTest {
+        dao.insertStickers(listOf(sticker("a", listOf("😀")).copy(autoNameDe = "Bär"), sticker("b")))
+        listOf("one", "two", "other").forEach { dao.insertPack(pack(it)) }
+        dao.addToPack("one", listOf("a", "b"), atFront = false, now = 2L)
+        dao.addToPack("two", listOf("a"), atFront = false, now = 2L)
+        dao.addToPack("other", listOf("b"), atFront = false, now = 2L)
+        listOf("one", "two", "other").forEach { dao.markSynced(it, dao.getPack(it)!!.updatedAt) }
+
+        assertEquals(true, dao.setStickerWords("a", listOf("🔥"), listOf("Fire"), now = 9L))
+
+        assertEquals(sticker("a", listOf("🔥")).copy(names = listOf("Fire"), autoNameDe = "Bär"), dao.getSticker("a"))
+        assertEquals(listOf("PENDING", "PENDING", "SYNCED"), listOf("one", "two", "other").map { syncState(it) })
+        assertEquals(listOf(9L, 9L), listOf("one", "two").map { dao.getPack(it)!!.updatedAt })
+    }
+
+    @Test
+    fun `an edit that changes nothing marks no pack, and one of an unknown sticker writes nothing`() = runTest {
+        dao.insertStickers(listOf(sticker("a", listOf("😀"))))
+        dao.insertPack(pack("one"))
+        dao.addToPack("one", listOf("a"), atFront = false, now = 2L)
+        dao.markSynced("one", dao.getPack("one")!!.updatedAt)
+
+        assertEquals(true, dao.setStickerWords("a", listOf("😀"), emptyList(), now = 9L))
+        assertEquals(false, dao.setStickerWords("ghost", listOf("😀"), listOf("Ghost"), now = 9L))
+
+        assertEquals("SYNCED", syncState("one"))
+        assertNull(dao.getSticker("ghost"))
+    }
+
+    @Test
+    fun `a newer manifest of the same pack brings the words typed on another device, when it states them`() = runTest {
+        val local = sticker("a", listOf("😀")).copy(names = listOf("Old"), autoNameEn = "Found")
+        dao.insertStickers(listOf(local))
+        dao.insertPack(pack("p"))
+        dao.addToPack("p", listOf("a"), atFront = false, now = 2L)
+        val edited = sticker("a", listOf("🔥")).copy(names = listOf("New"), autoNameAllowed = false)
+
+        // A manifest of an older build lists the sticker without names. It must not wipe them.
+        dao.applyRemotePack(pack("p").copy(updatedAt = 50L), listOf(sticker("a")), now = 60L, statesWords = false)
+        assertEquals(local, dao.getSticker("a"))
+
+        dao.applyRemotePack(pack("p").copy(updatedAt = 70L), listOf(edited), now = 80L, statesWords = true)
+        assertEquals(local.copy(emojis = listOf("🔥"), names = listOf("New"), autoNameAllowed = false), dao.getSticker("a"))
+
+        // Not newer than the row: nothing is taken.
+        dao.applyRemotePack(pack("p").copy(updatedAt = 70L), listOf(sticker("a")), now = 90L, statesWords = true)
+        assertEquals(listOf("New"), dao.getSticker("a")!!.names)
+    }
+
+    @Test
+    fun `a manifest that is new to the library leaves the words of a known sticker alone`() = runTest {
+        val local = sticker("a", listOf("😀")).copy(names = listOf("Mine"))
+        dao.insertStickers(listOf(local))
+
+        dao.applyRemotePack(pack("fresh"), listOf(sticker("a", listOf("🔥")).copy(names = listOf("Theirs"))), now = 5L, statesWords = true)
+
+        assertEquals(local, dao.getSticker("a"))
+        assertEquals(listOf("a"), dao.getStickerIds("fresh"))
+    }
+
+    @Test
     fun `a pack is found again by its import key, and a pack without one is always new`() = runTest {
         val first = dao.getOrCreatePack(pack("x1", importKey = "wa:cats"))
         val again = dao.getOrCreatePack(pack("x2", importKey = "wa:cats"))

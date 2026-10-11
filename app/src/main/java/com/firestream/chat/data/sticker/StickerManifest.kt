@@ -7,6 +7,7 @@ import com.firestream.chat.data.remote.source.RemoteSticker
 import com.firestream.chat.data.remote.source.RemoteStickerPack
 import com.firestream.chat.data.util.parseStickerPackKind
 import com.firestream.chat.domain.model.StickerFormat
+import com.firestream.chat.domain.util.StickerWords
 
 /**
  * The two directions between the library's rows and a pack manifest.
@@ -21,20 +22,16 @@ internal object StickerManifest {
     /** How many stickers a manifest lists. A larger pack is backed up without its tail. */
     const val MAX_STICKERS = 4000
 
-    /** As many as an import keeps (`WaStickerMetadata`), so a restore brings every tag back. */
-    const val MAX_EMOJIS = 8
-    private const val MAX_EMOJI_LENGTH = 32
-
     /**
      * What the sticker list may weigh. A manifest is one document of at most
      * 1 MiB, and the rest is left to the pack's own fields. [MAX_STICKERS]
      * stickers with a few emojis each stay under it. A pack whose stickers
-     * carry many long tags is cut short before the backend would refuse it.
+     * carry many long tags or names is cut short before the backend would refuse it.
      */
     const val MAX_LIST_BYTES = 900_000
 
-    /** An entry without its emojis: each field name and string in UTF-8 plus one byte, eight bytes per number. Rounded up. */
-    private const val ENTRY_BYTES = 128
+    /** An entry without its emojis and names: each field name and string in UTF-8 plus one byte, eight bytes per number. Rounded up. */
+    private const val ENTRY_BYTES = 160
     private const val MAX_IMPORT_KEY_LENGTH = 512
     private val PACK_ID = Regex("[A-Za-z0-9_-]{1,64}")
 
@@ -55,6 +52,7 @@ internal object StickerManifest {
         updatedAt = pack.updatedAt,
         stickers = listed(stickers),
         shownInRow = pack.shownInRow,
+        autoNameAllowed = pack.autoNameAllowed,
     )
 
     /** The entries of [stickers] a manifest has room for, by count and by weight. */
@@ -63,22 +61,34 @@ internal object StickerManifest {
         for (sticker in stickers) {
             if (size == MAX_STICKERS) break
             if (!StickerFiles.isValidId(sticker.id)) continue
-            val emojis = sticker.emojis.take(MAX_EMOJIS)
-            bytes += ENTRY_BYTES + emojis.sumOf { it.toByteArray().size + 1 }
+            val emojis = sticker.emojis.take(StickerWords.MAX_EMOJIS)
+            val names = sticker.names.take(StickerWords.MAX_NAMES)
+            bytes += ENTRY_BYTES + (emojis + names).sumOf { it.toByteArray().size + 1 }
             if (bytes > MAX_LIST_BYTES) break
-            add(RemoteSticker(sticker.id, sticker.format, sticker.width, sticker.height, sticker.isAnimated, emojis))
+            add(
+                RemoteSticker(
+                    id = sticker.id,
+                    format = sticker.format,
+                    width = sticker.width,
+                    height = sticker.height,
+                    isAnimated = sticker.isAnimated,
+                    emojis = emojis,
+                    names = names,
+                    autoNameAllowed = sticker.autoNameAllowed,
+                )
+            )
         }
     }
 
     /**
      * The pack row [remote] stands for, marked as synced. A manifest without
      * `shownInRow` gets what a new pack with its import key would. The two
-     * unnamed packs are in the row whatever a manifest says.
+     * unnamed packs are in the row whatever a manifest says. A manifest without
+     * `autoNameAllowed` is read by `StickerPackEntity.autoNameAllowedByDefault`.
      */
     fun packOf(remote: RemoteStickerPack): StickerPackEntity {
         val kind = parseStickerPackKind(remote.kind)
-        // Not cleaned: it has to equal the key an import computes, separators included.
-        val importKey = remote.importKey?.takeIf { it.isNotEmpty() && it.length <= MAX_IMPORT_KEY_LENGTH }
+        val importKey = importKeyOf(remote)
         return StickerPackEntity(
             id = remote.id,
             name = cleanStickerText(remote.name).orEmpty(),
@@ -91,13 +101,34 @@ internal object StickerManifest {
             updatedAt = remote.updatedAt,
             syncState = StickerSyncState.SYNCED.name,
             shownInRow = !kind.isNamed || (remote.shownInRow ?: StickerPackEntity.shownInRowByDefault(importKey)),
+            autoNameAllowed = packAllowsAutoName(remote),
         )
     }
+
+    /** Not cleaned: it has to equal the key an import computes, separators included. */
+    private fun importKeyOf(remote: RemoteStickerPack): String? =
+        remote.importKey?.takeIf { it.isNotEmpty() && it.length <= MAX_IMPORT_KEY_LENGTH }
+
+    private fun packAllowsAutoName(remote: RemoteStickerPack): Boolean =
+        remote.autoNameAllowed ?: StickerPackEntity.autoNameAllowedByDefault(importKeyOf(remote))
+
+    /**
+     * Whether [remote] states the words of its stickers. A build that knows
+     * names writes the field for every sticker, an empty list included. A
+     * manifest of an older build has it for none, and its silence must not be
+     * read as "no names".
+     */
+    fun statesWords(remote: RemoteStickerPack): Boolean = remote.stickers.any { it.names != null }
 
     /**
      * The sticker rows [remote] lists, in its order. An entry is left out when
      * its id is not a hash, when it repeats an earlier one, or when its format
-     * is one this build does not know.
+     * is one this build does not know. Emojis and names are cleaned and capped
+     * like typed ones. The rows carry nothing the naming service found.
+     *
+     * An entry that does not say whether the sticker may be named automatically
+     * takes its pack's answer. So a sticker of the maker's pack, backed up by a
+     * build before names, is closed to naming like its pack.
      */
     fun stickersOf(remote: RemoteStickerPack, now: Long): List<StickerEntity> = remote.stickers.asSequence()
         .filter { StickerFiles.isValidId(it.id) }
@@ -110,8 +141,10 @@ internal object StickerManifest {
                 width = sticker.width.coerceIn(0, StickerFiles.MAX_DIMENSION),
                 height = sticker.height.coerceIn(0, StickerFiles.MAX_DIMENSION),
                 isAnimated = sticker.isAnimated,
-                emojis = sticker.emojis.filter { it.length in 1..MAX_EMOJI_LENGTH }.take(MAX_EMOJIS),
+                emojis = StickerWords.cleanEmojis(sticker.emojis),
                 createdAt = now,
+                names = StickerWords.cleanNames(sticker.names.orEmpty()),
+                autoNameAllowed = sticker.autoNameAllowed ?: packAllowsAutoName(remote),
             )
         }
         .take(MAX_STICKERS)

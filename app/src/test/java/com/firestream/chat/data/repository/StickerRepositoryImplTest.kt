@@ -17,6 +17,7 @@ import com.firestream.chat.data.sticker.StickerMaker
 import com.firestream.chat.data.sticker.WhatsAppStickerFolder
 import com.firestream.chat.data.worker.StickerSyncScheduler
 import com.firestream.chat.domain.model.Sticker
+import com.firestream.chat.domain.model.StickerAutoName
 import com.firestream.chat.domain.model.StickerCrop
 import com.firestream.chat.domain.model.StickerDraft
 import com.firestream.chat.domain.model.StickerDraftImage
@@ -754,7 +755,7 @@ class StickerRepositoryImplTest {
         repository.importFrom(listOf(source("4.webp", sticker(4)))).getOrThrow()
         repository.importFrom(listOf(source("5.webp", sticker(5))), "Holiday").getOrThrow()
         repository.importFrom(listOf(source("h.wastickers", zip("6.webp" to sticker(6), "title.txt" to "Archive".toByteArray())))).getOrThrow()
-        repository.createSticker("/draft/a.png", StickerCrop(), emptyList(), null, "Made").getOrThrow()
+        repository.createSticker("/draft/a.png", StickerCrop(), emptyList(), emptyList(), null, "Made").getOrThrow()
         repository.createPack("By hand", listOf(StickerFiles.sha256Hex(sticker(4)))).getOrThrow()
 
         val shown = packs().associate { it.label() to it.shownInRow }
@@ -859,7 +860,7 @@ class StickerRepositoryImplTest {
         coEvery { packSource.fetchPack("theirs") } returns remotePack("theirs", stickers = listOf(remoteSticker(loose)))
         coEvery { maker.render(any(), any()) } returns sticker(1, cats)
 
-        repository.createSticker("/draft/a.png", StickerCrop(), emptyList(), null, "Made").getOrThrow()
+        repository.createSticker("/draft/a.png", StickerCrop(), emptyList(), emptyList(), null, "Made").getOrThrow()
         repository.saveSticker(folder[1]).getOrThrow()
         repository.installPack(repository.viewPack("theirs").getOrThrow()).getOrThrow()
 
@@ -1018,7 +1019,7 @@ class StickerRepositoryImplTest {
         val bytes = sticker(7)
         coEvery { maker.render("/draft/cutout.png", StickerCrop(scale = 2f)) } returns bytes
 
-        val id = repository.createSticker("/draft/cutout.png", StickerCrop(scale = 2f), listOf("😺"), null, "My stickers").getOrThrow()
+        val id = repository.createSticker("/draft/cutout.png", StickerCrop(scale = 2f), listOf("😺"), emptyList(), null, "My stickers").getOrThrow()
 
         assertEquals(StickerFiles.sha256Hex(bytes), id)
         val pack = pack("My stickers")
@@ -1034,8 +1035,8 @@ class StickerRepositoryImplTest {
     fun `a second made sticker joins the same named pack, after the first`() = runTest {
         coEvery { maker.render(any(), any()) } returnsMany listOf(sticker(1), sticker(2))
 
-        val first = repository.createSticker("/draft/a.png", StickerCrop(), emptyList(), null, "My stickers").getOrThrow()
-        val second = repository.createSticker("/draft/a.png", StickerCrop(), emptyList(), null, " My stickers ").getOrThrow()
+        val first = repository.createSticker("/draft/a.png", StickerCrop(), emptyList(), emptyList(), null, "My stickers").getOrThrow()
+        val second = repository.createSticker("/draft/a.png", StickerCrop(), emptyList(), emptyList(), null, " My stickers ").getOrThrow()
 
         assertEquals(listOf(first, second), pack("My stickers").stickers.map { it.id })
         assertEquals(1, packs().size)
@@ -1047,7 +1048,7 @@ class StickerRepositoryImplTest {
         val catPack = pack("Cats")
         coEvery { maker.render(any(), any()) } returns sticker(2)
 
-        val id = repository.createSticker("/draft/a.png", StickerCrop(), listOf("🐱"), catPack.id, "ignored").getOrThrow()
+        val id = repository.createSticker("/draft/a.png", StickerCrop(), listOf("🐱"), emptyList(), catPack.id, "ignored").getOrThrow()
 
         assertEquals(id, pack("Cats").stickers.last().id)
         assertEquals(2, pack("Cats").stickers.size)
@@ -1058,9 +1059,101 @@ class StickerRepositoryImplTest {
     fun `a made sticker keeps three emojis, each once`() = runTest {
         coEvery { maker.render(any(), any()) } returns sticker(3)
 
-        repository.createSticker("/draft/a.png", StickerCrop(), listOf("😺", " ", "😺", "🐶", "🦊", "🐸"), null, "Mine").getOrThrow()
+        repository.createSticker("/draft/a.png", StickerCrop(), listOf("😺", " ", "😺", "🐶", "🦊", "🐸"), emptyList(), null, "Mine").getOrThrow()
 
         assertEquals(listOf("😺", "🐶", "🦊"), pack("Mine").stickers.single().emojis)
+    }
+
+    @Test
+    fun `a made sticker keeps its names cleaned, and neither it nor its new pack may be named automatically`() = runTest {
+        coEvery { maker.render(any(), any()) } returns sticker(3)
+
+        val id = repository.createSticker("/draft/a.png", StickerCrop(), emptyList(), listOf(" Grumpy cat ", "", "grumpy CAT", "Montag"), null, "Mine").getOrThrow()
+
+        val made = pack("Mine")
+        assertEquals(listOf("Grumpy cat", "Montag"), made.stickers.single().names)
+        assertFalse(made.stickers.single().autoNameAllowed)
+        assertFalse(made.autoNameAllowed)
+        assertFalse(db.stickerDao().getSticker(id)!!.autoNameAllowed)
+    }
+
+    @Test
+    fun `a made sticker in an imported pack is still not named automatically, and the pack stays as it was`() = runTest {
+        repository.importFrom(listOf(source("1.webp", sticker(1, cats)))).getOrThrow()
+        coEvery { maker.render(any(), any()) } returns sticker(2)
+
+        val id = repository.createSticker("/draft/a.png", StickerCrop(), emptyList(), emptyList(), pack("Cats").id, "ignored").getOrThrow()
+
+        val catPack = pack("Cats")
+        assertTrue(catPack.autoNameAllowed)
+        assertEquals(listOf(true, false), catPack.stickers.map { it.autoNameAllowed })
+        assertEquals(id, catPack.stickers.last().id)
+    }
+
+    @Test
+    fun `a picture the library already had, made into a sticker, takes the typed names and is closed to naming`() = runTest {
+        repository.importFrom(listOf(source("1.webp", sticker(1, cats)))).getOrThrow()
+        val known = pack("Cats").stickers.single().id
+        repository.setStickerWords(known, emptyList(), listOf("Old")).getOrThrow()
+        coEvery { maker.render(any(), any()) } returns sticker(1, cats)
+
+        val id = repository.createSticker("/draft/a.png", StickerCrop(), emptyList(), listOf("old", "New"), null, "Mine").getOrThrow()
+
+        assertEquals(known, id)
+        val made = pack("Mine").stickers.single()
+        assertEquals(listOf("Old", "New"), made.names)
+        assertFalse(made.autoNameAllowed)
+    }
+
+    // --- A sticker's words ---
+
+    @Test
+    fun `a sticker's emojis and names are replaced, cleaned, and every pack that holds it is backed up again`() = runTest {
+        repository.importFrom(listOf(source("1.webp", sticker(1, cats)), source("2.webp", sticker(2, cats)))).getOrThrow()
+        val first = pack("Cats").stickers.first().id
+        repository.toggleFavourite(first).getOrThrow()
+        val dao = db.stickerDao()
+        packs().forEach { dao.markSynced(it.id, dao.getPack(it.id)!!.updatedAt) }
+        dao.updateSticker(dao.getSticker(first)!!.copy(autoNameEn = "Sleepy bear", autoEmojis = listOf("🐻")))
+
+        repository.setStickerWords(first, listOf(" 🔥", "🔥", ""), listOf("  Fire ", "fire", "x".repeat(60))).getOrThrow()
+
+        val edited = pack("Cats").stickers.first()
+        assertEquals(listOf("🔥"), edited.emojis)
+        assertEquals(listOf("Fire", "x".repeat(40)), edited.names)
+        assertEquals("what was found automatically stays", StickerAutoName(nameEn = "Sleepy bear", emojis = listOf("🐻")), edited.autoName)
+        assertEquals(emptyList<String>(), pack("Cats").stickers.last().names)
+        assertEquals(
+            "the pack and the favourites hold it",
+            listOf(StickerSyncState.PENDING.name, StickerSyncState.PENDING.name),
+            packs().map { dao.getPack(it.id)!!.syncState },
+        )
+    }
+
+    @Test
+    fun `words for a sticker the library does not hold are refused`() = runTest {
+        assertTrue(repository.setStickerWords("f".repeat(64), listOf("🔥"), listOf("Fire")).isFailure)
+    }
+
+    @Test
+    fun `a pack added from someone else brings its owner's names, and a sticker the library has keeps its own`() = runTest {
+        repository.importFrom(listOf(source("1.webp", sticker(1, cats)))).getOrThrow()
+        val mine = pack("Cats").stickers.single().id
+        repository.setStickerWords(mine, emptyList(), listOf("Mine")).getOrThrow()
+        val theirs = "a".repeat(64)
+        coEvery { packSource.fetchPack("their-pack") } returns remotePack(
+            "their-pack",
+            stickers = listOf(
+                remoteSticker(mine).copy(names = listOf("Theirs")),
+                remoteSticker(theirs).copy(names = listOf("Their cat"), autoNameAllowed = false),
+            ),
+        )
+
+        repository.installPack(repository.viewPack("their-pack").getOrThrow()).getOrThrow()
+
+        val installed = packs().single { it.kind == StickerPackKind.INSTALLED }
+        assertEquals(listOf(listOf("Mine"), listOf("Their cat")), installed.stickers.map { it.names })
+        assertEquals("a sticker its owner left out of naming stays out", listOf(true, false), installed.stickers.map { it.autoNameAllowed })
     }
 
     @Test
@@ -1069,9 +1162,9 @@ class StickerRepositoryImplTest {
         repository.importFrom(listOf(source("1.webp", sticker(1)))).getOrThrow()
         val saved = packs().single { it.kind == StickerPackKind.SAVED }
 
-        assertTrue(repository.createSticker("/draft/a.png", StickerCrop(), emptyList(), "no such pack", "x").isFailure)
-        assertTrue(repository.createSticker("/draft/a.png", StickerCrop(), emptyList(), saved.id, "x").isFailure)
-        assertTrue(repository.createSticker("/draft/a.png", StickerCrop(), emptyList(), null, "  ").isFailure)
+        assertTrue(repository.createSticker("/draft/a.png", StickerCrop(), emptyList(), emptyList(), "no such pack", "x").isFailure)
+        assertTrue(repository.createSticker("/draft/a.png", StickerCrop(), emptyList(), emptyList(), saved.id, "x").isFailure)
+        assertTrue(repository.createSticker("/draft/a.png", StickerCrop(), emptyList(), emptyList(), null, "  ").isFailure)
 
         assertEquals(1, packs().size)
         assertEquals(1, packs().single().stickers.size)
@@ -1083,8 +1176,8 @@ class StickerRepositoryImplTest {
         coEvery { maker.render("/draft/bad.png", any()) } returns byteArrayOf(1, 2, 3)
         coEvery { maker.render("/draft/gone.png", any()) } throws IllegalStateException("That picture is no longer available")
 
-        val notSticker = repository.createSticker("/draft/bad.png", StickerCrop(), emptyList(), null, "Mine")
-        val gone = repository.createSticker("/draft/gone.png", StickerCrop(), emptyList(), null, "Mine")
+        val notSticker = repository.createSticker("/draft/bad.png", StickerCrop(), emptyList(), emptyList(), null, "Mine")
+        val gone = repository.createSticker("/draft/gone.png", StickerCrop(), emptyList(), emptyList(), null, "Mine")
 
         assertEquals("That picture could not be made into a sticker", notSticker.exceptionOrNull()?.message)
         assertEquals("That picture is no longer available", gone.exceptionOrNull()?.message)

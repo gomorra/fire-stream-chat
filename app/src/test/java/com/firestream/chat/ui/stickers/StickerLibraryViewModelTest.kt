@@ -105,6 +105,58 @@ class StickerLibraryViewModelTest {
     }
 
     @Test
+    fun `one selected sticker can be edited, and saving writes its words and closes the edit`() {
+        coEvery { repository.setStickerWords(any(), any(), any()) } returns Result.success(Unit)
+        val viewModel = allStickers()
+        viewModel.toggleSticker(entry("a", "shared"))
+        // The same sticker picked in a second pack is still one sticker.
+        viewModel.toggleSticker(entry("b", "shared"))
+        assertTrue(viewModel.uiState.value.canEditSelected)
+
+        viewModel.editSelectedSticker()
+
+        assertEquals("shared", viewModel.uiState.value.editingSticker?.id)
+        assertTrue("the edit ends the selection", viewModel.uiState.value.selectedStickers.isEmpty())
+
+        viewModel.saveStickerWords(listOf("😺"), listOf("Cat"))
+
+        coVerify(exactly = 1) { repository.setStickerWords("shared", listOf("😺"), listOf("Cat")) }
+        assertNull(viewModel.uiState.value.editingSticker)
+    }
+
+    @Test
+    fun `two selected stickers cannot be edited, and a closed edit writes nothing`() {
+        val viewModel = allStickers()
+        viewModel.toggleSticker(entry("a", "shared"))
+        viewModel.toggleSticker(entry("b", "s2"))
+
+        viewModel.editSelectedSticker()
+
+        assertFalse(viewModel.uiState.value.canEditSelected)
+        assertNull(viewModel.uiState.value.editingStickerId)
+        assertEquals(2, viewModel.uiState.value.selectedStickers.size)
+
+        viewModel.clearSelection()
+        viewModel.toggleSticker(entry("b", "s2"))
+        viewModel.editSelectedSticker()
+        viewModel.closeStickerEdit()
+        viewModel.saveStickerWords(listOf("😺"), listOf("Cat"))
+
+        coVerify(exactly = 0) { repository.setStickerWords(any(), any(), any()) }
+    }
+
+    @Test
+    fun `a sticker that leaves the library while it is edited closes the edit`() {
+        val viewModel = allStickers()
+        viewModel.toggleSticker(entry("b", "s2"))
+        viewModel.editSelectedSticker()
+
+        packs.value = listOf(pack("a", "s1", "shared"), pack("b", "shared"))
+
+        assertNull(viewModel.uiState.value.editingStickerId)
+    }
+
+    @Test
     fun `a selection from one pack cannot move to that pack`() {
         val viewModel = allStickers()
 

@@ -8,6 +8,7 @@ import com.firestream.chat.data.sticker.StoredSticker
 import com.firestream.chat.data.util.parseStickerFormat
 import com.firestream.chat.data.util.parseStickerPackKind
 import com.firestream.chat.domain.model.Sticker
+import com.firestream.chat.domain.model.StickerAutoName
 import com.firestream.chat.domain.model.StickerFormat
 import com.firestream.chat.domain.model.StickerPack
 
@@ -17,6 +18,12 @@ import com.firestream.chat.domain.model.StickerPack
  * [remoteUrl] is where the backend holds the file, and is null until this device
  * has uploaded it or found it there (`StickerObjectSource.ensureUploaded`). It is
  * never taken from a received message: a send would hand that url on to every chat.
+ *
+ * [emojis] and [names] are the words of a person, and are backed up with every
+ * pack that holds the sticker. The `auto…` columns are the naming service's
+ * answer. Nothing a person does writes them, and no pack manifest carries them.
+ * [autoNameAllowed] is false for a sticker the service must not be asked about.
+ * [nameRequestedAt] is when this device last asked for a name, or null.
  */
 @Entity(tableName = "stickers")
 data class StickerEntity(
@@ -28,10 +35,25 @@ data class StickerEntity(
     val emojis: List<String>,
     val createdAt: Long,
     val remoteUrl: String? = null,
+    val names: List<String> = emptyList(),
+    val autoNameEn: String? = null,
+    val autoNameDe: String? = null,
+    val autoWords: List<String> = emptyList(),
+    val autoText: String? = null,
+    val autoEmojis: List<String> = emptyList(),
+    val autoNameAllowed: Boolean = true,
+    val nameRequestedAt: Long? = null,
 ) {
     /** [localPath] says where a file of the sticker's format lives; the row does not know the directory. */
     fun toDomain(localPath: (StickerFormat) -> String): Sticker {
         val format = parseStickerFormat(format)
+        val autoName = StickerAutoName(
+            nameEn = autoNameEn.orEmpty(),
+            nameDe = autoNameDe.orEmpty(),
+            words = autoWords,
+            text = autoText.orEmpty(),
+            emojis = autoEmojis,
+        )
         return Sticker(
             id = id,
             format = format,
@@ -40,6 +62,9 @@ data class StickerEntity(
             isAnimated = isAnimated,
             emojis = emojis,
             localPath = localPath(format),
+            names = names,
+            autoName = autoName.takeUnless { it.isEmpty },
+            autoNameAllowed = autoNameAllowed,
         )
     }
 
@@ -88,6 +113,8 @@ data class StickerPackEntity(
     val syncState: String = StickerSyncState.PENDING.name,
     /** Whether the pack has its own thumbnail in the picker's row. See [StickerPack.shownInRow]. */
     val shownInRow: Boolean = true,
+    /** Whether the naming service may be asked about the pack's stickers. See [StickerPack.autoNameAllowed]. */
+    val autoNameAllowed: Boolean = true,
 ) {
     fun toDomain(stickers: List<Sticker>) = StickerPack(
         id = id,
@@ -99,6 +126,7 @@ data class StickerPackEntity(
         createdAt = createdAt,
         updatedAt = updatedAt,
         shownInRow = shownInRow,
+        autoNameAllowed = autoNameAllowed,
     )
 
     companion object {
@@ -118,6 +146,17 @@ data class StickerPackEntity(
          */
         fun shownInRowByDefault(importKey: String?): Boolean =
             importKey == null || !(importKey.startsWith(WHATSAPP_KEY_PREFIX) || importKey == LOOSE_WHATSAPP_KEY)
+
+        /**
+         * What [autoNameAllowed] is for a pack with [importKey] whose manifest
+         * does not say: false for a pack the sticker maker created, true for
+         * every other. Only the maker and the WhatsApp import make a pack that
+         * is found by its name. A manifest of a build before names does not
+         * tell a made sticker from an imported one, so this is all a restore
+         * of such a manifest has to go by.
+         */
+        fun autoNameAllowedByDefault(importKey: String?): Boolean =
+            importKey == null || !importKey.startsWith(LOOSE_KEY_PREFIX) || importKey == LOOSE_WHATSAPP_KEY
     }
 }
 

@@ -91,8 +91,12 @@ stickerPacks/{packId}                          # one sticker pack's manifest; id
 ├── importKey                                  # percent-encoded: its parts are joined by U+0000
 ├── sortOrder, createdAt, updatedAt            # updatedAt decides which side is newer on a restore
 ├── shownInRow                                 # own thumbnail in the picker's row; absent in an older manifest, then derived from importKey
+├── autoNameAllowed                            # whether the naming service may be asked about the pack's stickers; absent in an older manifest, then derived from importKey
 └── stickers[]                                 # in pack order, at most 4000
-    └── { id, format, width, height, animated, emojis[] }   # id = SHA-256 of the file; no url
+    └── { id, format, width, height, animated, emojis[], names[], autoNameAllowed }
+                                               # id = SHA-256 of the file; no url. names: at most 8 of 40 characters.
+                                               # names and autoNameAllowed are absent in an older manifest.
+                                               # What the naming service found is not in a manifest.
 ```
 
 ### Realtime Database

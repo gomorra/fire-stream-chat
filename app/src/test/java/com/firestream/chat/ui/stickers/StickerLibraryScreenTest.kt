@@ -274,6 +274,8 @@ class StickerLibraryScreenTest {
 
         composeTestRule.onNodeWithContentDescription("More for the selection").performClick()
         composeTestRule.onNodeWithText("Remove from pack").assertDoesNotExist()
+        // Names and emojis are edited one sticker at a time.
+        composeTestRule.onNodeWithText(EDIT_STICKER_LABEL).assertDoesNotExist()
         composeTestRule.onNodeWithText("Add to favourites").performClick()
 
         composeTestRule.onNodeWithContentDescription("More for the selection").performClick()
@@ -290,6 +292,26 @@ class StickerLibraryScreenTest {
         composeTestRule.onNodeWithText("Delete").performClick()
 
         assertEquals(listOf("toggle:c1", "move:Birds", "favourite", "new:Best", "delete"), done)
+    }
+
+    @Test
+    fun `a selection of one sticker offers the edit of its names and emojis`() {
+        var edits = 0
+        // The same sticker picked in two packs is one sticker.
+        val selection = setOf(StickerEntry("Cats", "shared"), StickerEntry("Dogs", "shared"))
+        show(allStickers(cats, dogs, selected = selection), StickerLibraryActions(onEditSelectedSticker = { edits++ }))
+
+        composeTestRule.onNodeWithContentDescription("More for the selection").performClick()
+        composeTestRule.onNodeWithText(EDIT_STICKER_LABEL).performClick()
+
+        assertEquals(1, edits)
+    }
+
+    @Test
+    fun `the search field says what it finds by`() {
+        show(allStickers(cats))
+
+        composeTestRule.onNodeWithText("Search by name, emoji or pack").assertIsDisplayed()
     }
 
     @Test

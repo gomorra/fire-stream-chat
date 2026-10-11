@@ -2,7 +2,13 @@
 
 All notable changes to FireStream Chat. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); each section is headed by the SemVer `versionName` shipped on that merge day (e.g. `## [1.2.3] — 2026-04-24`). Bump rule: `feat:` → minor, `fix:` → patch, `feat!:` / `BREAKING CHANGE:` → major. `versionCode` is derived from `git rev-list --count HEAD`.
 
-## [UNRELEASED] [1.42.0] — 2026-10-10
+## [UNRELEASED] [1.43.0] — 2026-10-11
+
+### Added
+
+- **Names for stickers, and a search that finds them.** A sticker can have up to eight names. The sticker maker has an *Add names* chip beside *Add emoji*, and in the sticker manager a selection of one sticker offers *Edit names and emojis*, which also adds and removes its emojis. The search in the Stickers tab and in the manager now finds a sticker by the start of any word of a name or of its pack's name, in any order, and no longer only by emoji. Capitals, accents and umlauts do not matter, and *ß* matches *ss*. Stickers found by name come first, then those found by pack, then those found by emoji. Names are saved with your packs, reach your other phone, and come along when someone adds your pack through *View pack*. Installing this version empties the sticker library on the phone once, and it comes back from your account's backup.
+
+## [1.42.0] — 2026-10-10
 
 ### Added
 

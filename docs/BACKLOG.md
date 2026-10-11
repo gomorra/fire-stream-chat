@@ -38,6 +38,30 @@ Firestore questions. Nothing ran on a device. Check it by upgrading over an inst
 6. Delete a chat that the other person then writes into again. Its history comes back whole.
 7. Read the reads per day in the Firebase console before and after the update.
 
+### Sticker names and the text search (2026-10-11)
+
+`docs/plans/sticker-manager-and-names.md` step 5. JVM and Robolectric tests cover the search, the
+limits, the manifest, the restore rule and the chips. Nothing ran on a device.
+1. Install over the previous build. The sticker library is empty for a moment and comes back from
+   the backup, with every pack, its order and its thumbnail switch.
+2. Sticker maker: *Add names* sits beside *Add emoji* and opens a field. Each name becomes a chip,
+   the keyboard's Done adds one, and the field stays for the next. The keyboard does not cover the
+   field. Save the sticker.
+3. Stickers tab → search: the start of a word of that name finds the sticker, in capitals or not.
+   A name with an umlaut is found without it, and *ß* by *ss*. A pack's name finds its stickers.
+   *cat* still finds stickers tagged with a cat emoji, after those found by name.
+4. Manager → *All stickers*: the same search, under the pack titles. Long-press one sticker →
+   **⋮** → *Edit names and emojis*. The sheet shows the sticker and its chips. Add a name and an
+   emoji, remove one, *Save*. With two stickers selected the entry is not offered.
+5. The edit sheet with the keyboard open: the field and *Save* stay reachable, and the emoji
+   picker opens over the sheet and closes back to it.
+6. Second phone, same account: the names typed on the first phone arrive, and the search finds
+   the sticker there.
+7. Second account: *View pack* on a sticker of a named pack, *Add pack*. The owner's names came
+   along.
+8. A debug build opens the maker and the edit sheet without a crash. Only a device runs the dex
+   verifier (`docs/GOTCHAS.md`, the composable parameter ceiling).
+
 ### The sticker manager's *All stickers* tab and the new-only WhatsApp import (2026-10-10)
 
 `docs/plans/sticker-manager-and-names.md` step 4. JVM tests cover the selection, its actions, the

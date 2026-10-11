@@ -1,5 +1,6 @@
 package com.firestream.chat.data.sticker
 
+import com.firestream.chat.domain.util.StickerWords
 import org.json.JSONObject
 
 /**
@@ -19,8 +20,6 @@ data class WaStickerMetadata(
         private const val TAG_WHATSAPP = 0x5741
         private const val IFD_ENTRY = 12
         private const val MAX_JSON_BYTES = 64 * 1024
-        private const val MAX_EMOJIS = 8
-        private const val MAX_EMOJI_CHARS = 32
         private val EXIF_PREFIX = byteArrayOf('E'.code.toByte(), 'x'.code.toByte(), 'i'.code.toByte(), 'f'.code.toByte(), 0, 0)
 
         /**
@@ -44,11 +43,7 @@ data class WaStickerMetadata(
 
         private fun from(root: JSONObject): WaStickerMetadata? {
             val emojis = root.optJSONArray("emojis")?.let { array ->
-                (0 until array.length())
-                    .mapNotNull { (array.opt(it) as? String)?.trim() }
-                    .filter { it.isNotEmpty() && it.length <= MAX_EMOJI_CHARS }
-                    .distinct()
-                    .take(MAX_EMOJIS)
+                StickerWords.cleanEmojis((0 until array.length()).mapNotNull { array.opt(it) as? String })
             }.orEmpty()
             val metadata = WaStickerMetadata(
                 packId = root.text("sticker-pack-id"),

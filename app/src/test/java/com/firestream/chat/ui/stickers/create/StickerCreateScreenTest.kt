@@ -8,10 +8,16 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performTextInput
 import com.firestream.chat.domain.model.StickerDraft
 import com.firestream.chat.domain.model.StickerDraftImage
 import com.firestream.chat.test.fakes.testStickerPack
+import com.firestream.chat.ui.stickers.ADD_EMOJI_LABEL
+import com.firestream.chat.ui.stickers.ADD_NAMES_LABEL
+import com.firestream.chat.ui.stickers.STICKER_NAME_FIELD_TAG
+import com.firestream.chat.ui.stickers.StickerWordCallbacks
 import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
@@ -120,12 +126,32 @@ class StickerCreateScreenTest {
         val removed = mutableListOf<String>()
         setContent(
             StickerCreateUiState(draft = withSubject, emojis = listOf("😺", "🐶", "🦊")),
-            StickerCreateActions(onRemoveEmoji = { removed += it }),
+            StickerCreateActions(words = StickerWordCallbacks(onRemoveEmoji = { removed += it })),
         )
 
         composeTestRule.onNodeWithText("Add emoji").assertDoesNotExist()
         composeTestRule.onNodeWithText("🐶").performScrollTo().performClick()
 
         assertEquals(listOf("🐶"), removed)
+    }
+
+    @Test
+    fun `add names opens a field beside add emoji, and a name is a chip that a tap takes out`() {
+        val added = mutableListOf<String>()
+        val removed = mutableListOf<String>()
+        setContent(
+            StickerCreateUiState(draft = withSubject, names = listOf("Grumpy cat")),
+            StickerCreateActions(words = StickerWordCallbacks(onAddName = { added += it }, onRemoveName = { removed += it })),
+        )
+
+        composeTestRule.onNodeWithText(ADD_EMOJI_LABEL).performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithTag(STICKER_NAME_FIELD_TAG).assertDoesNotExist()
+        composeTestRule.onNodeWithText(ADD_NAMES_LABEL).performScrollTo().performClick()
+        composeTestRule.onNodeWithTag(STICKER_NAME_FIELD_TAG).performScrollTo().performTextInput("Montag")
+        composeTestRule.onNodeWithContentDescription("Add this name").performClick()
+        composeTestRule.onNodeWithText("Grumpy cat").performScrollTo().performClick()
+
+        assertEquals(listOf("Montag"), added)
+        assertEquals(listOf("Grumpy cat"), removed)
     }
 }

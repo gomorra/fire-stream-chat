@@ -138,17 +138,27 @@ interface StickerRepository {
 
     /**
      * Makes a sticker of the draft picture at [imagePath], placed by [crop],
-     * and tags it with [emojis].
+     * tags it with [emojis] and gives it [names].
      *
      * It joins the pack [packId], which must be a `USER` pack. When [packId] is
      * null it joins the pack named [packName], which is made when it is not
-     * there. Succeeds with the sticker's id.
+     * there. Succeeds with the sticker's id. A made sticker is never named
+     * automatically, and neither are the stickers of a pack made here.
      */
     suspend fun createSticker(
         imagePath: String,
         crop: StickerCrop,
         emojis: List<String>,
+        names: List<String>,
         packId: String?,
         packName: String,
     ): Result<String>
+
+    /**
+     * Replaces the emojis and the names a person gave [stickerId]. Both are
+     * cleaned and capped (`StickerWords`). What was found automatically stays.
+     * Every pack that holds the sticker is backed up again. Fails for a sticker
+     * the library does not hold.
+     */
+    suspend fun setStickerWords(stickerId: String, emojis: List<String>, names: List<String>): Result<Unit>
 }

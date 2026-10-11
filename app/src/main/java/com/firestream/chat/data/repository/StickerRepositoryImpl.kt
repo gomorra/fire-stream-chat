@@ -13,7 +13,9 @@
 //   leaves in no pack is remembered on the device, an import with skipKnown
 //   leaves it out, and an add on purpose forgets it again (an import without
 //   skipKnown, saveSticker, installPack, createSticker, createPack). A favourite
-//   does not: the star can come off again.
+//   does not: the star can come off again. The cleaning of the emojis and names
+//   a person gives a sticker (StickerWords), and that a made sticker and a pack
+//   the maker creates are closed to automatic naming (autoNameAllowed = false).
 // Collaborators: StickerDao (rows, and every multi-statement write as one
 //   transaction), StickerFiles (the content-addressed files), StickerPackArchive
 //   and WaStickerMetadata (untrusted input), WhatsAppStickerFolder (the folder
@@ -64,6 +66,7 @@ import com.firestream.chat.domain.model.StickerPackKind
 import com.firestream.chat.domain.model.StickerPackPreview
 import com.firestream.chat.domain.model.WhatsAppStickerFile
 import com.firestream.chat.domain.repository.StickerRepository
+import com.firestream.chat.domain.util.StickerWords
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
@@ -455,6 +458,9 @@ class StickerRepositoryImpl @Inject constructor(
                 isAnimated = sticker.isAnimated,
                 emojis = sticker.emojis,
                 createdAt = now,
+                // The owner's names come with the pack. A sticker the library has keeps its own.
+                names = sticker.names,
+                autoNameAllowed = sticker.autoNameAllowed,
             )
         }
         // False: a copy is there already, which is what the caller wanted.
@@ -471,6 +477,7 @@ class StickerRepositoryImpl @Inject constructor(
         imagePath: String,
         crop: StickerCrop,
         emojis: List<String>,
+        names: List<String>,
         packId: String?,
         packName: String,
     ): Result<String> = resultOf {
@@ -482,23 +489,39 @@ class StickerRepositoryImpl @Inject constructor(
             null
         }
         val bytes = stickerMaker.render(imagePath, crop)
-        val tags = emojis.map { it.trim() }.filter { it.isNotEmpty() }.distinct().take(StickerDraft.MAX_EMOJIS)
+        val tags = StickerWords.cleanEmojis(emojis, StickerDraft.MAX_EMOJIS)
         withContext(Dispatchers.IO) {
             // Under the import lock, like an import: a refused archive deletes files that have no row yet.
             importLock.withLock {
                 val stored = stickerFiles.store(bytes) ?: throw IllegalStateException(NOT_A_STICKER)
                 val now = System.currentTimeMillis()
+                // A made sticker is the user's own picture. It is not sent to the naming service.
                 val sticker = StickerEntity.of(stored, tags, now)
+                    .copy(names = StickerWords.cleanNames(names), autoNameAllowed = false)
                 if (newPackTarget != null) {
-                    stickerDao.importInto(newPack(newPackTarget, now), listOf(sticker), now)
+                    stickerDao.importInto(newPack(newPackTarget, now).copy(autoNameAllowed = false), listOf(sticker), now)
                 } else if (!stickerDao.addMadeSticker(packId!!, sticker, now)) {
                     throw NoSuchElementException(PACK_GONE)
                 }
+                // The same picture made a second time is a row the library had. It keeps that row.
+                stickerDao.markMade(stored.id, sticker.names, now)
                 preferences.forgetDeletedStickers(listOf(stored.id))
                 stored.id
             }
         }.also { syncScheduler.syncIfPending() }
     }
+
+    override suspend fun setStickerWords(stickerId: String, emojis: List<String>, names: List<String>): Result<Unit> =
+        resultOf {
+            val written = stickerDao.setStickerWords(
+                stickerId = stickerId,
+                emojis = StickerWords.cleanEmojis(emojis),
+                names = StickerWords.cleanNames(names),
+                now = System.currentTimeMillis(),
+            )
+            if (!written) throw NoSuchElementException("That sticker is not in the library")
+            syncScheduler.syncIfPending()
+        }
 
     private suspend fun requirePack(packId: String): StickerPackEntity =
         stickerDao.getPack(packId) ?: throw NoSuchElementException(PACK_GONE)

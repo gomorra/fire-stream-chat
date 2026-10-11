@@ -49,7 +49,102 @@ class StickerManifestTest {
         assertEquals(listOf(2L, 3L, 4L), listOf(manifest.sortOrder.toLong(), manifest.createdAt, manifest.updatedAt))
         assertEquals(listOf(second, first), manifest.stickers.map { it.id })
         assertEquals("as many as an import keeps", tags.take(8), manifest.stickers.first().emojis)
-        assertEquals(RemoteSticker(first, "WEBP", 512, 256, true, emptyList()), manifest.stickers.last())
+        assertEquals(
+            RemoteSticker(first, "WEBP", 512, 256, true, emptyList(), names = emptyList(), autoNameAllowed = true),
+            manifest.stickers.last(),
+        )
+    }
+
+    @Test
+    fun `a manifest carries a sticker's names and both automatic-naming switches, and nothing found automatically`() {
+        val pack = StickerPackEntity("p1", "Mine", null, "USER", null, "loose:Mine", 0, 1L, 1L, autoNameAllowed = false)
+        val made = row(first, listOf("😺")).copy(
+            names = listOf("Grumpy cat", "Montag"),
+            autoNameAllowed = false,
+            autoNameEn = "Angry cat",
+            autoWords = listOf("angry"),
+            nameRequestedAt = 5L,
+        )
+
+        val manifest = StickerManifest.of(pack, listOf(made, row(second)), "uid1")
+
+        assertEquals(false, manifest.autoNameAllowed)
+        assertEquals(
+            listOf(
+                RemoteSticker(first, "WEBP", 512, 256, true, listOf("😺"), listOf("Grumpy cat", "Montag"), false),
+                RemoteSticker(second, "WEBP", 512, 256, true, emptyList(), emptyList(), true),
+            ),
+            manifest.stickers,
+        )
+        assertTrue("a build that knows names says so for every sticker", StickerManifest.statesWords(manifest))
+    }
+
+    @Test
+    fun `names count toward what a manifest may weigh`() {
+        val pack = StickerPackEntity("p1", "Big", null, "USER", null, null, 0, 1L, 1L)
+        // Eight names of 40 chars that take three bytes each: about 1100 bytes a sticker.
+        val names = (0 until 8).map { "€".repeat(39) + it }
+        val stickers = (0 until 2000).map { row(it.toString(16).padStart(64, '0')).copy(names = names) }
+
+        val listed = StickerManifest.of(pack, stickers, "uid1").stickers
+
+        val bytes = listed.sumOf { sticker -> 128 + sticker.names.orEmpty().sumOf { it.toByteArray().size + 1 } }
+        assertTrue("some are listed", listed.size in 500 until 2000)
+        assertTrue("and they fit one document", bytes <= StickerManifest.MAX_LIST_BYTES)
+    }
+
+    @Test
+    fun `sticker rows from a manifest take its names cleaned and capped, and whether they may be named`() {
+        val rows = StickerManifest.stickersOf(
+            remote(
+                stickers = listOf(
+                    remoteSticker(first).copy(
+                        names = listOf("  Grumpy\u0000 cat ", "", "grumpy CAT", "x".repeat(90)) + List(9) { "n$it" },
+                        autoNameAllowed = false,
+                    ),
+                    // An entry of an older build says neither.
+                    remoteSticker(second),
+                )
+            ),
+            now = 9L,
+        )
+
+        assertEquals(listOf("Grumpy cat", "x".repeat(40)) + List(6) { "n$it" }, rows.first().names)
+        assertEquals(listOf(false, true), rows.map { it.autoNameAllowed })
+        assertEquals(emptyList<String>(), rows.last().names)
+        assertTrue("nothing automatic comes from a manifest", rows.all { it.autoNameEn == null && it.autoWords.isEmpty() && it.nameRequestedAt == null })
+    }
+
+    @Test
+    fun `a sticker entry that does not say whether it may be named takes its pack's answer`() {
+        val entries = listOf(remoteSticker(first), remoteSticker(second).copy(autoNameAllowed = true))
+
+        // The maker's pack as a build before names backed it up: its made stickers stay out of naming.
+        assertEquals(listOf(false, true), StickerManifest.stickersOf(remote(importKey = "loose:My stickers", stickers = entries), 9L).map { it.autoNameAllowed })
+        assertEquals(listOf(true, true), StickerManifest.stickersOf(remote(importKey = "wa:cats", stickers = entries), 9L).map { it.autoNameAllowed })
+        assertEquals(
+            listOf(false, true),
+            StickerManifest.stickersOf(remote(importKey = "wa:cats", stickers = entries).copy(autoNameAllowed = false), 9L).map { it.autoNameAllowed },
+        )
+    }
+
+    @Test
+    fun `a manifest of an older build states no words`() {
+        assertFalse(StickerManifest.statesWords(remote(stickers = listOf(remoteSticker(first), remoteSticker(second)))))
+        assertTrue(StickerManifest.statesWords(remote(stickers = listOf(remoteSticker(first).copy(names = emptyList())))))
+    }
+
+    @Test
+    fun `a pack row says whether its stickers may be named, and an older manifest is read by its import key`() {
+        assertFalse(StickerManifest.packOf(remote(importKey = "wa:cats").copy(autoNameAllowed = false)).autoNameAllowed)
+        assertTrue(StickerManifest.packOf(remote(importKey = "loose:Mine").copy(autoNameAllowed = true)).autoNameAllowed)
+        // Without the field: only the sticker maker makes a pack that is found by its name, beside the WhatsApp import.
+        assertFalse(StickerManifest.packOf(remote(importKey = "loose:My stickers")).autoNameAllowed)
+        assertFalse(StickerManifest.packOf(remote(importKey = "loose:Holiday")).autoNameAllowed)
+        assertTrue(StickerManifest.packOf(remote(importKey = "loose:WhatsApp")).autoNameAllowed)
+        assertTrue(StickerManifest.packOf(remote(importKey = "wa:com.cats\u0000Cats\u0000Ana")).autoNameAllowed)
+        assertTrue(StickerManifest.packOf(remote(importKey = "archive:Holiday\u0000Cleo")).autoNameAllowed)
+        assertTrue(StickerManifest.packOf(remote(importKey = null)).autoNameAllowed)
     }
 
     @Test

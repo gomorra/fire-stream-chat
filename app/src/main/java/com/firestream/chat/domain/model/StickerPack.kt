@@ -33,6 +33,9 @@ enum class StickerPackKind {
  * [shownInRow] says the pack has its own thumbnail in the picker's row. It is
  * false for a pack a WhatsApp import made, until its owner switches it on.
  * Those two unnamed packs are always in the row.
+ *
+ * [autoNameAllowed] is false for a pack whose stickers the naming service must
+ * not be asked about, such as the pack the sticker maker creates.
  */
 data class StickerPack(
     val id: String,
@@ -44,6 +47,7 @@ data class StickerPack(
     val createdAt: Long,
     val updatedAt: Long,
     val shownInRow: Boolean = true,
+    val autoNameAllowed: Boolean = true,
 ) {
     /**
      * Whether the pack has a thumbnail of its own in the picker's row. The two
