@@ -447,6 +447,7 @@ Findings: VIS-20, TEST-3. Decision D-9.
 
 - Replace the stale Roborazzi tests with a catalogue under `app/src/test/java/com/firestream/chat/catalogue/`. It covers text, media, poll, list and sticker bubbles (own and other), a chat-list row, settings rows, dialogs, top bars and empty states, each in light, dark and font scale 1.5.
 - Record the baselines and add `verifyRoborazziFirebaseDebug` to CI. Document re-recording in `docs/TESTING.md`. Delete the TECH_DEBT entry.
+- `docs/TESTING.md`: make *Per-feature testing requirements* agree with CLAUDE.md's post-step rule. Tests are owed for non-trivial logic and for every bug fix. Pass-through ViewModels, simple CRUD repositories and UI-only changes need none. Today the file asks for a test of every repository method, every ViewModel and every screen.
 
 Tests: the catalogue.
 Done when: CI fails on an unrecorded visual change.
@@ -631,6 +632,7 @@ Each becomes its own plan file when the owner picks it up. They are listed in th
 - **F-9 Sync and startup efficiency, measured first** (PERF-3, PERF-6, PERF-8, PERF-9, PERF-10, PERF-13, M–L): incremental sync on an `updatedAt` field; batched receipts; lifecycle-scoped ViewModel flows; startup work off the main thread; the OkHttp cache's scope; a regenerated baseline profile that covers the chat screen.
 - **F-10 Emulator smoke test** (PROC-3, M–L): a CI job with a Firebase test phone number that launches, signs in, sends text and a photo, and rotates. It also unblocks baseline-profile generation.
 - **F-11 Adaptive layouts** (UX-19, L): list-detail on tablets and foldables.
+- **F-12 Sync tests against the Firestore emulator** (TECH_DEBT § *Sync-path regression coverage*, M): a Gradle test task that runs the app's repositories against the Firestore emulator, outside the default gate, with a CI job shaped like `.github/workflows/firestore-rules.yml`. A sender and a receiver repository share one emulator. Five to ten tests assert that both Room databases converge: list add, toggle and clear, chat send and receive, shared-list fan-out. No stress or property tests, because mocked DAOs hide the interleaving these bugs need. The lock half of the TECH_DEBT entry is done (`ListRepositoryMutexTripwireTest`); this plan deletes the entry. It depends on no other follow-up. Start it after `docs/plans/message-sync.md` has shipped and before F-9, so the tests pin the sync that F-9 then changes.
 
 ## 6. Target outline for CLAUDE.md (Step 36)
 
