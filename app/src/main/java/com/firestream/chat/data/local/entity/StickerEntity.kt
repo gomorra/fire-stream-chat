@@ -23,7 +23,9 @@ import com.firestream.chat.domain.model.StickerPack
  * pack that holds the sticker. The `auto…` columns are the naming service's
  * answer. Nothing a person does writes them, and no pack manifest carries them.
  * [autoNameAllowed] is false for a sticker the service must not be asked about.
- * [nameRequestedAt] is when this device last asked for a name, or null.
+ * [nameRequestedAt] is when this device last asked for a name, or last found a
+ * record on the backend that holds no usable answer. It is null before the
+ * first look. `StickerNameSync` asks again a day after it at the earliest.
  */
 @Entity(tableName = "stickers")
 data class StickerEntity(
@@ -44,16 +46,28 @@ data class StickerEntity(
     val autoNameAllowed: Boolean = true,
     val nameRequestedAt: Long? = null,
 ) {
-    /** [localPath] says where a file of the sticker's format lives; the row does not know the directory. */
-    fun toDomain(localPath: (StickerFormat) -> String): Sticker {
-        val format = parseStickerFormat(format)
-        val autoName = StickerAutoName(
+    /** What the naming service found, or `null` while the `auto…` columns hold nothing. */
+    val autoName: StickerAutoName?
+        get() = StickerAutoName(
             nameEn = autoNameEn.orEmpty(),
             nameDe = autoNameDe.orEmpty(),
             words = autoWords,
             text = autoText.orEmpty(),
             emojis = autoEmojis,
-        )
+        ).takeUnless { it.isEmpty }
+
+    /** This row with [found] in its `auto…` columns. Nothing a person gave the sticker changes. */
+    fun withAutoName(found: StickerAutoName): StickerEntity = copy(
+        autoNameEn = found.nameEn.ifEmpty { null },
+        autoNameDe = found.nameDe.ifEmpty { null },
+        autoWords = found.words,
+        autoText = found.text.ifEmpty { null },
+        autoEmojis = found.emojis,
+    )
+
+    /** [localPath] says where a file of the sticker's format lives; the row does not know the directory. */
+    fun toDomain(localPath: (StickerFormat) -> String): Sticker {
+        val format = parseStickerFormat(format)
         return Sticker(
             id = id,
             format = format,
@@ -63,7 +77,7 @@ data class StickerEntity(
             emojis = emojis,
             localPath = localPath(format),
             names = names,
-            autoName = autoName.takeUnless { it.isEmpty },
+            autoName = autoName,
             autoNameAllowed = autoNameAllowed,
         )
     }
@@ -184,6 +198,17 @@ data class StickerPackItemEntity(
     val packId: String,
     val stickerId: String,
     val position: Int,
+)
+
+/**
+ * What a naming run reads of a sticker it may ask about. Not the whole row: a
+ * run reads the candidates again before every batch, and a row carries four
+ * lists that would be decoded each time.
+ */
+data class StickerNameCandidate(
+    val id: String,
+    val format: String,
+    val nameRequestedAt: Long?,
 )
 
 /** A sticker together with the pack it was read for. */

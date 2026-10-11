@@ -179,6 +179,12 @@ data class StickerAutoName(           // a part that was not found is empty
     val emojis: List<String> = emptyList()
 )
 
+data class StickerAutoNaming(         // automatic sticker names as this device has them
+    val isSupported: Boolean = false, // false on a backend without a naming service
+    val isEnabled: Boolean = false,   // the person's switch; off until they switch it on
+    val isRefused: Boolean = false    // the backend refused the last look; switches nothing off
+)
+
 data class StickerPack(
     val id: String,                   // random UUID
     val name: String,                 // "" for FAVOURITES and SAVED; a screen labels those by kind

@@ -82,6 +82,8 @@ When adding a new convention, append a section here in the same shape: **definit
 
 **Example.** `app/src/main/java/com/firestream/chat/ui/chat/ChatViewModel.kt:88–96` — `persistScrollPosition()` launches on `appScope` with the explanatory comment. `@ApplicationScope` is provided by `di/CoroutineScopeModule`.
 
+**A write with a caller to answer to.** A repository call that returns a `Result` runs the write under `withContext(NonCancellable)` instead. The caller still gets its answer, and the write finishes when the caller's scope is cancelled. `StickerRepositoryImpl.setAutoNaming` and `StickerLibrarySync.signingOut` do. Use it for a write that must not be lost half-way, such as a switch that withdraws consent.
+
 **Trap.** Writing on `viewModelScope` looks correct in tests (the scope lives long enough) but loses writes in the field — the user pops back, `onCleared()` fires, the coroutine cancels, and the last preference change vanishes.
 
 ---

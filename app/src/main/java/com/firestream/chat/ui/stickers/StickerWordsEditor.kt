@@ -174,7 +174,7 @@ private val WordsSaver = listSaver<List<String>, String>(save = { it.toList() },
 @Composable
 internal fun StickerWordsSheet(
     sticker: Sticker,
-    onSave: (emojis: List<String>, names: List<String>) -> Unit,
+    onSave: (emojis: List<String>, names: List<String>, stopAutoNaming: Boolean) -> Unit,
     onDismiss: () -> Unit,
 ) {
     ModalBottomSheet(onDismissRequest = onDismiss) {
@@ -186,14 +186,19 @@ internal fun StickerWordsSheet(
  * The content of [StickerWordsSheet]: the sticker, its emojis and names as
  * chips, and under them what was found automatically, which cannot be changed
  * here. Nothing is written before *Save*.
+ *
+ * *Use as mine* puts the automatic names and search words among the names,
+ * where they can be edited like typed ones. A save after it also tells
+ * [onSave] to leave the sticker out of automatic naming from now on.
  */
 @Composable
 internal fun StickerWordsEditor(
     sticker: Sticker,
-    onSave: (emojis: List<String>, names: List<String>) -> Unit,
+    onSave: (emojis: List<String>, names: List<String>, stopAutoNaming: Boolean) -> Unit,
     onCancel: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    var usedAsMine by rememberSaveable(sticker.id) { mutableStateOf(false) }
     // Saved across a rotation: the draft is what the person typed, and nothing else holds it.
     var emojis by rememberSaveable(sticker.id, stateSaver = WordsSaver) { mutableStateOf(sticker.emojis) }
     var names by rememberSaveable(sticker.id, stateSaver = WordsSaver) { mutableStateOf(sticker.names) }
@@ -219,20 +224,31 @@ internal fun StickerWordsEditor(
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
         )
-        sticker.autoName?.let { AutomaticWords(it) }
+        sticker.autoName?.let { found ->
+            AutomaticWords(
+                autoName = found,
+                usedAsMine = usedAsMine,
+                onUseAsMine = {
+                    names = StickerWords.withAutoName(names, found)
+                    usedAsMine = true
+                },
+            )
+        }
         Row(
             horizontalArrangement = Arrangement.End,
             modifier = Modifier.fillMaxWidth().padding(top = 16.dp, bottom = 16.dp),
         ) {
             TextButton(onClick = onCancel) { Text("Cancel") }
-            TextButton(onClick = { onSave(emojis, names) }) { Text("Save") }
+            TextButton(onClick = { onSave(emojis, names, usedAsMine) }) { Text("Save") }
         }
     }
 }
 
-/** What the naming service found, read-only. */
+internal const val USE_AS_MINE_LABEL = "Use as mine"
+
+/** What the naming service found, read-only, with the button that takes it over. */
 @Composable
-private fun AutomaticWords(autoName: StickerAutoName) {
+private fun AutomaticWords(autoName: StickerAutoName, usedAsMine: Boolean, onUseAsMine: () -> Unit) {
     WordsTitle("Found automatically")
     val lines = listOfNotNull(
         listOf(autoName.nameDe, autoName.nameEn).filter { it.isNotEmpty() }.joinToString(" · ").ifEmpty { null },
@@ -247,6 +263,16 @@ private fun AutomaticWords(autoName: StickerAutoName) {
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.fillMaxWidth(),
         )
+    }
+    if (usedAsMine) {
+        Text(
+            text = "Added to your names. Saving also stops automatic naming for this sticker.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+        )
+    } else {
+        TextButton(onClick = onUseAsMine, modifier = Modifier.fillMaxWidth()) { Text(USE_AS_MINE_LABEL) }
     }
 }
 

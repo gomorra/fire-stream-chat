@@ -224,4 +224,43 @@ class StickerSearchTest {
         // An empty pack has nothing to show, also when its name matches.
         assertTrue(sections("Empty").isEmpty())
     }
+
+    // --- The manager's filters ---
+
+    private val typed = testSticker("typed").copy(names = listOf("Grumpy cat"))
+    private val found = testSticker("found").copy(autoName = StickerAutoName(nameEn = "Sleepy bear"))
+    private val both = testSticker("both").copy(names = listOf("Mine"), autoName = StickerAutoName(nameDe = "Müder Bär"))
+    private val nameless = testSticker("nameless", "😺")
+    private val named = listOf(pack("Zoo", typed, found, both, nameless), pack("Typed only", typed))
+
+    private fun filtered(filter: StickerNameFilter, query: String = "") =
+        StickerSearch.sections(named, query, emojisFor, filter = filter).map { section ->
+            section.pack.id to section.stickers.map { it.id }
+        }
+
+    @Test
+    fun `the no-name filter shows the stickers nobody named, and an emoji is no name`() {
+        assertEquals(listOf("Zoo" to listOf("nameless")), filtered(StickerNameFilter.NO_NAME))
+    }
+
+    @Test
+    fun `the named-automatically filter shows what the service named, whatever a person named it since`() {
+        assertEquals(listOf("Zoo" to listOf("found", "both")), filtered(StickerNameFilter.NAMED_AUTOMATICALLY))
+    }
+
+    @Test
+    fun `a filter narrows a search, and a pack it leaves nothing of is left out`() {
+        assertEquals(listOf("Zoo" to listOf("found")), filtered(StickerNameFilter.NAMED_AUTOMATICALLY, "bear"))
+        assertTrue(filtered(StickerNameFilter.NO_NAME, "grumpy").isEmpty())
+        // A pack's name still shows the pack, as far as the filter lets it.
+        assertEquals(listOf("Zoo" to listOf("nameless")), filtered(StickerNameFilter.NO_NAME, "zoo"))
+    }
+
+    @Test
+    fun `without a filter every sticker shows`() {
+        assertEquals(
+            listOf("Zoo" to listOf("typed", "found", "both", "nameless"), "Typed only" to listOf("typed")),
+            filtered(StickerNameFilter.ALL),
+        )
+    }
 }

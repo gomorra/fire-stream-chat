@@ -74,3 +74,18 @@ data class StickerAutoName(
     val isEmpty: Boolean
         get() = nameEn.isEmpty() && nameDe.isEmpty() && words.isEmpty() && text.isEmpty() && emojis.isEmpty()
 }
+
+/**
+ * Automatic sticker names as this device has them.
+ *
+ * [isSupported] is false on a backend without a naming service, where nothing
+ * about it is offered. [isEnabled] is the person's switch, which is off until
+ * they switch it on: with it on, the pictures of their stickers are read by the
+ * naming service. [isRefused] says the backend refused the last look, so no
+ * name can be had right now. It switches nothing off.
+ */
+data class StickerAutoNaming(
+    val isSupported: Boolean = false,
+    val isEnabled: Boolean = false,
+    val isRefused: Boolean = false,
+)

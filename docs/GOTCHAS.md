@@ -411,6 +411,12 @@ developer machine, and (c) likely to recur. Named, structural conventions belong
   `ScaledImageDecoder.Factory()`, which decodes through `ImageDecoder.setTargetSize`.
   Both the Shared Media grid and every avatar (`buildAvatarRequest`) do. Disabling hardware
   bitmaps does not fix it. Regression: `AvatarRequestTest`, `ScaledImageDecoderTest`.
+- **WorkManager's backoff stops growing at five hours.** `Result.retry()` with
+  `BackoffPolicy.EXPONENTIAL` doubles the wait up to `WorkRequest.MAX_BACKOFF_MILLIS`, and no
+  setting raises it. A worker that should come back "up to a day later" needs its own delayed
+  work for that. A retry that waits out its backoff is also a pending unique work, so
+  `ExistingWorkPolicy.KEEP` drops every new request until it has run. A trigger that must not
+  wait uses `REPLACE` (`StickerNameScheduler`).
 - **WorkManager typed `setForeground` needs a manifest merge on Android 14+.** Declare
   `<service android:name="androidx.work.impl.foreground.SystemForegroundService"
   android:foregroundServiceType="dataSync" tools:node="merge"/>` or the worker 400s.

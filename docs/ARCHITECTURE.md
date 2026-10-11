@@ -470,6 +470,8 @@ com.firestream.chat/
 │   │   ├── StickerUploads.kt    # A sticker's shared object: one lock per sticker, uploaded once, remoteUrl kept on the row
 │   │   ├── StickerManifest.kt   # Library rows ⇄ pack manifest; what of a manifest is let into the library
 │   │   ├── StickerLibrarySync.kt # The restore: a listener on the user's own manifests, merged newer-only; the sign-out fence
+│   │   ├── StickerNameSync.kt   # Automatic names: who is asked for, look before asking, the answer into the auto… columns
+│   │   ├── StickerNameAnswer.kt # The check of the naming service's answer before any of it reaches a row
 │   │   ├── StickerPackArchive.kt # .wastickers / zip reader under entry, per-entry and total-byte caps
 │   │   ├── StickerText.kt       # The one cleaning rule for pack names, publishers and pack ids
 │   │   ├── WaStickerMetadata.kt # Pack id, name, publisher and emojis out of a WebP's EXIF chunk
@@ -492,6 +494,8 @@ com.firestream.chat/
 │   │   ├── MediaBackfillScheduler.kt # The one-time backfill run a failed download queues
 │   │   ├── StickerSyncWorker.kt   # Backs up changed sticker packs and deletes the manifests of deleted ones
 │   │   ├── StickerSyncScheduler.kt # The one unique sync run, queued whenever a pack is unsynced
+│   │   ├── StickerNameWorker.kt   # Asks the naming service about stickers and stores its answers
+│   │   ├── StickerNameScheduler.kt # The one unique naming run, replaced by every new reason to run
 │   │   └── UpdateCheckWorker.kt   # 24h periodic check; notifies on new release
 │   ├── remote/
 │   │   ├── fcm/                 # FCMService, ActiveChatTracker

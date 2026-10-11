@@ -33,6 +33,7 @@ import androidx.compose.material.icons.automirrored.filled.DriveFileMove
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AddPhotoAlternate
 import androidx.compose.material.icons.filled.Animation
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
@@ -82,6 +83,7 @@ import com.firestream.chat.ui.components.LibraryStickerImage
 import com.firestream.chat.ui.components.StickerImage
 import com.firestream.chat.domain.model.Sticker
 import com.firestream.chat.domain.model.StickerPack
+import com.firestream.chat.domain.util.StickerNameFilter
 import sh.calvin.reorderable.ReorderableItem
 import sh.calvin.reorderable.rememberReorderableLazyListState
 
@@ -123,7 +125,12 @@ internal data class StickerLibraryActions(
     val onDeleteSelectedStickers: () -> Unit = {},
     val onEditSelectedSticker: () -> Unit = {},
     val onCloseStickerEdit: () -> Unit = {},
-    val onSaveStickerWords: (emojis: List<String>, names: List<String>) -> Unit = { _, _ -> },
+    val onSaveStickerWords: (emojis: List<String>, names: List<String>, stopAutoNaming: Boolean) -> Unit = { _, _, _ -> },
+    val onSetAutoNaming: (Boolean) -> Unit = {},
+    val onSetPackAutoNaming: (packId: String, allowed: Boolean) -> Unit = { _, _ -> },
+    val onNameSelectedNow: () -> Unit = {},
+    val onStopNamingSelected: () -> Unit = {},
+    val onSetNameFilter: (StickerNameFilter) -> Unit = {},
 )
 
 @Composable
@@ -218,6 +225,11 @@ fun StickerLibraryScreen(
                 onEditSelectedSticker = viewModel::editSelectedSticker,
                 onCloseStickerEdit = viewModel::closeStickerEdit,
                 onSaveStickerWords = viewModel::saveStickerWords,
+                onSetAutoNaming = viewModel::setAutoNaming,
+                onSetPackAutoNaming = viewModel::setPackAutoNaming,
+                onNameSelectedNow = viewModel::nameSelectedNow,
+                onStopNamingSelected = viewModel::stopNamingSelected,
+                onSetNameFilter = viewModel::setNameFilter,
             )
         }
         StickerLibraryContent(uiState = uiState, actions = actions, snackbarHostState = snackbarHostState)
@@ -263,6 +275,8 @@ internal fun StickerLibraryContent(
                             // Only a pack's own grid can take a sticker out of that pack alone.
                             canRemoveFromPack = openPack != null,
                             canEdit = uiState.canEditSelected,
+                            canNameNow = uiState.canNameSelectedNow,
+                            canStopNaming = uiState.autoNaming.isSupported,
                             actions = actions,
                             onAsk = { dialog = it },
                         )
@@ -321,6 +335,15 @@ internal fun StickerLibraryContent(
 /** The menu entry of a selection of one sticker that opens the edit of its emojis and names. */
 internal const val EDIT_STICKER_LABEL = "Edit names and emojis"
 
+/** The menu entry of a sticker selection that opens its stickers to automatic naming and asks for them. */
+internal const val NAME_NOW_LABEL = "Name now"
+
+/** The menu entry of a sticker selection that leaves its stickers out of automatic naming. */
+internal const val STOP_NAMING_LABEL = "Do not name automatically"
+
+/** The entry of a pack's menu that lets the pack's stickers be named automatically, or leaves the pack out. */
+internal const val PACK_AUTO_NAMING_LABEL = "Name automatically"
+
 /** A question the top bar of a selection asks before it acts. */
 internal enum class SelectionDialog { MERGE_PACKS, DELETE_PACKS, MOVE_STICKERS, NEW_PACK, DELETE_STICKERS }
 
@@ -329,6 +352,8 @@ internal enum class SelectionDialog { MERGE_PACKS, DELETE_PACKS, MOVE_STICKERS, 
 private fun StickerSelectionActions(
     canRemoveFromPack: Boolean,
     canEdit: Boolean,
+    canNameNow: Boolean,
+    canStopNaming: Boolean,
     actions: StickerLibraryActions,
     onAsk: (SelectionDialog) -> Unit,
 ) {
@@ -363,6 +388,19 @@ private fun StickerSelectionActions(
                 DropdownMenuItem(
                     text = { Text("Remove from pack") },
                     onClick = { menuOpen = false; actions.onRemoveSelected() },
+                )
+            }
+            // Asking sends a picture, so it is offered only while the person has naming switched on.
+            if (canNameNow) {
+                DropdownMenuItem(
+                    text = { Text(NAME_NOW_LABEL) },
+                    onClick = { menuOpen = false; actions.onNameSelectedNow() },
+                )
+            }
+            if (canStopNaming) {
+                DropdownMenuItem(
+                    text = { Text(STOP_NAMING_LABEL) },
+                    onClick = { menuOpen = false; actions.onStopNamingSelected() },
                 )
             }
         }
@@ -530,7 +568,11 @@ private fun PackList(uiState: StickerLibraryUiState, actions: StickerLibraryActi
         ROW_GROUP_TITLE to shown.filter { it.hasOwnThumbnail },
         GROUPED_GROUP_TITLE to shown.filterNot { it.hasOwnThumbnail },
     )
+    val canAutoName = uiState.autoNaming.isSupported
     LazyColumn(state = listState, modifier = Modifier.fillMaxSize()) {
+        if (canAutoName) {
+            item(key = "auto-naming") { AutoNamingRow(naming = uiState.autoNaming, onSet = actions.onSetAutoNaming) }
+        }
         groups.forEach { (title, packs) ->
             if (packs.isEmpty()) return@forEach
             item(key = "header:$title") {
@@ -548,6 +590,7 @@ private fun PackList(uiState: StickerLibraryUiState, actions: StickerLibraryActi
                         isSelected = pack.id in uiState.selectedPackIds,
                         isSelecting = selecting,
                         isDragging = isRowDragging,
+                        canAutoName = canAutoName,
                         actions = actions,
                         dragHandleModifier = Modifier.draggableHandle(),
                         onRename = { renaming = pack },
@@ -612,6 +655,7 @@ private fun PackRow(
     isSelected: Boolean,
     isSelecting: Boolean,
     isDragging: Boolean,
+    canAutoName: Boolean,
     actions: StickerLibraryActions,
     dragHandleModifier: Modifier,
     onRename: () -> Unit,
@@ -672,6 +716,19 @@ private fun PackRow(
                             DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
                                 if (pack.canRename) {
                                     DropdownMenuItem(text = { Text("Rename") }, onClick = { menuOpen = false; onRename() })
+                                }
+                                // A sticker is asked for only when every pack that holds it has this on.
+                                if (canAutoName) {
+                                    DropdownMenuItem(
+                                        text = { Text(PACK_AUTO_NAMING_LABEL) },
+                                        trailingIcon = {
+                                            if (pack.autoNameAllowed) Icon(Icons.Default.Check, contentDescription = "On")
+                                        },
+                                        onClick = {
+                                            menuOpen = false
+                                            actions.onSetPackAutoNaming(pack.id, !pack.autoNameAllowed)
+                                        },
+                                    )
                                 }
                                 DropdownMenuItem(text = { Text("Delete") }, onClick = { menuOpen = false; onDelete() })
                             }

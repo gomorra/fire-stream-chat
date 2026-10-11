@@ -1,6 +1,7 @@
 package com.firestream.chat.domain.repository
 
 import com.firestream.chat.domain.model.Sticker
+import com.firestream.chat.domain.model.StickerAutoNaming
 import com.firestream.chat.domain.model.StickerCrop
 import com.firestream.chat.domain.model.StickerDraft
 import com.firestream.chat.domain.model.StickerImportResult
@@ -159,6 +160,48 @@ interface StickerRepository {
      * cleaned and capped (`StickerWords`). What was found automatically stays.
      * Every pack that holds the sticker is backed up again. Fails for a sticker
      * the library does not hold.
+     *
+     * With [stopAutoNaming] the same write leaves the sticker out of automatic
+     * naming from now on. Its owner took what was found as their own names.
      */
-    suspend fun setStickerWords(stickerId: String, emojis: List<String>, names: List<String>): Result<Unit>
+    suspend fun setStickerWords(
+        stickerId: String,
+        emojis: List<String>,
+        names: List<String>,
+        stopAutoNaming: Boolean = false,
+    ): Result<Unit>
+
+    /** Automatic sticker names on this device: whether they are offered, switched on, and refused by the backend. */
+    fun observeAutoNaming(): Flow<StickerAutoNaming>
+
+    /**
+     * Switches automatic sticker names on or off for this device. Only while
+     * it is on is the naming service asked about a sticker, and switching it
+     * off stops a run that is under way. It is written even when the caller
+     * is cancelled, so a screen that closes cannot leave it on.
+     */
+    suspend fun setAutoNaming(enabled: Boolean): Result<Unit>
+
+    /**
+     * Looks for names now: asks for the stickers that may be named, and fetches
+     * the answers that are there. Does nothing while naming is switched off.
+     * The work runs in the background, and this returns at once.
+     */
+    suspend fun refreshAutoNames()
+
+    /**
+     * Lets the naming service be asked about the stickers of [packId], or
+     * leaves the pack out. A sticker is asked for only when every pack that
+     * holds it allows it. The pack is backed up again.
+     */
+    suspend fun setPackAutoNaming(packId: String, allowed: Boolean): Result<Unit>
+
+    /**
+     * Lets the naming service be asked about [stickerIds], or leaves them out.
+     * Allowing asks for them at once, when naming is switched on and their
+     * packs allow it. This is how a sticker made in the app gets a name. What
+     * was found for a sticker earlier stays. Every pack that holds one of them
+     * is backed up again.
+     */
+    suspend fun setStickersAutoNaming(stickerIds: List<String>, allowed: Boolean): Result<Unit>
 }

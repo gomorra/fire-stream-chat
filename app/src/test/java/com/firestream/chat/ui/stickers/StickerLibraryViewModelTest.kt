@@ -2,12 +2,14 @@ package com.firestream.chat.ui.stickers
 
 import com.firestream.chat.domain.model.AppError
 import com.firestream.chat.domain.model.Sticker
+import com.firestream.chat.domain.model.StickerAutoNaming
 import com.firestream.chat.domain.model.StickerFormat
 import com.firestream.chat.domain.model.StickerImportResult
 import com.firestream.chat.domain.model.StickerPack
 import com.firestream.chat.domain.model.StickerPackKind
 import com.firestream.chat.domain.model.WhatsAppStickerFile
 import com.firestream.chat.domain.repository.StickerRepository
+import com.firestream.chat.domain.util.StickerNameFilter
 import com.firestream.chat.test.MainDispatcherRule
 import io.mockk.coEvery
 import io.mockk.Runs
@@ -34,6 +36,7 @@ class StickerLibraryViewModelTest {
 
     private val repository = mockk<StickerRepository>()
     private val packs = MutableStateFlow<List<StickerPack>>(emptyList())
+    private val autoNaming = MutableStateFlow(StickerAutoNaming())
 
     @Before
     fun setUp() {
@@ -50,6 +53,99 @@ class StickerLibraryViewModelTest {
         coEvery { repository.toggleFavourite(any()) } returns Result.success(true)
         coEvery { repository.whatsAppImportedUntil() } returns 0
         coEvery { repository.markWhatsAppImported(any()) } just Runs
+        every { repository.observeAutoNaming() } returns autoNaming
+        coEvery { repository.refreshAutoNames() } just Runs
+        coEvery { repository.setAutoNaming(any()) } returns Result.success(Unit)
+        coEvery { repository.setPackAutoNaming(any(), any()) } returns Result.success(Unit)
+        coEvery { repository.setStickersAutoNaming(any(), any()) } returns Result.success(Unit)
+    }
+
+    // --- Automatic names ---
+
+    @Test
+    fun `opening the manager looks for names, and the state follows the switch`() {
+        val viewModel = StickerLibraryViewModel(repository)
+
+        coVerify(exactly = 1) { repository.refreshAutoNames() }
+        assertEquals(StickerAutoNaming(), viewModel.uiState.value.autoNaming)
+        assertFalse(viewModel.uiState.value.canNameSelectedNow)
+
+        autoNaming.value = StickerAutoNaming(isSupported = true, isEnabled = true, isRefused = true)
+
+        assertEquals(autoNaming.value, viewModel.uiState.value.autoNaming)
+        assertTrue("a refusal switches nothing off", viewModel.uiState.value.canNameSelectedNow)
+    }
+
+    @Test
+    fun `the switch and a pack's switch go to the repository`() {
+        val viewModel = StickerLibraryViewModel(repository)
+
+        viewModel.setAutoNaming(true)
+        viewModel.setPackAutoNaming("a", false)
+
+        coVerify(exactly = 1) { repository.setAutoNaming(true) }
+        coVerify(exactly = 1) { repository.setPackAutoNaming("a", false) }
+    }
+
+    @Test
+    fun `naming a selection now opens each sticker once and ends the selection`() {
+        val viewModel = allStickers()
+        viewModel.toggleSticker(entry("a", "shared"))
+        viewModel.toggleSticker(entry("b", "shared"))
+        viewModel.toggleSticker(entry("b", "s2"))
+
+        viewModel.nameSelectedNow()
+
+        coVerify(exactly = 1) { repository.setStickersAutoNaming(match { it.sorted() == listOf("s2", "shared") }, true) }
+        assertTrue(viewModel.uiState.value.selectedStickers.isEmpty())
+        assertNull("every pack that holds them allows it", viewModel.uiState.value.notice)
+    }
+
+    @Test
+    fun `naming a sticker whose pack is left out says which pack holds it back`() {
+        packs.value = listOf(pack("a", "s1"), pack("closed", "s1").copy(autoNameAllowed = false))
+        val viewModel = StickerLibraryViewModel(repository).apply { selectTab(StickerManagerTab.ALL_STICKERS) }
+        viewModel.toggleSticker(entry("a", "s1"))
+
+        viewModel.nameSelectedNow()
+
+        coVerify(exactly = 1) { repository.setStickersAutoNaming(listOf("s1"), true) }
+        assertTrue(viewModel.uiState.value.notice!!.startsWith("Pack closed is left out of automatic names"))
+    }
+
+    @Test
+    fun `leaving a selection out of naming closes its stickers`() {
+        val viewModel = allStickers()
+        viewModel.toggleSticker(entry("b", "s2"))
+
+        viewModel.stopNamingSelected()
+
+        coVerify(exactly = 1) { repository.setStickersAutoNaming(listOf("s2"), false) }
+        assertTrue(viewModel.uiState.value.selectedStickers.isEmpty())
+    }
+
+    @Test
+    fun `saving after use-as-mine writes the words and leaves the sticker out of naming in one call`() {
+        coEvery { repository.setStickerWords(any(), any(), any(), any()) } returns Result.success(Unit)
+        val viewModel = allStickers()
+        viewModel.toggleSticker(entry("b", "s2"))
+        viewModel.editSelectedSticker()
+
+        viewModel.saveStickerWords(listOf("😺"), listOf("Cat", "Sleepy bear"), stopAutoNaming = true)
+
+        coVerify(exactly = 1) { repository.setStickerWords("s2", listOf("😺"), listOf("Cat", "Sleepy bear"), true) }
+        // One write: words that are saved while the sticker stays open would be half of what was asked for.
+        coVerify(exactly = 0) { repository.setStickersAutoNaming(any(), any()) }
+        assertNull(viewModel.uiState.value.editingStickerId)
+    }
+
+    @Test
+    fun `the name filter is kept in the state`() {
+        val viewModel = StickerLibraryViewModel(repository)
+
+        viewModel.setNameFilter(StickerNameFilter.NO_NAME)
+
+        assertEquals(StickerNameFilter.NO_NAME, viewModel.uiState.value.nameFilter)
     }
 
     private fun sticker(id: String) = Sticker(id, StickerFormat.WEBP, 512, 512, false, emptyList(), "/stickers/$id.webp")
@@ -118,7 +214,7 @@ class StickerLibraryViewModelTest {
         assertEquals("shared", viewModel.uiState.value.editingSticker?.id)
         assertTrue("the edit ends the selection", viewModel.uiState.value.selectedStickers.isEmpty())
 
-        viewModel.saveStickerWords(listOf("😺"), listOf("Cat"))
+        viewModel.saveStickerWords(listOf("😺"), listOf("Cat"), stopAutoNaming = false)
 
         coVerify(exactly = 1) { repository.setStickerWords("shared", listOf("😺"), listOf("Cat")) }
         assertNull(viewModel.uiState.value.editingSticker)
@@ -140,7 +236,7 @@ class StickerLibraryViewModelTest {
         viewModel.toggleSticker(entry("b", "s2"))
         viewModel.editSelectedSticker()
         viewModel.closeStickerEdit()
-        viewModel.saveStickerWords(listOf("😺"), listOf("Cat"))
+        viewModel.saveStickerWords(listOf("😺"), listOf("Cat"), stopAutoNaming = false)
 
         coVerify(exactly = 0) { repository.setStickerWords(any(), any(), any()) }
     }

@@ -14,6 +14,7 @@ import com.firestream.chat.domain.model.StickerAutoName
 import com.firestream.chat.domain.util.StickerWords
 import com.firestream.chat.test.fakes.testSticker
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -36,7 +37,14 @@ class StickerWordsEditorTest {
         var cancels = 0
         composeTestRule.setContent {
             MaterialTheme {
-                StickerWordsEditor(sticker = sticker, onSave = { emojis, names -> saved += emojis to names }, onCancel = { cancels++ })
+                StickerWordsEditor(
+                    sticker = sticker,
+                    onSave = { emojis, names, stopAutoNaming ->
+                        saved += emojis to names
+                        assertFalse("nothing was taken over, so naming goes on", stopAutoNaming)
+                    },
+                    onCancel = { cancels++ },
+                )
             }
         }
 
@@ -64,7 +72,7 @@ class StickerWordsEditorTest {
         )
         var saves = 0
         composeTestRule.setContent {
-            MaterialTheme { StickerWordsEditor(sticker = named, onSave = { _, _ -> saves++ }, onCancel = {}) }
+            MaterialTheme { StickerWordsEditor(sticker = named, onSave = { _, _, _ -> saves++ }, onCancel = {}) }
         }
 
         composeTestRule.onNodeWithText("Found automatically").performScrollTo().assertIsDisplayed()
@@ -73,6 +81,33 @@ class StickerWordsEditorTest {
         composeTestRule.onNodeWithText("Text: Gute Nacht").assertExists()
         composeTestRule.onNodeWithContentDescription("Remove Sleepy bear").assertDoesNotExist()
         assertEquals(0, saves)
+    }
+
+    @Test
+    fun `use as mine puts the automatic names among the names, and its save stops automatic naming`() {
+        val named = sticker.copy(
+            autoName = StickerAutoName(nameEn = "Sleepy bear", nameDe = "Müder Bär", words = listOf("tired", "katze"), text = "Gute Nacht", emojis = listOf("😴")),
+        )
+        val saved = mutableListOf<Triple<List<String>, List<String>, Boolean>>()
+        composeTestRule.setContent {
+            MaterialTheme {
+                StickerWordsEditor(sticker = named, onSave = { emojis, names, stop -> saved += Triple(emojis, names, stop) }, onCancel = {})
+            }
+        }
+
+        composeTestRule.onNodeWithText(USE_AS_MINE_LABEL).performScrollTo().performClick()
+
+        // The button is used up, and the names can be taken out like typed ones.
+        composeTestRule.onNodeWithText(USE_AS_MINE_LABEL).assertDoesNotExist()
+        composeTestRule.onNodeWithContentDescription("Remove Sleepy bear").assertExists()
+        composeTestRule.onNodeWithText("tired").performScrollTo().performClick()
+        composeTestRule.onNodeWithText("Save").performScrollTo().performClick()
+
+        // The German name first, a word the sticker had already is not repeated, and the emojis and the text stay out.
+        assertEquals(
+            listOf(Triple(listOf("😺", "🐱"), listOf("Old name", "Katze", "Müder Bär", "Sleepy bear"), true)),
+            saved,
+        )
     }
 
     @Test

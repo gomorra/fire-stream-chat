@@ -3,6 +3,7 @@ package com.firestream.chat.data.repository
 import com.firestream.chat.data.local.PreferencesDataStore
 import com.firestream.chat.data.local.dao.StickerDao
 import com.firestream.chat.data.remote.source.AuthSource
+import com.firestream.chat.data.remote.source.StickerNameSource
 import com.firestream.chat.data.remote.source.StickerObjectSource
 import com.firestream.chat.data.remote.source.StickerPackSource
 import com.firestream.chat.data.sticker.StickerDownloads
@@ -10,6 +11,7 @@ import com.firestream.chat.data.sticker.StickerFiles
 import com.firestream.chat.data.sticker.StickerLibrarySync
 import com.firestream.chat.data.sticker.StickerMaker
 import com.firestream.chat.data.sticker.WhatsAppStickerFolder
+import com.firestream.chat.data.worker.StickerNameScheduler
 import com.firestream.chat.data.worker.StickerSyncScheduler
 import io.mockk.Runs
 import io.mockk.coEvery
@@ -40,7 +42,11 @@ internal fun newStickerRepository(
     syncScheduler: StickerSyncScheduler = mockk(relaxed = true),
     authSource: AuthSource = mockk { every { currentUserId } returns "uid1" },
     stickerMaker: StickerMaker = mockk(),
+    nameSource: StickerNameSource = mockk { every { isSupported } returns true },
+    nameScheduler: StickerNameScheduler = mockk(relaxed = true),
 ) = StickerRepositoryImpl(
+    nameSource = nameSource,
+    nameScheduler = nameScheduler,
     stickerDao = stickerDao,
     stickerFiles = stickerFiles,
     whatsAppFolder = whatsAppFolder,

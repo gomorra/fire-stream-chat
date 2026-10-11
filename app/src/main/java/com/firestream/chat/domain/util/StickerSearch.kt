@@ -10,6 +10,24 @@ data class StickerMatch(val sticker: Sticker, val packId: String)
 /** One pack's part of a search over the whole library: the pack, and those of its stickers that were found. */
 data class StickerPackMatches(val pack: StickerPack, val stickers: List<Sticker>)
 
+/** Which stickers the manager's grid of every sticker shows, by how they are named. */
+enum class StickerNameFilter {
+    ALL,
+
+    /** A sticker nobody named: no name of a person's, and nothing found automatically. */
+    NO_NAME,
+
+    /** A sticker the naming service found something on, whatever a person named it since. */
+    NAMED_AUTOMATICALLY,
+    ;
+
+    fun shows(sticker: Sticker): Boolean = when (this) {
+        ALL -> true
+        NO_NAME -> sticker.names.isEmpty() && sticker.autoName == null
+        NAMED_AUTOMATICALLY -> sticker.autoName != null
+    }
+}
+
 /**
  * Finds stickers by their words and by the emojis they are tagged with.
  *
@@ -76,19 +94,28 @@ object StickerSearch {
      *
      * A sticker that two packs hold is in both sections. [find] returns it
      * once, because a pick needs one pack. Here each is its own entry.
+     *
+     * [filter] narrows every section to the stickers it shows, before the query.
      */
     fun sections(
         packs: List<StickerPack>,
         query: String,
         emojisFor: (String) -> List<String>,
         packName: (StickerPack) -> String = { it.name },
+        filter: StickerNameFilter = StickerNameFilter.ALL,
     ): List<StickerPackMatches> {
-        if (query.isBlank()) return packs.filter { it.stickers.isNotEmpty() }.map { StickerPackMatches(it, it.stickers) }
-        val rankOf = ranking(query, emojisFor) ?: return emptyList()
+        val rankOf = if (query.isBlank()) null else ranking(query, emojisFor) ?: return emptyList()
         return packs.mapNotNull { pack ->
-            val packWords = wordsOf(packName(pack))
-            val found = pack.stickers.mapNotNull { sticker -> rankOf(sticker, packWords)?.let { it to sticker } }
-            if (found.isEmpty()) null else StickerPackMatches(pack, found.sortedBy { it.first }.map { it.second })
+            val shown = if (filter == StickerNameFilter.ALL) pack.stickers else pack.stickers.filter(filter::shows)
+            val found = if (rankOf == null) {
+                shown
+            } else {
+                val packWords = wordsOf(packName(pack))
+                shown.mapNotNull { sticker -> rankOf(sticker, packWords)?.let { it to sticker } }
+                    .sortedBy { it.first }
+                    .map { it.second }
+            }
+            if (found.isEmpty()) null else StickerPackMatches(pack, found)
         }
     }
 

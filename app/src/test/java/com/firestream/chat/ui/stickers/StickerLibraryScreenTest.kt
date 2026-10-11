@@ -20,8 +20,10 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTouchInput
+import com.firestream.chat.domain.model.StickerAutoNaming
 import com.firestream.chat.domain.model.StickerPack
 import com.firestream.chat.domain.model.StickerPackKind
+import com.firestream.chat.domain.util.StickerNameFilter
 import com.firestream.chat.test.fakes.testSticker
 import com.firestream.chat.test.fakes.testStickerPack
 import org.junit.Assert.assertEquals
@@ -305,6 +307,132 @@ class StickerLibraryScreenTest {
         composeTestRule.onNodeWithText(EDIT_STICKER_LABEL).performClick()
 
         assertEquals(1, edits)
+    }
+
+    // --- Automatic names ---
+
+    private val naming = StickerAutoNaming(isSupported = true)
+
+    @Test
+    fun `the naming switch asks before it goes on, and only the notice's button switches it on`() {
+        val set = mutableListOf<Boolean>()
+        show(library(cats).copy(autoNaming = naming), StickerLibraryActions(onSetAutoNaming = { set += it }))
+
+        composeTestRule.onNodeWithText(AUTO_NAMING_TITLE).assertIsDisplayed()
+        composeTestRule.onNodeWithTag(AUTO_NAMING_SWITCH_TAG).assertIsOff()
+        composeTestRule.onNodeWithText(AUTO_NAMING_ACCEPT_LABEL).assertDoesNotExist()
+
+        composeTestRule.onNodeWithTag(AUTO_NAMING_SWITCH_TAG).performClick()
+        // The tap alone switches nothing on. The notice says what happens first.
+        assertEquals(emptyList<Boolean>(), set)
+        composeTestRule.onNodeWithText("read by a computer", substring = true).assertExists()
+        composeTestRule.onNodeWithText("made in the app are left out", substring = true).assertExists()
+        composeTestRule.onNodeWithText("Not now").performClick()
+        composeTestRule.onNodeWithText(AUTO_NAMING_ACCEPT_LABEL).assertDoesNotExist()
+        assertEquals(emptyList<Boolean>(), set)
+
+        composeTestRule.onNodeWithTag(AUTO_NAMING_SWITCH_TAG).performClick()
+        composeTestRule.onNodeWithText(AUTO_NAMING_ACCEPT_LABEL).performClick()
+
+        assertEquals(listOf(true), set)
+    }
+
+    @Test
+    fun `switching naming off needs no question, and a refusal is said without switching anything off`() {
+        val set = mutableListOf<Boolean>()
+        show(
+            library(cats).copy(autoNaming = StickerAutoNaming(isSupported = true, isEnabled = true, isRefused = true)),
+            StickerLibraryActions(onSetAutoNaming = { set += it }),
+        )
+
+        composeTestRule.onNodeWithText(AUTO_NAMING_REFUSED).assertIsDisplayed()
+        composeTestRule.onNodeWithTag(AUTO_NAMING_SWITCH_TAG).assertIsOn()
+        composeTestRule.onNodeWithTag(AUTO_NAMING_SWITCH_TAG).performClick()
+
+        assertEquals(listOf(false), set)
+        composeTestRule.onNodeWithText(AUTO_NAMING_ACCEPT_LABEL).assertDoesNotExist()
+    }
+
+    @Test
+    fun `a backend without a naming service offers nothing about automatic names`() {
+        show(library(cats))
+
+        composeTestRule.onNodeWithText(AUTO_NAMING_TITLE).assertDoesNotExist()
+        composeTestRule.onNodeWithContentDescription("Options for Cats").performClick()
+        composeTestRule.onNodeWithText("Rename").assertIsDisplayed()
+        composeTestRule.onNodeWithText(PACK_AUTO_NAMING_LABEL).assertDoesNotExist()
+    }
+
+    @Test
+    fun `a pack's menu leaves the pack out of naming and lets it in again`() {
+        val set = mutableListOf<Pair<String, Boolean>>()
+        show(
+            library(cats, dogs.copy(autoNameAllowed = false)).copy(autoNaming = naming),
+            StickerLibraryActions(onSetPackAutoNaming = { id, allowed -> set += id to allowed }),
+        )
+
+        composeTestRule.onNodeWithContentDescription("Options for Cats").performClick()
+        composeTestRule.onNodeWithContentDescription("On").assertExists()
+        composeTestRule.onNodeWithText(PACK_AUTO_NAMING_LABEL).performClick()
+        composeTestRule.onNodeWithContentDescription("Options for Dogs").performClick()
+        composeTestRule.onNodeWithContentDescription("On").assertDoesNotExist()
+        composeTestRule.onNodeWithText(PACK_AUTO_NAMING_LABEL).performClick()
+
+        assertEquals(listOf("Cats" to false, "Dogs" to true), set)
+    }
+
+    @Test
+    fun `a sticker selection can be named now while naming is on, and left out of naming`() {
+        val done = mutableListOf<String>()
+        show(
+            allStickers(cats, selected = setOf(StickerEntry("Cats", "c1")))
+                .copy(autoNaming = StickerAutoNaming(isSupported = true, isEnabled = true)),
+            StickerLibraryActions(onNameSelectedNow = { done += "name" }, onStopNamingSelected = { done += "stop" }),
+        )
+
+        composeTestRule.onNodeWithContentDescription("More for the selection").performClick()
+        composeTestRule.onNodeWithText(NAME_NOW_LABEL).performClick()
+        composeTestRule.onNodeWithContentDescription("More for the selection").performClick()
+        composeTestRule.onNodeWithText(STOP_NAMING_LABEL).performClick()
+
+        assertEquals(listOf("name", "stop"), done)
+    }
+
+    @Test
+    fun `with naming switched off a selection can be left out, and cannot be named now`() {
+        show(allStickers(cats, selected = setOf(StickerEntry("Cats", "c1"))).copy(autoNaming = naming))
+
+        composeTestRule.onNodeWithContentDescription("More for the selection").performClick()
+
+        // Asking sends a picture. Without the switch nothing may ask.
+        composeTestRule.onNodeWithText(NAME_NOW_LABEL).assertDoesNotExist()
+        composeTestRule.onNodeWithText(STOP_NAMING_LABEL).assertExists()
+    }
+
+    @Test
+    fun `the name filters narrow the grid, and a second tap on a chip shows every sticker again`() {
+        val set = mutableListOf<StickerNameFilter>()
+        val zoo = testStickerPack("Zoo", StickerPackKind.USER, testSticker("typed").copy(names = listOf("Cat")), testSticker("nameless"))
+        show(
+            allStickers(zoo).copy(autoNaming = naming, nameFilter = StickerNameFilter.NO_NAME),
+            StickerLibraryActions(onSetNameFilter = { set += it }),
+        )
+
+        composeTestRule.onNodeWithText("Zoo · 1").assertIsDisplayed()
+        composeTestRule.onNodeWithTag(stickerEntryTag(StickerEntry("Zoo", "typed"))).assertDoesNotExist()
+        composeTestRule.onNodeWithText(NO_NAME_FILTER_LABEL).performClick()
+        composeTestRule.onNodeWithText(AUTO_NAMED_FILTER_LABEL).performClick()
+
+        assertEquals(listOf(StickerNameFilter.ALL, StickerNameFilter.NAMED_AUTOMATICALLY), set)
+    }
+
+    @Test
+    fun `a filter that leaves nothing says so, and the automatic filter is not offered without a naming service`() {
+        show(allStickers(cats).copy(nameFilter = StickerNameFilter.NAMED_AUTOMATICALLY))
+
+        composeTestRule.onNodeWithText("No sticker is named automatically yet").assertIsDisplayed()
+        composeTestRule.onNodeWithText(AUTO_NAMED_FILTER_LABEL).assertDoesNotExist()
+        composeTestRule.onNodeWithText(NO_NAME_FILTER_LABEL).assertIsDisplayed()
     }
 
     @Test

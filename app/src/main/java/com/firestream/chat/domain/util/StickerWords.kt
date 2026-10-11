@@ -1,5 +1,7 @@
 package com.firestream.chat.domain.util
 
+import com.firestream.chat.domain.model.StickerAutoName
+
 /**
  * The limits of the words a person gives a sticker, its names and its emojis,
  * and the two edits a screen makes to them. The repository cleans what it is
@@ -36,6 +38,14 @@ object StickerWords {
         if (names.size >= MAX_NAMES || names.any { it.equals(name, ignoreCase = true) }) return names
         return names + name
     }
+
+    /**
+     * [names] with what was found automatically after them: the German name,
+     * the English name and the search words. They are cleaned and capped like
+     * typed names, so a sticker that has [MAX_NAMES] names takes none of them.
+     */
+    fun withAutoName(names: List<String>, found: StickerAutoName): List<String> =
+        cleanNames(names + found.nameDe + found.nameEn + found.words)
 
     /** [emojis] with [emoji] added. Unchanged when it is one of them already, or [max] are there. */
     fun withEmoji(emojis: List<String>, emoji: String, max: Int = MAX_EMOJIS): List<String> {

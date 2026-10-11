@@ -12,6 +12,7 @@ import com.firestream.chat.data.remote.firebase.FirestoreContactSource
 import com.firestream.chat.data.remote.firebase.FirestoreListHistorySource
 import com.firestream.chat.data.remote.firebase.FirestoreListSource
 import com.firestream.chat.data.remote.firebase.FirestoreMessageSource
+import com.firestream.chat.data.remote.firebase.FirestoreStickerNameSource
 import com.firestream.chat.data.remote.firebase.FirestoreStickerPackSource
 import com.firestream.chat.data.remote.firebase.FirestoreUserSource
 import com.firestream.chat.data.remote.firebase.RealtimePresenceSource
@@ -26,6 +27,7 @@ import com.firestream.chat.data.remote.source.ListSource
 import com.firestream.chat.data.remote.source.MessageSource
 import com.firestream.chat.data.remote.source.PresenceSource
 import com.firestream.chat.data.remote.source.SendErrorClassifier
+import com.firestream.chat.data.remote.source.StickerNameSource
 import com.firestream.chat.data.remote.source.StickerObjectSource
 import com.firestream.chat.data.remote.source.StickerPackSource
 import com.firestream.chat.data.remote.source.StorageSource
@@ -71,6 +73,9 @@ abstract class FirebaseSourceBindings {
 
     @Binds @Singleton
     abstract fun bindStickerPackSource(impl: FirestoreStickerPackSource): StickerPackSource
+
+    @Binds @Singleton
+    abstract fun bindStickerNameSource(impl: FirestoreStickerNameSource): StickerNameSource
 
     @Binds @Singleton
     abstract fun bindCallSignalingSource(impl: FirestoreCallSource): CallSignalingSource

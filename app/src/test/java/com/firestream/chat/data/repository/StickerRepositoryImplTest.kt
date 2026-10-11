@@ -9,15 +9,18 @@ import com.firestream.chat.data.local.entity.StickerEntity
 import com.firestream.chat.data.local.entity.StickerSyncState
 import com.firestream.chat.data.remote.source.RemoteSticker
 import com.firestream.chat.data.remote.source.RemoteStickerPack
+import com.firestream.chat.data.remote.source.StickerNameSource
 import com.firestream.chat.data.remote.source.StickerObjectSource
 import com.firestream.chat.data.remote.source.StickerPackSource
 import com.firestream.chat.data.sticker.StickerDownloads
 import com.firestream.chat.data.sticker.StickerFiles
 import com.firestream.chat.data.sticker.StickerMaker
 import com.firestream.chat.data.sticker.WhatsAppStickerFolder
+import com.firestream.chat.data.worker.StickerNameScheduler
 import com.firestream.chat.data.worker.StickerSyncScheduler
 import com.firestream.chat.domain.model.Sticker
 import com.firestream.chat.domain.model.StickerAutoName
+import com.firestream.chat.domain.model.StickerAutoNaming
 import com.firestream.chat.domain.model.StickerCrop
 import com.firestream.chat.domain.model.StickerDraft
 import com.firestream.chat.domain.model.StickerDraftImage
@@ -39,6 +42,7 @@ import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -86,6 +90,8 @@ class StickerRepositoryImplTest {
     private val objectSource = mockk<StickerObjectSource>()
     private val packSource = mockk<StickerPackSource> { every { isSupported } returns true }
     private val scheduler = mockk<StickerSyncScheduler>(relaxed = true)
+    private val nameSource = mockk<StickerNameSource> { every { isSupported } returns true }
+    private val nameScheduler = mockk<StickerNameScheduler>(relaxed = true)
     private val httpClient = mockk<OkHttpClient>()
     private val maker = mockk<StickerMaker>()
 
@@ -115,6 +121,8 @@ class StickerRepositoryImplTest {
             packSource = packSource,
             syncScheduler = scheduler,
             stickerMaker = maker,
+            nameSource = nameSource,
+            nameScheduler = nameScheduler,
         )
     }
 
@@ -1133,6 +1141,134 @@ class StickerRepositoryImplTest {
     @Test
     fun `words for a sticker the library does not hold are refused`() = runTest {
         assertTrue(repository.setStickerWords("f".repeat(64), listOf("🔥"), listOf("Fire")).isFailure)
+    }
+
+    @Test
+    fun `words saved with use-as-mine leave the sticker out of naming in the same write, and a later edit keeps it out`() = runTest {
+        repository.importFrom(listOf(source("1.webp", sticker(1, cats)))).getOrThrow()
+        val before = pack("Cats").stickers.single()
+        val dao = db.stickerDao()
+        packs().forEach { dao.markSynced(it.id, dao.getPack(it.id)!!.updatedAt) }
+        assertTrue(before.autoNameAllowed)
+
+        // Nothing but the switch changes, and that alone is a change the backup has to carry.
+        repository.setStickerWords(before.id, before.emojis, before.names, stopAutoNaming = true).getOrThrow()
+
+        assertFalse(pack("Cats").stickers.single().autoNameAllowed)
+        assertEquals(StickerSyncState.PENDING.name, dao.getPack(pack("Cats").id)!!.syncState)
+
+        repository.setStickerWords(before.id, before.emojis, listOf("Cat")).getOrThrow()
+
+        val edited = pack("Cats").stickers.single()
+        assertEquals(listOf("Cat") to false, edited.names to edited.autoNameAllowed)
+    }
+
+    // --- Automatic names: the three switches ---
+
+    @Test
+    fun `the naming switch is written, starts a run when it goes on and stops one when it goes off`() = runTest {
+        coEvery { preferences.setAutoNameStickers(any()) } returns Unit
+
+        repository.setAutoNaming(true).getOrThrow()
+        coVerify(exactly = 1) { preferences.setAutoNameStickers(true) }
+        coVerify(exactly = 1) { nameScheduler.runIfWanted() }
+        verify(exactly = 0) { nameScheduler.cancel() }
+
+        repository.setAutoNaming(false).getOrThrow()
+        coVerify(exactly = 1) { preferences.setAutoNameStickers(false) }
+        verify(exactly = 1) { nameScheduler.cancel() }
+        coVerify(exactly = 1) { nameScheduler.runIfWanted() }
+    }
+
+    @Test
+    fun `switching naming off finishes although its caller is cancelled`() = runTest {
+        // The screen that flips the switch can close in the same moment. Naming must not stay on.
+        val written = CompletableDeferred<Unit>()
+        coEvery { preferences.setAutoNameStickers(false) } coAnswers { written.await() }
+
+        val caller = launch(start = CoroutineStart.UNDISPATCHED) { repository.setAutoNaming(false) }
+        caller.cancel()
+        written.complete(Unit)
+        caller.join()
+
+        verify(exactly = 1) { nameScheduler.cancel() }
+    }
+
+    @Test
+    fun `a switch that cannot be written is a failure, and starts nothing`() = runTest {
+        coEvery { preferences.setAutoNameStickers(any()) } throws IOException("disk")
+
+        assertTrue(repository.setAutoNaming(true).isFailure)
+
+        coVerify(exactly = 0) { nameScheduler.runIfWanted() }
+    }
+
+    @Test
+    fun `a pack left out of naming is backed up again, and only opening one asks for names`() = runTest {
+        repository.importFrom(listOf(source("1.webp", sticker(1, cats)))).getOrThrow()
+        val dao = db.stickerDao()
+        val imported = pack("Cats")
+        dao.markSynced(imported.id, dao.getPack(imported.id)!!.updatedAt)
+        assertTrue(imported.autoNameAllowed)
+
+        repository.setPackAutoNaming(imported.id, allowed = false).getOrThrow()
+
+        assertFalse(pack("Cats").autoNameAllowed)
+        assertEquals(StickerSyncState.PENDING.name, dao.getPack(imported.id)!!.syncState)
+        coVerify(exactly = 0) { nameScheduler.runIfWanted() }
+
+        repository.setPackAutoNaming(imported.id, allowed = true).getOrThrow()
+
+        assertTrue(pack("Cats").autoNameAllowed)
+        coVerify(exactly = 1) { nameScheduler.runIfWanted() }
+        assertTrue(repository.setPackAutoNaming("gone", allowed = false).isFailure)
+    }
+
+    @Test
+    fun `stickers left out of naming are backed up again in every pack that holds them, and keep what was found`() = runTest {
+        repository.importFrom(listOf(source("1.webp", sticker(1, cats)), source("2.webp", sticker(2, cats)))).getOrThrow()
+        val first = pack("Cats").stickers.first().id
+        repository.toggleFavourite(first).getOrThrow()
+        val dao = db.stickerDao()
+        packs().forEach { dao.markSynced(it.id, dao.getPack(it.id)!!.updatedAt) }
+        dao.setAutoName(first, StickerAutoName(nameEn = "Sleepy bear"))
+
+        repository.setStickersAutoNaming(listOf(first, "not an id"), allowed = false).getOrThrow()
+
+        val closed = pack("Cats").stickers.first()
+        assertFalse(closed.autoNameAllowed)
+        assertEquals(StickerAutoName(nameEn = "Sleepy bear"), closed.autoName)
+        assertTrue(pack("Cats").stickers.last().autoNameAllowed)
+        assertEquals(
+            "the pack and the favourites hold it",
+            listOf(StickerSyncState.PENDING.name, StickerSyncState.PENDING.name),
+            packs().map { dao.getPack(it.id)!!.syncState },
+        )
+        coVerify(exactly = 0) { nameScheduler.runIfWanted() }
+
+        // Naming a sticker now opens it and asks at once.
+        repository.setStickersAutoNaming(listOf(first), allowed = true).getOrThrow()
+
+        assertTrue(pack("Cats").stickers.first().autoNameAllowed)
+        coVerify(exactly = 1) { nameScheduler.runIfWanted() }
+    }
+
+    @Test
+    fun `automatic naming follows the switch and a refusal, and is not offered without a naming service`() = runTest {
+        every { preferences.autoNameStickersFlow } returns MutableStateFlow(true)
+        every { preferences.stickerNamingRefusedFlow } returns MutableStateFlow(true)
+
+        assertEquals(StickerAutoNaming(isSupported = true, isEnabled = true, isRefused = true), repository.observeAutoNaming().first())
+
+        every { nameSource.isSupported } returns false
+        assertEquals(StickerAutoNaming(), repository.observeAutoNaming().first())
+    }
+
+    @Test
+    fun `opening the manager asks for a naming run`() = runTest {
+        repository.refreshAutoNames()
+
+        coVerify(exactly = 1) { nameScheduler.runIfWanted() }
     }
 
     @Test

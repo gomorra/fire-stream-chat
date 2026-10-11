@@ -8,7 +8,8 @@
 // Collaborators: StickerPackSource (the listener), StickerDao.applyRemotePack
 //   and removeIfSynced (the merge rules), StickerManifest (what of a manifest is
 //   acceptable), StickerSyncScheduler (a merge can leave a pack to upload or a
-//   tombstone), AuthSource, AuthRepositoryImpl (signingOut).
+//   tombstone), StickerNameScheduler (cancelled at sign-out), AuthSource,
+//   AuthRepositoryImpl (signingOut).
 // Don't put here: the upload (StickerSyncWorker), sticker files — a restored
 //   row's file is fetched when it is first shown (StickerRepositoryImpl.ensureFile).
 // endregion
@@ -21,6 +22,7 @@ import com.firestream.chat.data.local.dao.StickerDao
 import com.firestream.chat.data.remote.source.AuthSource
 import com.firestream.chat.data.remote.source.StickerPackChanges
 import com.firestream.chat.data.remote.source.StickerPackSource
+import com.firestream.chat.data.worker.StickerNameScheduler
 import com.firestream.chat.data.worker.StickerSyncScheduler
 import com.firestream.chat.di.ApplicationScope
 import kotlinx.coroutines.CoroutineScope
@@ -42,6 +44,7 @@ class StickerLibrarySync @Inject constructor(
     private val packSource: StickerPackSource,
     private val authSource: AuthSource,
     private val scheduler: StickerSyncScheduler,
+    private val nameScheduler: StickerNameScheduler,
     private val preferences: PreferencesDataStore,
     @ApplicationScope appScope: CoroutineScope,
 ) {
@@ -95,9 +98,9 @@ class StickerLibrarySync @Inject constructor(
 
     /**
      * Runs [signOut], which clears the library, with no restore writing during
-     * it or after it. The sync work is cancelled, and the recents, the list of
-     * deleted stickers and the Klipy id are cleared: they belong to the user who
-     * is leaving.
+     * it or after it. The sync work and the naming work are cancelled, and the
+     * recents, the list of deleted stickers, the switch of automatic names and
+     * the Klipy id are cleared: they belong to the user who is leaving.
      *
      * It runs to its end once called. The settings screen leaves in the click
      * that signs out, which cancels the caller's scope. Without this, a sign-out
@@ -107,6 +110,7 @@ class StickerLibrarySync @Inject constructor(
     suspend fun signingOut(signOut: suspend () -> Unit) = withContext(NonCancellable) {
         fence.withLock {
             scheduler.cancel()
+            nameScheduler.cancel()
             signOut()
             preferences.clearStickerLists()
             preferences.clearKlipyCustomerId()

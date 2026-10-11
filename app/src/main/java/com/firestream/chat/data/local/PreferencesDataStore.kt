@@ -85,6 +85,10 @@ class PreferencesDataStore @Inject constructor(
     // The WhatsApp sticker folder at the last import
     private val whatsAppImportedUntilKey = longPreferencesKey("whatsapp_stickers_imported_until")
 
+    // Automatic sticker names
+    private val autoNameStickersKey = booleanPreferencesKey("auto_name_stickers")
+    private val stickerNamingRefusedKey = booleanPreferencesKey("sticker_naming_refused")
+
     // Klipy
     private val klipyCustomerIdKey = stringPreferencesKey("klipy_customer_id")
     private val klipyNoticeAcceptedKey = booleanPreferencesKey("klipy_notice_accepted")
@@ -421,7 +425,34 @@ class PreferencesDataStore @Inject constructor(
             prefs.remove(recentStickerIdsKey)
             prefs.remove(deletedStickerIdsKey)
             prefs.remove(whatsAppImportedUntilKey)
+            // The leaving user's consent is not the next user's.
+            prefs.remove(autoNameStickersKey)
+            prefs.remove(stickerNamingRefusedKey)
         }
+    }
+
+    // --- Automatic sticker names ---
+
+    /**
+     * Whether the person switched automatic sticker names on. It is off until
+     * they do: with it on, the pictures of their stickers are read by the
+     * naming service. Device-only, and cleared at sign-out.
+     */
+    val autoNameStickersFlow: Flow<Boolean> =
+        context.dataStore.data.map { it[autoNameStickersKey] ?: false }.distinctUntilChanged()
+
+    suspend fun autoNameStickers(): Boolean = context.dataStore.data.first()[autoNameStickersKey] ?: false
+
+    suspend fun setAutoNameStickers(enabled: Boolean) {
+        context.dataStore.edit { prefs -> prefs[autoNameStickersKey] = enabled }
+    }
+
+    /** Whether the backend refused the last look for a sticker's name, which a backend without the rules for it does. */
+    val stickerNamingRefusedFlow: Flow<Boolean> =
+        context.dataStore.data.map { it[stickerNamingRefusedKey] ?: false }.distinctUntilChanged()
+
+    suspend fun setStickerNamingRefused(refused: Boolean) {
+        context.dataStore.edit { prefs -> prefs[stickerNamingRefusedKey] = refused }
     }
 
     // --- The WhatsApp sticker folder at the last import ---

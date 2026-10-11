@@ -380,9 +380,27 @@ Known refactors and code smells that have been consciously deferred or declined.
 - A sticker that is in no pack is in no manifest. Its names do not survive a reinstall.
 - A manifest without `autoNameAllowed` does not say which stickers were made in the app. A restore of one closes a pack to automatic naming by its import key (`StickerPackEntity.autoNameAllowedByDefault`), and each of its stickers takes the pack's answer (`StickerManifest.stickersOf`). A made sticker that sits in an imported pack of such a manifest reads as allowed.
 
-**Why we haven't fixed it.** One record of words per sticker is a second synced collection with its own merge rule, which the plan refused for the list of deleted stickers too (`docs/plans/sticker-manager-and-names.md`, §0). The owner edits names on one phone at a time. The third point matters only once step 6 of that plan asks for names, and step 6 carries a note.
+**Why we haven't fixed it.** One record of words per sticker is a second synced collection with its own merge rule, which the plan refused for the list of deleted stickers too (`docs/plans/sticker-manager-and-names.md`, §0). The owner edits names on one phone at a time. For the last point no rule exists: a row does not tell a made sticker from an imported one. Automatic names are asked for such a sticker once the switch is on, unless its owner closes it with *Do not name automatically*. The device checklist in `docs/BACKLOG.md` says so. The same restore rule can open a sticker again that was closed on another phone, when an older manifest of a second pack is applied after the newer one.
 
 **When to revisit.** When names are seen to differ between two phones, or when a made sticker is found to have been sent to the naming service. Step 8 of the plan reviews this path.
+
+---
+
+### Automatic sticker names — the known limits
+
+**The smell.** Seven things about `stickerNames/{stickerId}` and `StickerNameSync` are accepted.
+
+- **Anyone signed in can ask for a name for any sticker id.** `firestore.rules` checks the shape of a request and that the id is 64 hex digits, and nothing about who holds the sticker. The naming service then spends time on it. A request for an id without a file in Storage costs the service one failed read.
+- **Anyone signed in can read the name of any sticker whose id they have.** A name says what is on a sticker. An id comes with every sticker message and every pack manifest, and the file itself is readable by the same id.
+- **A Lottie sticker gets no automatic name.** The service names WebP stickers only, and the phone does not ask for another format. A Lottie sticker is found by its emojis and by the names a person types.
+- **A sticker without a usable answer is read once per run.** No column says that the service answered `skipped`, or that an answer was malformed. Such a sticker is held back from a new request by `nameRequestedAt`, for a day at a time, and each naming run still reads its document. The rules let no phone replace the record, so it stays until the service or the owner rewrites it.
+- **A run comes back at most every five hours, not every day.** WorkManager's backoff grows no further (`docs/GOTCHAS.md`). While requests wait for a service that is switched off, the phone reads every waiting document about five times a day.
+- **A naming run writes to `stickers` once per sticker.** Each `setNameRequestedAt` and `setAutoName` makes Room read the whole library again for every collector of `observePacks()`, although `nameRequestedAt` is not in the domain model. A first run over a few hundred stickers is a few hundred such reads while the manager or a chat is open. One write per batch would do. Flagged by `/simplify` on step 6 of `docs/plans/sticker-manager-and-names.md`, with a shared helper for the two schedulers' enqueue and a naming trigger at every first upload, which the `REPLACE` policy would turn into a restart per file.
+- **The switch is per device.** It is kept in `PreferencesDataStore` and cleared at sign-out. A second phone asks nothing until it is switched on there too. A name that the first phone fetched reaches the second only through its own fetch, because no pack manifest carries what was found.
+
+**Why we haven't fixed it.** The user base is closed, and the plan accepts the first two as open risks (`docs/plans/sticker-manager-and-names.md`, risks 4 and 5). A column for `skipped` is a Room bump, which empties the library on every phone. A delayed work of its own for the day-long wait is a second unique work with its own replace rules.
+
+**When to revisit.** Before the app is opened to users who are not trusted: then a request needs a check that the asker holds the sticker, which only a Cloud Function can make. Add the `skipped` column with the next Room bump that happens for another reason. Step 8 of the plan reviews this path.
 
 ---
 

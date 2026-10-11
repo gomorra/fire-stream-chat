@@ -8,9 +8,11 @@ import androidx.room.Transaction
 import androidx.room.Update
 import com.firestream.chat.data.local.entity.PackStickerRow
 import com.firestream.chat.data.local.entity.StickerEntity
+import com.firestream.chat.data.local.entity.StickerNameCandidate
 import com.firestream.chat.data.local.entity.StickerPackEntity
 import com.firestream.chat.data.local.entity.StickerPackItemEntity
 import com.firestream.chat.data.local.entity.StickerSyncState
+import com.firestream.chat.domain.model.StickerAutoName
 import com.firestream.chat.domain.util.StickerWords
 import kotlinx.coroutines.flow.Flow
 
@@ -78,6 +80,34 @@ interface StickerDao {
     @Query("SELECT DISTINCT packId FROM sticker_pack_items WHERE stickerId IN (:stickerIds)")
     suspend fun getPackIdsHolding(stickerIds: List<String>): List<String>
 
+    /**
+     * The stickers the naming service may be asked about, as far as the rows
+     * say: a WebP whose file the backend holds, that has no automatic name,
+     * that allows it itself, and that sits in at least one pack, every one of
+     * which allows it. A sticker in no pack is not in the library. It was only
+     * received, or it was deleted. Oldest first.
+     *
+     * The backend holds the file when this device put or found it there
+     * (`remoteUrl`), or when a synced pack holds the sticker: a manifest is
+     * written only after its files are uploaded, and a restored pack came from
+     * one. A restored row has no `remoteUrl` until the sticker is first sent.
+     *
+     * `'[]'` is how `Converters` writes an empty list. Were that to change,
+     * this would return nothing, and nothing would be asked for.
+     */
+    @Query(
+        "SELECT s.id AS id, s.format AS format, s.nameRequestedAt AS nameRequestedAt FROM stickers s " +
+            "INNER JOIN sticker_pack_items i ON i.stickerId = s.id " +
+            "INNER JOIN sticker_packs p ON p.id = i.packId " +
+            "WHERE s.autoNameAllowed = 1 AND s.format = 'WEBP' " +
+            "AND COALESCE(s.autoNameEn, '') = '' AND COALESCE(s.autoNameDe, '') = '' AND COALESCE(s.autoText, '') = '' " +
+            "AND s.autoWords = '[]' AND s.autoEmojis = '[]' " +
+            "GROUP BY s.id HAVING MIN(p.autoNameAllowed) = 1 " +
+            "AND (s.remoteUrl IS NOT NULL OR MAX(p.syncState = 'SYNCED') = 1) " +
+            "ORDER BY s.createdAt ASC, s.id ASC"
+    )
+    suspend fun getNameCandidates(): List<StickerNameCandidate>
+
     /** The packs whose state the backend does not have: changed packs and tombstones. */
     @Query("SELECT * FROM sticker_packs WHERE syncState != 'SYNCED' ORDER BY sortOrder ASC, createdAt ASC")
     suspend fun getUnsyncedPacks(): List<StickerPackEntity>
@@ -105,6 +135,13 @@ interface StickerDao {
     /** Where the backend holds the sticker's file. A pack does not change by it, so no pack is touched. */
     @Query("UPDATE stickers SET remoteUrl = :remoteUrl WHERE id = :id")
     suspend fun setRemoteUrl(id: String, remoteUrl: String)
+
+    /** When this device last looked for the sticker's name without finding one. No pack changes by it. */
+    @Query("UPDATE stickers SET nameRequestedAt = :at WHERE id = :id")
+    suspend fun setNameRequestedAt(id: String, at: Long)
+
+    @Query("UPDATE stickers SET autoNameAllowed = :allowed WHERE id IN (:stickerIds)")
+    suspend fun updateAutoNameAllowed(stickerIds: List<String>, allowed: Boolean)
 
     @Insert(onConflict = OnConflictStrategy.ABORT)
     suspend fun insertPack(pack: StickerPackEntity)
@@ -155,6 +192,13 @@ interface StickerDao {
             "WHERE id = :packId AND shownInRow != :shown AND syncState != 'DELETED'"
     )
     suspend fun setShownInRow(packId: String, shown: Boolean, now: Long)
+
+    /** Whether the naming service may be asked about the pack's stickers. A manifest carries it, so the pack is marked. */
+    @Query(
+        "UPDATE sticker_packs SET autoNameAllowed = :allowed, updatedAt = MAX(:now, updatedAt + 1), syncState = 'PENDING' " +
+            "WHERE id = :packId AND autoNameAllowed != :allowed AND syncState != 'DELETED'"
+    )
+    suspend fun setPackAutoNameAllowed(packId: String, allowed: Boolean, now: Long)
 
     /** Turns the row into a tombstone. Its import key is given up, so a new pack can take it. */
     @Query(
@@ -209,12 +253,26 @@ interface StickerDao {
      * Gives the sticker [emojis] and [names], and marks every pack that holds it
      * for a backup, because a manifest lists both. Returns false, and writes
      * nothing, when the library has no such sticker.
+     *
+     * With [stopAutoNaming] the same write closes the sticker to automatic
+     * naming. It never opens one.
      */
     @Transaction
-    suspend fun setStickerWords(stickerId: String, emojis: List<String>, names: List<String>, now: Long): Boolean {
+    suspend fun setStickerWords(
+        stickerId: String,
+        emojis: List<String>,
+        names: List<String>,
+        now: Long,
+        stopAutoNaming: Boolean = false,
+    ): Boolean {
         val sticker = getSticker(stickerId) ?: return false
-        if (sticker.emojis == emojis && sticker.names == names) return true
-        updateSticker(sticker.copy(emojis = emojis, names = names))
+        val edited = sticker.copy(
+            emojis = emojis,
+            names = names,
+            autoNameAllowed = sticker.autoNameAllowed && !stopAutoNaming,
+        )
+        if (edited == sticker) return true
+        updateSticker(edited)
         getPackIdsHolding(listOf(stickerId)).forEach { touchPack(it, now) }
         return true
     }
@@ -233,6 +291,42 @@ interface StickerDao {
         if (made == row) return
         updateSticker(made)
         getPackIdsHolding(listOf(stickerId)).forEach { touchPack(it, now) }
+    }
+
+    /**
+     * Stores what the naming service found on [stickerId]. Only the `auto…`
+     * columns change: the emojis and names of a person stay as they are. No
+     * pack is marked, because no manifest carries what was found. Returns
+     * false when the library has no such sticker.
+     */
+    @Transaction
+    suspend fun setAutoName(stickerId: String, found: StickerAutoName): Boolean {
+        val row = getSticker(stickerId) ?: return false
+        updateSticker(row.withAutoName(found))
+        return true
+    }
+
+    /**
+     * Opens the stickers of [stickerIds] to automatic naming, or closes them,
+     * and marks every pack that holds one that changed: a manifest carries the
+     * switch of each of its stickers.
+     */
+    @Transaction
+    suspend fun setStickersAutoNameAllowed(stickerIds: List<String>, allowed: Boolean, now: Long) {
+        val changing = getStickers(stickerIds).filter { it.autoNameAllowed != allowed }.map { it.id }
+        if (changing.isEmpty()) return
+        updateAutoNameAllowed(changing, allowed)
+        getPackIdsHolding(changing).forEach { touchPack(it, now) }
+    }
+
+    /**
+     * Closes [leaving] to automatic naming when the pack [packId], which they
+     * leave, is left out of it. Their owner left them out by their pack, and a
+     * move, a merge or a delete must not open them without a word. Call it
+     * while the pack's row is still there.
+     */
+    suspend fun keepOutOfNaming(packId: String, leaving: List<String>, now: Long) {
+        if (getPackRow(packId)?.autoNameAllowed == false) setStickersAutoNameAllowed(leaving, allowed = false, now = now)
     }
 
     /**
@@ -310,6 +404,7 @@ interface StickerDao {
         if (removing.isEmpty()) return emptyList()
         deleteItems(packId, removing)
         touchPack(packId, now)
+        keepOutOfNaming(packId, removing, now)
         return inNoPack(removing)
     }
 
@@ -359,7 +454,9 @@ interface StickerDao {
         val target = merging.first()
         renamePack(target, name, now)
         merging.drop(1).forEach { merged ->
-            addToPack(target, getStickerIds(merged), atFront = false, now = now)
+            val stickerIds = getStickerIds(merged)
+            addToPack(target, stickerIds, atFront = false, now = now)
+            keepOutOfNaming(merged, stickerIds, now)
             if (keepTombstones) deletePack(merged, now) else deletePackNow(merged)
         }
         return true
@@ -378,6 +475,7 @@ interface StickerDao {
         addToPack(toPackId, moving, atFront = false, now = now)
         deleteItems(fromPackId, moving)
         touchPack(fromPackId, now)
+        keepOutOfNaming(fromPackId, moving, now)
         return true
     }
 
@@ -408,6 +506,7 @@ interface StickerDao {
         if (favourites != null && stickerId in getStickerIds(favourites.id)) {
             deleteItems(favourites.id, listOf(stickerId))
             touchPack(favourites.id, now)
+            keepOutOfNaming(favourites.id, listOf(stickerId), now)
             return false
         }
         return if (addFavourite(candidate, stickerId, now)) true else null
@@ -442,6 +541,7 @@ interface StickerDao {
     @Transaction
     suspend fun deletePackLocally(packId: String, keepTombstone: Boolean, now: Long): List<String> {
         val stickerIds = getStickerIds(packId)
+        keepOutOfNaming(packId, stickerIds, now)
         if (keepTombstone) deletePack(packId, now) else deletePackNow(packId)
         return inNoPack(stickerIds)
     }

@@ -38,6 +38,36 @@ Firestore questions. Nothing ran on a device. Check it by upgrading over an inst
 6. Delete a chat that the other person then writes into again. Its history comes back whole.
 7. Read the reads per day in the Firebase console before and after the update.
 
+### Automatic sticker names (2026-10-11)
+
+`docs/plans/sticker-manager-and-names.md` step 6. JVM and Robolectric tests cover who is asked for,
+the answer check, the worker's verdicts, the switch with its notice and the document shape. Nothing
+ran on a device, and the rules tests ran only in CI. Items 4 to 8 need the naming service of step 7.
+1. **Before the rules are deployed:** the manager's *Packs* tab starts with the row *Name my
+   stickers automatically*, off. Switch it on. The notice shows first, and *Switch on* switches it
+   on. A moment later the row says that naming is not available. The switch stays on, and nothing
+   else in the manager changes.
+2. Deploy `firestore.rules`. Open the manager again: the row says *On*.
+3. **Before switching on with the real library:** look for stickers you made in the app before
+   1.43 and moved out of *My stickers* before the update. The backup of that time does not say
+   they were made, so they read as open. Select them → **⋮** → *Do not name automatically*.
+4. With the switch on, `stickerNames/` in the Firestore console gets one document per WebP sticker
+   whose file is in Storage, with `status`, `format` and `requestedAt` and nothing else. A made
+   sticker, a Lottie sticker and a sticker of a pack with *Name automatically* off get none.
+5. Switch off, import new stickers: no new document. Switch on again: they are asked for.
+6. With the service running, names arrive within minutes of opening the manager. The search finds
+   a sticker by its German and its English name. *All stickers* → *Named automatically* shows
+   them, and *No name* shows the rest.
+7. Edit sheet of a named sticker: *Found automatically* lists what came back. *Use as mine* adds
+   the names as chips, *Save* keeps them, and the sticker gets no new request afterwards.
+8. Second phone, same account, switch on: it creates no second document for a sticker the first
+   phone asked for, and shows the same names.
+9. Select a made sticker → *Name now*. The notice names its pack. Switch *Name automatically* on in
+   that pack's menu: this one sticker is asked for, and the other made stickers of the pack are not.
+10. Sign out and in again: the switch is off.
+11. A debug build opens the manager and the pack menu without a crash. Only a device runs the dex
+    verifier (`docs/GOTCHAS.md`, the composable parameter ceiling).
+
 ### Sticker names and the text search (2026-10-11)
 
 `docs/plans/sticker-manager-and-names.md` step 5. JVM and Robolectric tests cover the search, the
