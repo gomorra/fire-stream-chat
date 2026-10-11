@@ -92,6 +92,19 @@ journalctl --user -u sticker-namer -f
 systemctl --user restart sticker-namer
 ```
 
+Switch it off and on:
+
+```bash
+systemctl --user stop sticker-namer       # off until the next login
+systemctl --user disable --now sticker-namer   # off, and it stays off
+systemctl --user enable --now sticker-namer    # on, and it starts with your session
+```
+
+While it is off, the phones' requests wait in Firestore. They are answered when it is on again.
+
+The service stops when you log out. `loginctl enable-linger $USER` keeps it running without a
+session, and `loginctl disable-linger $USER` takes that back.
+
 By hand, without the unit: `.venv/bin/python namer.py`.
 
 The unit restarts the service after a failure. It does not restart after exit status 78, which is
