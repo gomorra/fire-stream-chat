@@ -1,6 +1,6 @@
 # Sticker manager and sticker names
 
-Status: approved by the owner on 2026-10-10. Steps 1 to 4 are shipped.
+Status: approved by the owner on 2026-10-10. Steps 1 to 5 are shipped.
 
 ## Context
 
@@ -441,6 +441,53 @@ Departures (for sign-off):
 - Docs: `SCHEMA-ROOM.md`, `SCHEMA-FIRESTORE.md`, `DOMAIN-MODELS.md`, `FEATURE-MAP.md`, CHANGELOG
   `Added`.
 
+**Approach**
+
+- Order: `Sticker` / `StickerPack` / `StickerEntity` / `StickerPackEntity` and the `AppDatabase` bump
+  (34 to 35), then `StickerText` (the limits), `RemoteSticker` / `RemoteStickerPack`,
+  `StickerManifest` and `FirestoreStickerPackSource`, then `StickerDao`, `StickerRepository` +
+  `StickerRepositoryImpl`, `StickerSearch`, and last the UI: `StickerLibraryTab`, `AllStickersTab`,
+  `StickerCreateViewModel` + `StickerCreateScreen`, `StickerLibraryViewModel` + `StickerLibraryScreen`
+  and a new `StickerWordsEditor.kt`.
+- The text search is one ranking function in `StickerSearch`. The picker asks for each sticker once,
+  best rank first. The manager asks for sections per pack. Both pass the emoji keyword table and the
+  pack's shown name in, so `StickerSearch` stays in the domain.
+- A name typed on one phone has to reach the other. `StickerDao.mergeStickers` keeps a known
+  sticker's row, so a restore would drop the edit. A newer manifest of the owner's own pack that
+  carries names therefore replaces the words of the stickers it lists. A manifest of an older build
+  carries none and replaces nothing.
+- A manifest of an older build does not say which pack the maker made. After the bump, the restore
+  reads `autoNameAllowed` from the import key: the maker's default pack is left out, every other
+  pack is allowed.
+- The limits and the add of one name or emoji are pure functions (`StickerWords`), used by the maker,
+  the edit sheet and the repository.
+- Tests: `StickerSearchTest` (the table, and the sections that `AllStickerSectionsTest` held),
+  `StickerWordsTest`, `StickerManifestTest`, `FirestoreStickerPackSourceTest`, `StickerDaoTest`,
+  `StickerRepositoryImplTest`, `StickerCreateViewModelTest`, `StickerLibraryViewModelTest`, and the
+  two screen tests for the new chip and *Edit*.
+- Nothing in the code contradicts a §0 decision. Skills beyond the floor: `simplify`, because the
+  diff will pass 600 lines and two ViewModels change.
+
+**Shipped** `c6854e58` (2026-10-11) — tier: strong, tagged strong. skills: simplify, code-review. Reviewer models: simplify: sonnet, sonnet, sonnet, sonnet; code-review: opus, opus. CHANGELOG entry (`Added`, under `[UNRELEASED] [1.43.0]`) is in `c6854e58`, and its hash was added in the `docs(plan):` commit.
+Departures (for sign-off):
+- `AppDatabase` went from 34 to 35. Main had taken 33 and 34 since the plan was written.
+- The CHANGELOG got a new section, `[UNRELEASED] [1.43.0]`. The tags `v1.42.0` and `v1.42.1` exist, and this branch does not hold their release commits. So `[1.42.0]` lost its `[UNRELEASED]` prefix here, as on main. The merge with main has to place `[1.42.1]` between the two.
+- A newer manifest of the owner's own pack replaces the emojis, the names and `autoNameAllowed` of the stickers it lists, when it states names (`StickerDao.mergeStickers(takeWords)`, `StickerManifest.statesWords`). Without this a name typed on one phone never reached the other. Until now a known sticker only gained emojis when it had none, and that still holds for every other restore and for *Add pack*.
+- A pack change on a phone that has not yet seen an edit can take the edit back. Two phones that edit one sticker at once can end with different words. Both are in `TECH_DEBT.md`, and step 8 reviews the path.
+- A manifest of an older build does not say which stickers were made in the app. A restore of one reads `autoNameAllowed` from the import key: a pack found by its name (`loose:…`, other than `loose:WhatsApp`) is the maker's and is closed, and its stickers with it. A made sticker that sat in an imported pack before this build reads as allowed.
+- `Sticker` and `StickerPack` also carry `autoNameAllowed`. *Add pack* needs it to keep a sticker its owner left out, and step 6 shows it.
+- The search has four ranks, not three. A hit by the pack's name sits between the automatic group and an emoji hit.
+- Every word of a query has to be found, in any order. Each may be found in another field.
+- The limits live in `domain/util/StickerWords`, which repeats what `cleanStickerText` does with a cap of 40. `cleanStickerText` is in the data layer, and the ViewModels and the sheet need the same rule. An edit keeps up to eight emojis, as an import does. The maker still stops at three.
+- The manifest, the WhatsApp metadata and the edit now clean emojis by one rule (`StickerWords.cleanEmojis`). A restored tag is also trimmed and kept once.
+- *Edit* is the entry *Edit names and emojis* in the selection's **⋮** menu. It is offered when the selection is one sticker, also when that sticker is picked in two packs. Its sheet writes nothing before *Save*.
+- The sheet already shows what was found automatically, read-only. Step 6 adds *Use as mine*.
+- The maker shows emojis and names as chips in one row, under the title *Emojis and names*. *Add names* opens a field that takes one name after the other.
+- The same picture made into a sticker twice keeps its row. It takes the newly typed names after its own and is closed to naming (`StickerDao.markMade`, found by `/code-review`).
+- The manager's search field says *Search by name, emoji or pack*. `allStickerSections` and `AllStickerSectionsTest` are gone: the function is `StickerSearch.sections`, and its cases are in `StickerSearchTest`.
+- A manifest entry is weighed at 160 bytes before its words, up from 128, for the two new fields.
+- Not done, from `/simplify`: one value type for a sticker's emojis and names, and an index of folded words built once per library (`TECH_DEBT.md`).
+
 ### Step 6 — Asking for a name: requests, answers, consent — skills: code-review; model: max
 
 - Firestore `stickerNames/{stickerId}`. A request is `status: "pending"`, `format` and
@@ -481,6 +528,28 @@ Departures (for sign-off):
   them through `editSelection`, which hands over the sticker ids by pack id.
 - A refused request (`PERMISSION_DENIED`) switches nothing off. The manager says that naming is
   not available.
+- **(step-5)** The columns are there, and this step needs no Room bump: `stickers.autoNameEn`,
+  `autoNameDe`, `autoWords`, `autoText`, `autoEmojis`, `autoNameAllowed`, `nameRequestedAt`, and
+  `sticker_packs.autoNameAllowed`. `StickerEntity.toDomain` builds `Sticker.autoName` when one of
+  the five is not empty, so "has no automatic name" is `autoName == null`. No column says that
+  the service answered `skipped`. Such a sticker is only held back by `nameRequestedAt`, so look
+  at what a day later does with it.
+- **(step-5)** Write an answer with a `StickerDao` query that sets the `auto…` columns only. It
+  must not go through `setStickerWords` or `mergeStickers`, and it must not call `touchPack`: no
+  manifest carries the automatic group. `mergeStickers` keeps those columns in both of its modes.
+- **(step-5)** Who may be asked for is two flags, and both must hold: the sticker's
+  `autoNameAllowed` and that of every pack that holds it. `Sticker.autoNameAllowed` and
+  `StickerPack.autoNameAllowed` are on the domain models. A manifest carries both, so a write of
+  either has to mark the packs like `setStickerWords` does. A restore of a manifest of an older
+  build closes the maker's packs by their import key
+  (`StickerPackEntity.autoNameAllowedByDefault`). A made sticker that was moved into an imported
+  pack before step 5 reads as allowed (`TECH_DEBT.md`). Decide whether that needs a rule here.
+- **(step-5)** The edit sheet is `StickerWordsEditor` in `ui/stickers/StickerWordsEditor.kt`. Its
+  `AutomaticWords` already shows the group read-only. *Use as mine* goes there, and it can save
+  through `StickerRepository.setStickerWords` plus the switch. The names it copies pass
+  `StickerWords.cleanNames`, which keeps eight. The filters are one more argument of
+  `StickerSearch.sections`. `StickerSearch` already reads the automatic names, words, text and
+  emojis, so a stored answer is found with no further code.
 - Tests: `StickerNameSyncTest` as a table of who is asked for (each of the six conditions alone),
   the answer check (too long, too many, not a list, an emoji that is a word), a test that an
   answer leaves `names` and `emojis` alone, `StickerNameWorkerTest`, `FirestoreStickerNameSourceTest`,
@@ -583,6 +652,15 @@ and it looks for no bugs. This step is the correctness review. It adds no featur
      `firestore.rules`. Nothing is asked for while the switch is off. A made sticker, a pack that
      is switched off and a sticker that is switched off are never asked for. No answer changes
      `names` or `emojis`. A hostile answer.
+     **(step-5 /code-review)** Also the words a person typed. `StickerDao.applyRemotePack` hands
+     `statesWords` to `mergeStickers(takeWords)`, which replaces a known sticker's emojis, names
+     and `autoNameAllowed` from a newer manifest of the same pack. Look at a sticker in two packs
+     whose manifests disagree, at a phone that changes a pack before it has applied an edit, at a
+     manifest that states names for some stickers only, and at a restore that flips
+     `autoNameAllowed` back to true. Look at `StickerDao.markMade` and `setStickerWords` beside a
+     running restore, at `StickerManifest.stickersOf` for an entry without `autoNameAllowed`, and
+     at `StickerSearch` with a query of many words on a large library, which runs in composition.
+     Step 5's `/code-review` was the standards-and-spec skill, and its `/simplify` hunted no bugs.
   4. The service: `tools/sticker-namer/`. A request that is answered twice. A crash in the middle
      of a batch. What a log line holds. Where the key can be read from.
 - **A finding needs a failure path.** A reviewer reports the input or state, the path through the
