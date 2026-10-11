@@ -38,6 +38,30 @@ Firestore questions. Nothing ran on a device. Check it by upgrading over an inst
 6. Delete a chat that the other person then writes into again. Its history comes back whole.
 7. Read the reads per day in the Firebase console before and after the update.
 
+### The sticker naming service on the PC (2026-10-11)
+
+`docs/plans/sticker-manager-and-names.md` step 7, `tools/sticker-namer/`. **No line of it has run,
+and neither have its tests.** The first stage of `setup.sh` runs the tests, and
+`.github/workflows/sticker-namer.yml` runs them on the push.
+1. `bash tools/sticker-namer/setup.sh`, stage 1: the two pinned packages install on this PC's
+   Python, and the tests pass. A failure there is a fault in the tool.
+2. `evaluate.py` on a folder of about 40 stickers, with `gemma4:26b` and `gemma4:12b`. Neither request
+   body in `engine.py` has been sent to an engine. Check that thinking is off (`think: false` for Ollama, `chat_template_kwargs` for
+   llama.cpp) and that an answer comes back as the six fields.
+3. The service account has the two roles and no other. `firebase_store.py` reads a file and writes
+   an answer with them. No test covers that file.
+4. One sticker named end to end, as the last stage of the wizard asks. A German and an English
+   search find it.
+5. With a game on the graphics card, the log says the card is busy, and names arrive after the game
+   ends. While a batch runs, `nvidia-smi` shows the model, and it leaves about two minutes after
+   the last sticker.
+6. With Ollama stopped, requests stay `pending`, and they are answered after it starts again.
+   With `MODEL` set to a model Ollama does not have, requests stay `pending` too, and none is
+   answered `skipped`.
+7. `systemctl --user stop sticker-namer` in the middle of a batch, then `start`: the rest is named,
+   and no document is written twice.
+8. A reboot: the unit starts with the session, also before the network is up.
+
 ### Automatic sticker names (2026-10-11)
 
 `docs/plans/sticker-manager-and-names.md` step 6. JVM and Robolectric tests cover who is asked for,

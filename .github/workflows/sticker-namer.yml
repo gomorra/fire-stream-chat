@@ -1,0 +1,36 @@
+name: Sticker namer
+
+# Runs the tests of the naming service (tools/sticker-namer/).
+# See tools/sticker-namer/README.md, "Tests". Not part of the CI gate.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'tools/sticker-namer/**'
+      - '.github/workflows/sticker-namer.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'tools/sticker-namer/**'
+      - '.github/workflows/sticker-namer.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+          cache-dependency-path: tools/sticker-namer/requirements-dev.txt
+
+      # The tests use fakes for Firestore and Storage, so firebase-admin is not installed.
+      - run: python -m pip install -r tools/sticker-namer/requirements-dev.txt
+      - run: python -m pytest tools/sticker-namer
+      - run: bash -n tools/sticker-namer/setup.sh

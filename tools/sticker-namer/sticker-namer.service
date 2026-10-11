@@ -1,0 +1,28 @@
+# The sticker naming service as a systemd user unit.
+#
+# setup.sh copies this file to ~/.config/systemd/user/ and puts the tool's
+# folder in place of @TOOL_DIR@. By hand:
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now sticker-namer
+#   journalctl --user -u sticker-namer -f
+
+[Unit]
+Description=FireStream sticker naming service
+# No After= line: a user unit cannot be ordered after the system's network
+# target. The service itself treats a missing network as a failure that passes,
+# and tries again.
+
+[Service]
+Type=simple
+WorkingDirectory=@TOOL_DIR@
+ExecStart=@TOOL_DIR@/.venv/bin/python @TOOL_DIR@/namer.py
+Environment=PYTHONUNBUFFERED=1
+Restart=on-failure
+RestartSec=30
+# Exit status 78 is a wrong or missing setting. A restart would not mend it.
+RestartPreventExitStatus=78
+
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=default.target

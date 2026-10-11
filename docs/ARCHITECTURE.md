@@ -592,3 +592,9 @@ com.firestream.chat/
 ## 13. Firebase Cloud Functions
 
 Moved — see [CLOUD-FUNCTIONS.md](CLOUD-FUNCTIONS.md) for trigger details and FCM payload shapes.
+
+---
+
+## 14. Sticker naming service
+
+A sticker's automatic name is written by a Python service outside the app, in `tools/sticker-namer/`. It runs on the server owner's PC with a local picture model (Ollama, or llama.cpp's server), so no sticker goes to a third party. A phone and the service never connect to each other. The phone creates `stickerNames/{stickerId}` as a request (`StickerNameSync`), and the service answers in the same document with the Admin SDK. The service reads the sticker's file from Storage and refuses a file whose hash is not its id. It shows the first frame to the model. It writes only what passes the app's own limits (`StickerNameAnswer`). It is not part of the Gradle build or the CI gate. Setup, settings and the three ends of a request are in [`tools/sticker-namer/README.md`](../tools/sticker-namer/README.md).

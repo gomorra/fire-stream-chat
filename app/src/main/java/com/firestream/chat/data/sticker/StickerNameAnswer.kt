@@ -14,6 +14,7 @@ import com.firestream.chat.domain.util.StickerWords
  * ([cleanStickerText]).
  *
  * The naming service keeps to the same limits, so an answer it wrote passes.
+ * It repeats them in `tools/sticker-namer/answer.py`. Change both together.
  */
 internal object StickerNameAnswer {
 

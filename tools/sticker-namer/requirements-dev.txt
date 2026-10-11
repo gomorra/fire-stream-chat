@@ -1,0 +1,3 @@
+# What the tests need on top. They use fakes, so they need no firebase-admin.
+Pillow==12.0.0
+pytest==8.4.2
