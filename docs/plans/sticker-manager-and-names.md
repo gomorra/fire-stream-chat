@@ -34,6 +34,7 @@ or a sticker that was deleted comes back.
 | Names by hand | An *Add names* button beside *Add emoji* in the sticker maker, and an edit in the manager |
 | Automatic names | A service on the owner's PC with a local picture model. No token cost, and the pictures go to no third party |
 | Engine and model | Ollama with Gemma 4 26b. Gemma 4 12b when the PC is too busy. Both are settings of the service. Qwen 3.8 27B on llama.cpp is the second choice. The default comes from a test with 12 stickers. The owner's test with about 40 real stickers at the checkpoint after step 7 can change it |
+| Seeing a sticker's words | One sheet shows the sticker large, its names and its search words. It opens by a tap on a sticker in a chat, inside a pack and in *All stickers*. *All stickers* also has a list view with the words beside each sticker. A name under every cell of the grid was refused: six in a row leave room for ten letters. Agreed on 2026-10-11 |
 | The phone and the PC | A phone never connects to the PC and holds no listener. It asks through Firestore, and a background job fetches the answer later. The namer and Ollama stay on and wait. Only the model leaves the graphics card after a batch |
 | Names that are already there | The service never overwrites them. What it finds is added beside them |
 | Review of automatic names | No review state. The additions sit in their own group, the manager has a *Named automatically* filter, and the edit sheet shows both groups. A review mark on 500 stickers is a queue nobody works through |
@@ -138,7 +139,7 @@ step 7.
 
 ## Steps
 
-Order: 1 → 2 ‖ 3 → 4 ‖ 5 → 6 → 7 ‖ 8
+Order: 1 → 2 ‖ 3 → 4 ‖ 5 → 6 → 7 ‖ 7a ‖ 8
 
 Every step follows CLAUDE.md's post-step workflow (tests, `./gradlew test`,
 `./gradlew assembleDebug`, review skills, one commit, docs). UI steps load the `app-ui-design`
@@ -729,6 +730,47 @@ Then automatic naming is switched on, on both phones.
 failing test there is a fault in the tool and belongs fixed before the service is switched on.
 Work through the list *The sticker naming service on the PC* in `docs/BACKLOG.md`. Set
 `MIN_FREE_VRAM_MB` with `MODEL`: the default of 10000 fits the 12b model.
+
+### Step 7a — See what a sticker is found by: one sticker sheet in three places, and a list view (UI + state)
+
+The words of a sticker are only in *Edit names and emojis*, one sticker at a time and three taps
+deep. Nobody can look through a few hundred stickers to judge what the model wrote.
+
+- **One sheet, `StickerDetailSheet` in `ui/stickers/`.** It slides up from the bottom and shows,
+  from the top:
+  1. the sticker, a little larger than in a chat, and a tap enlarges it. This is `StickerPreview`
+     of `ui/chat/StickerActionsSheet.kt`, moved beside the sheet;
+  2. *Your names* and the emojis, read-only, as one line each;
+  3. *Found automatically*: the German and the English name, the search words, and the text on
+     the sticker. `AutomaticWords` in `StickerWordsEditor.kt` already draws this group. Draw it
+     from one function in both places;
+  4. the rows: *Add to favourites* or *Remove from favourites*, *View pack* (in a chat only), and
+     *Edit names and emojis*, which opens `StickerWordsSheet`.
+  A group with nothing in it is left out. A sticker with no words at all says *No names yet*.
+- **In a chat.** `StickerActionsSheet` becomes a caller of `StickerDetailSheet`. The words come
+  from this phone's library row for `Message.stickerId`. A sticker that is not in the library
+  shows the picture and the rows it has today, and no words and no *Edit*. The sheet asks nobody
+  for a name: it reads Room only, and it makes no request to `stickerNames`.
+- **In the manager, inside a pack.** A tap on a sticker of `PackGrid` opens the sheet. Today the
+  tap does nothing (`NO_TAP`). While a selection runs, a tap still picks.
+- **In the manager, *All stickers*.** A tap opens the sheet, by the same rule.
+- **A list view in *All stickers*.** A button beside the search field switches between the grid
+  and a list. A list row is the sticker at 56 dp, then one line with the names (yours first, then
+  the German and the English automatic name) and one line with the search words, each cut at one
+  line. A row with no words says *No name*. The sections, the search and the two filters are the
+  same in both views (`StickerSearch.sections`). A long press starts a selection in the list too.
+  The choice is kept while the manager is open (`SavedStateHandle`), and the grid is the default.
+- The star in the manager's sheet uses `StickerRepository.toggleFavourite`.
+- **The parameter ceiling.** `ChatScreen` and `StickerLibraryScreen` gain code. Hand the sheet
+  one state object and one callbacks object. After the gate, run the register check of
+  `docs/GOTCHAS.md` on a debug APK and write the highest count of the touched files into the
+  Shipped block. `PackRow` stands at 127 of 255.
+- Tests: a Robolectric test of the sheet (words of both groups, a sticker with none, a sticker
+  that is not in the library, the rows per host), `StickerLibraryViewModelTest` for the view
+  switch and the open sticker, a screen test that a tap opens the sheet and that a tap in a
+  selection picks, and the chat's test of `StickerActionsSheet` kept green.
+- Docs: `FEATURE-MAP.md`, a checklist in `docs/BACKLOG.md` § *Pending on-device verification*,
+  CHANGELOG `Added`.
 
 ### Step 8 — Bug hunt over everything this plan built — model: max; budget: 60
 
