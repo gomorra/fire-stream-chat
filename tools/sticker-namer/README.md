@@ -144,6 +144,7 @@ the last stage of `setup.sh` is its check.
 | `namer.py` | One request from start to answer, and the loop. The listener only wakes the loop, which reads the pending requests itself |
 | `store.py` | What the namer needs from Firestore and Storage, as two interfaces |
 | `firebase_store.py` | Those interfaces over `firebase-admin`. The transaction that writes an answer only while the document is pending |
+| `retry.py` | Tries a call again after a failure that passes. `firebase_store.py` uses it for the access token request, which fails once after standby |
 | `answer.py` | The question, the JSON schema, and the check of what the model wrote |
 | `picture.py` | The hash check, and a WebP's first frame as a PNG |
 | `engine.py` | Both engine clients behind `Engine.ask`, and whether the model is loaded |

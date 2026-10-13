@@ -11,13 +11,38 @@ from typing import Callable
 
 import firebase_admin
 from firebase_admin import credentials, firestore, storage
+from google.auth.exceptions import TransportError
 from google.cloud import firestore as cloud_firestore
 from google.cloud.firestore_v1.base_query import FieldFilter
+from google.oauth2 import service_account
 
 from config import Config
+from retry import retrying
 from store import PENDING, FileTooLarge, Request
 
 COLLECTION = "stickerNames"
+
+
+class _Credentials(service_account.Credentials):
+    """The service account, with a token request that survives a dead connection.
+
+    The access token runs out during the PC's standby. The request for a new
+    one then goes out on a connection that died in the meantime. gRPC logs that
+    failure with its whole traceback, so it is tried again here.
+    """
+
+    def refresh(self, request):
+        retrying(lambda: super(_Credentials, self).refresh(request), TransportError)
+
+
+class _Certificate(credentials.Certificate):
+    """A key file whose credential is a [_Credentials]."""
+
+    def __init__(self, key_file: str):
+        super().__init__(key_file)
+        plain = self._g_credential
+        # A copy keeps the class, so the scoped copies the clients make retry too.
+        self._g_credential = _Credentials.from_service_account_file(key_file, scopes=plain.scopes)
 
 
 class FirebaseStore:
@@ -25,7 +50,7 @@ class FirebaseStore:
 
     def __init__(self, config: Config):
         app = firebase_admin.initialize_app(
-            credentials.Certificate(str(config.key_file)), {"storageBucket": config.bucket}
+            _Certificate(str(config.key_file)), {"storageBucket": config.bucket}
         )
         self._db = firestore.client(app)
         self._bucket = storage.bucket(app=app)
