@@ -6,7 +6,7 @@ All notable changes to FireStream Chat. Format follows [Keep a Changelog](https:
 
 ### Fixed
 
-- **A sticker from the keyboard takes the emoji's place.** When the composer held one emoji and the keyboard's sticker suggestions sent a sticker for it, the emoji stayed in the composer. It is now cleared, as with a pick from the app's own sticker strip. A message being written stays as it is. (`HASH`)
+- **A sticker from the keyboard takes the emoji's place.** When the composer held one emoji and the keyboard's sticker suggestions sent a sticker for it, the emoji stayed in the composer. It is now cleared, as with a pick from the app's own sticker strip. A message being written stays as it is. (`8ff97d8e`)
 
 ## [1.44.0] — 2026-10-11
 
