@@ -1,5 +1,6 @@
 package com.firestream.chat.ui.chat
 
+import androidx.compose.ui.text.TextRange
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -30,5 +31,22 @@ class KeyboardContentRouteTest {
     @Test
     fun `every type the composer names to the keyboard has a route`() {
         assertTrue(KEYBOARD_CONTENT_MIME_TYPES.all { keyboardContentRoute(it) != null })
+    }
+}
+
+class ComposerAfterKeyboardContentTest {
+
+    @Test
+    fun `the one emoji the keyboard offered stickers for is cleared`() {
+        listOf("😀", "❤️‍🔥", "👍🏽", " 🐱 ").forEach {
+            assertEquals(it, ComposerEdit("", TextRange(0), emptyMap()), composerAfterKeyboardContent(it))
+        }
+    }
+
+    @Test
+    fun `a message being written stays`() {
+        listOf("", "hi", "hi 😀", "😀 😀", "2😀").forEach {
+            assertNull(it, composerAfterKeyboardContent(it))
+        }
     }
 }

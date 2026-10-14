@@ -2,6 +2,12 @@
 
 All notable changes to FireStream Chat. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); each section is headed by the SemVer `versionName` shipped on that merge day (e.g. `## [1.2.3] — 2026-04-24`). Bump rule: `feat:` → minor, `fix:` → patch, `feat!:` / `BREAKING CHANGE:` → major. `versionCode` is derived from `git rev-list --count HEAD`.
 
+## [UNRELEASED] [1.44.1] — 2026-10-14
+
+### Fixed
+
+- **A sticker from the keyboard takes the emoji's place.** When the composer held one emoji and the keyboard's sticker suggestions sent a sticker for it, the emoji stayed in the composer. It is now cleared, as with a pick from the app's own sticker strip. A message being written stays as it is. (`HASH`)
+
 ## [1.44.0] — 2026-10-11
 
 ### Added

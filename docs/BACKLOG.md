@@ -636,6 +636,7 @@ and the panel's logic. Nothing ran on a device, and no test draws a real sticker
    for the search field must not close the panel.
 9. Type one emoji that tags a sticker. The strip shows above the composer. A pick sends the sticker
    and clears the composer. Typing a second character hides the strip.
+   A sticker the keyboard suggests for that emoji (Gboard's sticker bar) also clears it.
 10. Recents does not reorder while the panel stays open, and does after it is reopened.
 11. A debug build opens a chat and the panel. `ChatScreen` gained code, and only a device runs the
     dex verifier (`docs/GOTCHAS.md`).

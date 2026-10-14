@@ -2025,10 +2025,14 @@ fun ChatScreen(
                         .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(24.dp))
                 ) {
                     // A GIF or a sticker from the keyboard is sent at once, like a pick
-                    // from the Stickers tab. Not while a message is being edited.
+                    // from the Stickers tab. Not while a message is being edited. The
+                    // emoji the keyboard suggested it for goes, as with the strip.
                     KeyboardContentReceiver(
                         enabled = uiState.composer.editingMessage == null,
-                        onContent = viewModel::sendKeyboardContent,
+                        onContent = { uri, mimeType, release ->
+                            composerAfterKeyboardContent(messageText)?.let(::applyComposerEdit)
+                            viewModel.sendKeyboardContent(uri, mimeType, release)
+                        },
                     ) { BasicTextField(
                         value = inputValue,
                         onValueChange = { newValue ->

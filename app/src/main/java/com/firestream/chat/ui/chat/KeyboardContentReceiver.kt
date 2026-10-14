@@ -11,10 +11,12 @@ import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.platform.InterceptPlatformTextInput
 import androidx.compose.ui.platform.PlatformTextInputInterceptor
 import androidx.compose.ui.platform.PlatformTextInputMethodRequest
+import androidx.compose.ui.text.TextRange
 import androidx.core.view.inputmethod.EditorInfoCompat
 import androidx.core.view.inputmethod.InputConnectionCompat
 import androidx.core.view.inputmethod.InputContentInfoCompat
 import com.firestream.chat.domain.util.GIF_MIME_TYPE
+import com.firestream.chat.domain.util.StickerSearch
 
 /** What a picture the keyboard inserted is sent as. */
 internal enum class KeyboardContentRoute { GIF, STICKER }
@@ -30,6 +32,15 @@ internal fun keyboardContentRoute(mimeType: String?): KeyboardContentRoute? = wh
     mimeType.startsWith("image/", ignoreCase = true) -> KeyboardContentRoute.STICKER
     else -> null
 }
+
+/**
+ * The composer after the keyboard inserted a sticker or a GIF holding [text]:
+ * cleared when [text] is the one emoji a keyboard offers stickers for, so the
+ * sticker takes the emoji's place, like a pick from [StickerSuggestionStrip].
+ * `null` leaves a message being written as it is.
+ */
+internal fun composerAfterKeyboardContent(text: String): ComposerEdit? =
+    if (StickerSearch.suggestionKey(text) != null) ComposerEdit("", TextRange(0), emptyMap()) else null
 
 /** The types the composer tells the keyboard it takes. A keyboard hides or greys out what is not listed. */
 internal val KEYBOARD_CONTENT_MIME_TYPES = arrayOf(GIF_MIME_TYPE, "image/webp", "image/png", "image/jpeg")
