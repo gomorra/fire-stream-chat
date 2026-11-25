@@ -1,0 +1,103 @@
+rules_version = '2';
+
+// NOTE: Before deploying to production, diff this file against the currently
+// deployed Firebase Console Storage rules to confirm no custom console rules
+// are dropped.
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(uid) {
+      return isSignedIn() && request.auth.uid == uid;
+    }
+
+    function isChatParticipant(chatId) {
+      return isSignedIn()
+        && request.auth.uid in firestore.get(/databases/(default)/documents/chats/$(chatId)).data.participants;
+    }
+
+    // User profile avatars: avatars/{uid}/profile.jpg
+    // Any signed-in user may fetch by exact path (no listing); only the owner may write/delete.
+    match /avatars/{uid}/{fileName} {
+      allow get: if isSignedIn();
+      allow create, update: if isOwner(uid)
+        && fileName == 'profile.jpg'
+        && request.resource.size < 10 * 1024 * 1024
+        && request.resource.contentType != null
+        && request.resource.contentType.matches('image/.*');
+      allow delete: if isOwner(uid) && fileName == 'profile.jpg';
+    }
+
+    // Group chat avatars: avatars/groups/{chatId}/group.jpg
+    // Only chat participants may upload/update the group avatar; no listing or client delete.
+    match /avatars/groups/{chatId}/{fileName} {
+      allow get: if isSignedIn();
+      allow create, update: if isChatParticipant(chatId)
+        && fileName == 'group.jpg'
+        && request.resource.size < 10 * 1024 * 1024
+        && request.resource.contentType != null
+        && request.resource.contentType.matches('image/.*');
+      allow delete: if false;
+    }
+
+    // Chat media (legacy plaintext and Phase 2+ E2EE .enc blobs):
+    // media/{chatId}/{storageId}.{ext|enc}
+    // Restricted to chat participants; no listing; client deletion disabled
+    // (one-time plaintext scrub runs via Admin SDK).
+    match /media/{chatId}/{fileName} {
+      allow get: if isChatParticipant(chatId);
+      allow create, update: if isChatParticipant(chatId)
+        && request.resource.size < 100 * 1024 * 1024;
+      allow delete: if false;
+    }
+
+    // Shared content-addressed sticker library: stickers/{sha256}.{webp|tgs}
+    // Get-only (never list — aligns with firestore.rules sticker enumeration guard)
+    // and create-only so immutable sticker blobs cannot be overwritten or deleted.
+    match /stickers/{fileName} {
+      allow get: if isSignedIn();
+      allow create: if isSignedIn()
+        && fileName.matches('^[0-9a-f]{64}\\.(webp|tgs)$')
+        && request.resource.size < 2 * 1024 * 1024
+        && request.resource.contentType != null
+        && (
+          request.resource.contentType == 'image/webp'
+          || request.resource.contentType == 'application/x-tgsticker'
+        );
+      allow update, delete: if false;
+    }
+
+    // Passphrase-encrypted per-user backups — strictly owner-only, split by
+    // object class so sizes, filenames, and content types are tightly bounded.
+    match /backups/{uid}/manifest.json {
+      allow get, delete: if isOwner(uid);
+      allow create, update: if isOwner(uid)
+        && request.resource.size < 10 * 1024 * 1024
+        && request.resource.contentType != null
+        && request.resource.contentType.matches('application/json.*');
+    }
+
+    match /backups/{uid}/{dbFile} {
+      allow get, delete: if isOwner(uid)
+        && dbFile.matches('^db_[0-9]+(_[0-9a-f]{8})?\\.enc$');
+      allow create, update: if isOwner(uid)
+        && dbFile.matches('^db_[0-9]+(_[0-9a-f]{8})?\\.enc$')
+        && request.resource.size < 512 * 1024 * 1024
+        && request.resource.contentType == 'application/octet-stream';
+    }
+
+    match /backups/{uid}/legacy-media/{keyGen}/{fileName} {
+      allow get, delete: if isOwner(uid)
+        && keyGen.matches('^[0-9a-f]{16}$')
+        && fileName.matches('^[^/]+\\.enc$');
+      allow create, update: if isOwner(uid)
+        && keyGen.matches('^[0-9a-f]{16}$')
+        && fileName.matches('^[^/]+\\.enc$')
+        && request.resource.size < 100 * 1024 * 1024
+        && request.resource.contentType == 'application/octet-stream';
+    }
+  }
+}

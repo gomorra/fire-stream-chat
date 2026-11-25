@@ -11,6 +11,7 @@ import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import com.firestream.chat.domain.model.BackupFrequency
 import com.firestream.chat.domain.model.ChatFontSize
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.Flow
@@ -113,6 +114,12 @@ class PreferencesDataStore @Inject constructor(
 
     // Last open list detail
     private val lastOpenListIdKey = stringPreferencesKey("last_open_list_id")
+
+    // Encrypted cloud backup metadata
+    private val lastBackupAtKey = longPreferencesKey("last_backup_at")
+    private val lastBackupSizeBytesKey = longPreferencesKey("last_backup_size_bytes")
+    private val lastBackupLegacyMediaCompleteKey = booleanPreferencesKey("last_backup_legacy_media_complete")
+    private val backupFrequencyKey = stringPreferencesKey("backup_frequency")
 
     // --- Theme ---
 
@@ -528,5 +535,51 @@ class PreferencesDataStore @Inject constructor(
 
     suspend fun setKlipyNoticeAccepted() {
         context.dataStore.edit { prefs -> prefs[klipyNoticeAcceptedKey] = true }
+    }
+
+    // --- Encrypted cloud backup ---
+
+    val lastBackupAtFlow: Flow<Long?> = context.dataStore.data
+        .map { it[lastBackupAtKey] }
+        .distinctUntilChanged()
+
+    val lastBackupSizeBytesFlow: Flow<Long?> = context.dataStore.data
+        .map { it[lastBackupSizeBytesKey] }
+        .distinctUntilChanged()
+
+    val lastBackupLegacyMediaCompleteFlow: Flow<Boolean> = context.dataStore.data
+        .map { it[lastBackupLegacyMediaCompleteKey] ?: false }
+        .distinctUntilChanged()
+
+    val backupFrequencyFlow: Flow<BackupFrequency> = context.dataStore.data
+        .map { prefs ->
+            runCatching { BackupFrequency.valueOf(prefs[backupFrequencyKey] ?: BackupFrequency.OFF.name) }
+                .getOrDefault(BackupFrequency.OFF)
+        }
+        .distinctUntilChanged()
+
+    suspend fun setBackupFrequency(frequency: BackupFrequency) {
+        context.dataStore.edit { prefs -> prefs[backupFrequencyKey] = frequency.name }
+    }
+
+    suspend fun recordBackupSuccess(
+        timestampMs: Long,
+        sizeBytes: Long,
+        legacyMediaComplete: Boolean,
+    ) {
+        context.dataStore.edit { prefs ->
+            prefs[lastBackupAtKey] = timestampMs
+            prefs[lastBackupSizeBytesKey] = sizeBytes
+            prefs[lastBackupLegacyMediaCompleteKey] = legacyMediaComplete
+        }
+    }
+
+    suspend fun clearBackupPreferences() {
+        context.dataStore.edit { prefs ->
+            prefs.remove(lastBackupAtKey)
+            prefs.remove(lastBackupSizeBytesKey)
+            prefs.remove(lastBackupLegacyMediaCompleteKey)
+            prefs.remove(backupFrequencyKey)
+        }
     }
 }

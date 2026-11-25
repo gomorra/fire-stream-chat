@@ -1,6 +1,8 @@
 package com.firestream.chat.di
 
+import com.firestream.chat.data.backup.BackupSource
 import com.firestream.chat.data.remote.firebase.FirebaseAuthSource
+import com.firestream.chat.data.remote.firebase.FirebaseBackupSource
 import com.firestream.chat.data.remote.firebase.FirebaseIceServerSource
 import com.firestream.chat.data.remote.firebase.FirebaseKeySource
 import com.firestream.chat.data.remote.firebase.FirebaseSendErrorClassifier
@@ -97,4 +99,7 @@ abstract class FirebaseSourceBindings {
 
     @Binds @Singleton
     abstract fun bindSendErrorClassifier(impl: FirebaseSendErrorClassifier): SendErrorClassifier
+
+    @Binds @Singleton
+    abstract fun bindBackupSource(impl: FirebaseBackupSource): BackupSource
 }

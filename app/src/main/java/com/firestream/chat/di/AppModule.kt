@@ -4,6 +4,9 @@ import android.app.AlarmManager
 import android.content.Context
 import android.net.ConnectivityManager
 import androidx.work.WorkManager
+import com.firestream.chat.data.backup.AndroidKeystoreKeyWrapper
+import com.firestream.chat.data.backup.BackupKeyWrapper
+import com.firestream.chat.data.backup.BackupManager
 import com.firestream.chat.data.repository.AppUpdateRepositoryImpl
 import com.firestream.chat.data.repository.AuthRepositoryImpl
 import com.firestream.chat.data.repository.CallRepositoryImpl
@@ -24,6 +27,7 @@ import com.firestream.chat.data.util.FilePreviewLoader
 import com.firestream.chat.domain.reminder.DateTimeDetector
 import com.firestream.chat.domain.repository.AppUpdateRepository
 import com.firestream.chat.domain.repository.AuthRepository
+import com.firestream.chat.domain.repository.BackupRepository
 import com.firestream.chat.domain.repository.CallRepository
 import com.firestream.chat.domain.repository.ChatRepository
 import com.firestream.chat.domain.repository.ContactRepository
@@ -113,6 +117,14 @@ abstract class AppModule {
     @Binds
     @Singleton
     abstract fun bindConnectivityObserver(impl: AndroidConnectivityObserver): ConnectivityObserver
+
+    @Binds
+    @Singleton
+    abstract fun bindBackupRepository(impl: BackupManager): BackupRepository
+
+    @Binds
+    @Singleton
+    abstract fun bindBackupKeyWrapper(impl: AndroidKeystoreKeyWrapper): BackupKeyWrapper
 }
 
 @Module

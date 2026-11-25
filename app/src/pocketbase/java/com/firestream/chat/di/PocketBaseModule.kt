@@ -12,8 +12,10 @@
 // endregion
 package com.firestream.chat.di
 
+import com.firestream.chat.data.backup.BackupSource
 import com.firestream.chat.data.remote.pocketbase.PbTokenBridge
 import com.firestream.chat.data.remote.pocketbase.PocketBaseAuthSource
+import com.firestream.chat.data.remote.pocketbase.PocketBaseBackupSource
 import com.firestream.chat.data.remote.pocketbase.PocketBaseCallSignalingSource
 import com.firestream.chat.data.remote.pocketbase.PocketBaseChatSource
 import com.firestream.chat.data.remote.pocketbase.PocketBaseContactSource
@@ -102,6 +104,9 @@ abstract class PocketBaseModule {
 
     @Binds @Singleton
     abstract fun bindSendErrorClassifier(impl: PocketBaseSendErrorClassifier): SendErrorClassifier
+
+    @Binds @Singleton
+    abstract fun bindBackupSource(impl: PocketBaseBackupSource): BackupSource
 
     /**
      * Adds [PocketBaseLifecycleHook] to the multibound `Set<FlavorBootstrap>`

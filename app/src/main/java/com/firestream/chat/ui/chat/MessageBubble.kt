@@ -1319,7 +1319,7 @@ private fun MessageBubbleBody(
             }
             MessageType.VOICE -> {
                 val voiceSource = message.displayMediaSource
-                if (voiceSource == null && message.isEncryptedMedia && message.mediaUrl != null) {
+                if (message.localUri == null && message.mediaUrl != null) {
                     androidx.compose.runtime.LaunchedEffect(message.id) {
                         callbacks.onDownloadMedia?.invoke()
                     }

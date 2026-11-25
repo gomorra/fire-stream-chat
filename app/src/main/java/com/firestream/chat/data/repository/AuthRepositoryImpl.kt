@@ -16,6 +16,7 @@
 package com.firestream.chat.data.repository
 
 import android.util.Log
+import com.firestream.chat.data.backup.BackupManager
 import com.firestream.chat.data.crypto.SignalManager
 import com.firestream.chat.data.local.AppDatabase
 import com.firestream.chat.data.local.SignalDatabase
@@ -44,6 +45,7 @@ class AuthRepositoryImpl @Inject constructor(
     private val signalManager: SignalManager,
     private val firebaseMessaging: FirebaseMessaging,
     private val stickerLibrarySync: StickerLibrarySync,
+    private val backupManager: BackupManager,
 ) : AuthRepository {
 
     override val currentUserId: String?
@@ -189,6 +191,7 @@ class AuthRepositoryImpl @Inject constructor(
         stickerLibrarySync.signingOut {
             database.clearAllTables()
             signalDatabase.clearAllTables()
+            backupManager.clearForSignOut()
             authSource.signOut()
         }
     }

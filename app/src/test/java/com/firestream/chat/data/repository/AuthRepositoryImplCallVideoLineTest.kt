@@ -1,5 +1,6 @@
 package com.firestream.chat.data.repository
 
+import com.firestream.chat.data.backup.BackupManager
 import com.firestream.chat.data.crypto.SignalManager
 import com.firestream.chat.data.local.AppDatabase
 import com.firestream.chat.data.local.SignalDatabase
@@ -35,6 +36,7 @@ class AuthRepositoryImplCallVideoLineTest {
         mockk<SignalManager>(relaxed = true),
         firebaseMessaging,
         mockk(relaxed = true),
+        mockk<BackupManager>(relaxed = true),
     )
 
     @Before

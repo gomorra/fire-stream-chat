@@ -15,6 +15,7 @@ import io.mockk.spyk
 import io.mockk.unmockkAll
 import io.mockk.verify
 import kotlinx.coroutines.test.runTest
+import com.firestream.chat.data.backup.LegacyMediaBackupFetcher
 import com.firestream.chat.data.crypto.MediaCrypto
 import com.firestream.chat.data.crypto.MediaEncryptionParams
 import com.firestream.chat.data.sticker.StickerDownloads
@@ -51,6 +52,7 @@ class MediaFileManagerTest {
     }
     private val httpClient = mockk<OkHttpClient>(relaxed = true)
     private val stickerDownloads = mockk<StickerDownloads>()
+    private val legacyMediaBackupFetcher = mockk<LegacyMediaBackupFetcher>(relaxed = true)
 
     private val rowUri: Uri = Uri.parse("content://media/external_primary/downloads/1")
 
@@ -59,7 +61,8 @@ class MediaFileManagerTest {
 
     @Before
     fun setUp() {
-        manager = MediaFileManager(context, httpClient, DocumentFiles(context), stickerDownloads)
+        coEvery { legacyMediaBackupFetcher.downloadAndDecrypt(any(), any()) } returns false
+        manager = MediaFileManager(context, httpClient, DocumentFiles(context), stickerDownloads, legacyMediaBackupFetcher)
 
         // A real, readable temp file so the input stream copy works.
         sourceFile = File.createTempFile("mfm-test-", ".jpg").apply {
@@ -382,5 +385,76 @@ class MediaFileManagerTest {
         }
         assertTrue(result.exceptionOrNull() is SecurityException)
         verify(exactly = 0) { httpClient.newCall(any()) }
+    }
+
+    @Test
+    fun `legacy document falls back to encrypted backup when remote URL returns 404`() = runTest {
+        val call = mockk<Call> {
+            every { execute() } answers {
+                Response.Builder()
+                    .request(Request.Builder().url("https://storage.example/media/c1/legacyDoc1.pdf").build())
+                    .protocol(Protocol.HTTP_1_1).code(404).message("Not Found")
+                    .body(ByteArray(0).toResponseBody())
+                    .build()
+            }
+        }
+        every { httpClient.newCall(any()) } returns call
+        coEvery { legacyMediaBackupFetcher.downloadAndDecrypt("legacyDoc1", any()) } answers {
+            secondArg<File>().writeText("restored pdf from backup")
+            true
+        }
+
+        val file = manager.downloadFor(
+            chatId = "c1",
+            messageId = "legacyDoc1",
+            type = MessageType.DOCUMENT,
+            mediaUrl = "https://storage.example/media/c1/legacyDoc1.pdf",
+            fileName = "old.pdf",
+            mimeType = "application/pdf",
+            stickerId = null,
+            encryption = null,
+        )!!
+
+        assertEquals(File(realContext.filesDir, "documents/legacyDoc1.pdf"), file)
+        assertEquals("restored pdf from backup", file.readText())
+        file.delete()
+    }
+
+    @Test
+    fun `legacy image falls back to encrypted backup when remote URL returns 404`() = runTest {
+        val capturedBytes = ByteArrayOutputStream()
+        every { resolver.insert(any(), any()) } returns rowUri
+        every { resolver.openOutputStream(rowUri) } returns capturedBytes
+        every { resolver.update(rowUri, any(), null, null) } returns 1
+
+        val call = mockk<Call> {
+            every { execute() } answers {
+                Response.Builder()
+                    .request(Request.Builder().url("https://storage.example/media/c1/legacyImg1.jpg").build())
+                    .protocol(Protocol.HTTP_1_1).code(404).message("Not Found")
+                    .body(ByteArray(0).toResponseBody())
+                    .build()
+            }
+        }
+        every { httpClient.newCall(any()) } returns call
+        val expectedJpeg = byteArrayOf(0xFF.toByte(), 0xD8.toByte(), 0x11, 0x22, 0xFF.toByte(), 0xD9.toByte())
+        coEvery { legacyMediaBackupFetcher.downloadAndDecrypt("legacyImg1", any()) } answers {
+            secondArg<File>().writeBytes(expectedJpeg)
+            true
+        }
+
+        val file = manager.downloadFor(
+            chatId = "c1",
+            messageId = "legacyImg1",
+            type = MessageType.IMAGE,
+            mediaUrl = "https://storage.example/media/c1/legacyImg1.jpg",
+            fileName = null,
+            mimeType = "image/jpeg",
+            stickerId = null,
+            encryption = null,
+        )!!
+
+        assertEquals("legacyImg1.jpg", file.name)
+        assertTrue(capturedBytes.toByteArray().contentEquals(expectedJpeg))
     }
 }

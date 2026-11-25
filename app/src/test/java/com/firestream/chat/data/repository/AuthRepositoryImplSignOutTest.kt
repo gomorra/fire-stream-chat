@@ -1,5 +1,6 @@
 package com.firestream.chat.data.repository
 
+import com.firestream.chat.data.backup.BackupManager
 import com.firestream.chat.data.crypto.SignalManager
 import com.firestream.chat.data.local.AppDatabase
 import com.firestream.chat.data.local.PreferencesDataStore
@@ -54,8 +55,11 @@ class AuthRepositoryImplSignOutTest {
         syncScope,
     )
 
+    private val backupManager = mockk<BackupManager>(relaxed = true)
+
     private val repository = AuthRepositoryImpl(
-        authSource, database, signalDatabase, userDao, signalManager, firebaseMessaging, stickerLibrarySync
+        authSource, database, signalDatabase, userDao, signalManager, firebaseMessaging, stickerLibrarySync,
+        backupManager,
     )
 
     @After
@@ -70,6 +74,7 @@ class AuthRepositoryImplSignOutTest {
         coVerifyOrder {
             database.clearAllTables()
             signalDatabase.clearAllTables()
+            backupManager.clearForSignOut()
             authSource.signOut()
         }
     }

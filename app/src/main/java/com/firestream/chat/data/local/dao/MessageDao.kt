@@ -16,7 +16,7 @@ import kotlinx.coroutines.flow.Flow
  * one has a place `MediaFileManager.downloadFor` puts it, and matches
  * `AUTO_DOWNLOAD_TYPES` in `MessageRepositoryImpl`.
  */
-private const val LOCAL_MEDIA_TYPES = "'IMAGE', 'VIDEO', 'DOCUMENT', 'STICKER', 'GIF'"
+private const val LOCAL_MEDIA_TYPES = "'IMAGE', 'VIDEO', 'DOCUMENT', 'STICKER', 'GIF', 'VOICE'"
 
 /**
  * A row still owed a local file: one of [LOCAL_MEDIA_TYPES] with a url and no
@@ -25,7 +25,7 @@ private const val LOCAL_MEDIA_TYPES = "'IMAGE', 'VIDEO', 'DOCUMENT', 'STICKER', 
  * capitals), and `MediaFileManager.downloadFor` refuses those.
  */
 private const val OWED_LOCAL_MEDIA =
-    "((type IN ($LOCAL_MEDIA_TYPES)) OR (type = 'VOICE' AND mediaKey IS NOT NULL))" +
+    "type IN ($LOCAL_MEDIA_TYPES)" +
     " AND localUri IS NULL AND mediaUrl IS NOT NULL" +
     " AND mediaUrl NOT LIKE 'https://${KlipyUrls.MEDIA_HOST}/%'" +
     " AND mediaUrl NOT LIKE 'https://${KlipyUrls.MEDIA_HOST_1}/%'" +
@@ -345,7 +345,7 @@ interface MessageDao {
     @Query("SELECT * FROM messages WHERE $OWED_LOCAL_MEDIA")
     suspend fun getMessagesWithoutLocalMedia(): List<MessageEntity>
 
-    @Query("SELECT * FROM messages WHERE type IN ($LOCAL_MEDIA_TYPES) OR (type = 'VOICE' AND mediaKey IS NOT NULL)")
+    @Query("SELECT * FROM messages WHERE type IN ($LOCAL_MEDIA_TYPES)")
     suspend fun getAllMediaMessages(): List<MessageEntity>
 
     @Query("SELECT * FROM messages WHERE chatId = :chatId AND $OWED_LOCAL_MEDIA")
@@ -356,6 +356,24 @@ interface MessageDao {
 
     @Query("SELECT * FROM messages WHERE chatId = :chatId AND $OWED_LOCAL_THUMB")
     suspend fun getMessagesWithoutLocalThumbForChat(chatId: String): List<MessageEntity>
+
+    // Encrypted cloud backup queries
+    @Query("SELECT COUNT(*) FROM messages")
+    suspend fun getMessageCount(): Int
+
+    @Query(
+        """
+        SELECT * FROM messages
+        WHERE mediaKey IS NULL
+          AND mediaUrl IS NOT NULL
+          AND deletedAt IS NULL
+          AND type IN ('IMAGE', 'VIDEO', 'DOCUMENT', 'GIF', 'VOICE')
+          AND mediaUrl NOT LIKE 'https://${KlipyUrls.MEDIA_HOST}/%'
+          AND mediaUrl NOT LIKE 'https://${KlipyUrls.MEDIA_HOST_1}/%'
+          AND mediaUrl NOT LIKE 'https://${KlipyUrls.MEDIA_HOST_2}/%'
+        """
+    )
+    suspend fun getLegacyMediaMessages(): List<MessageEntity>
 
     // Call log
     @Query("SELECT * FROM messages WHERE type = 'CALL' ORDER BY timestamp DESC")

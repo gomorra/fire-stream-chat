@@ -13,6 +13,9 @@ interface ChatDao {
     @Query("SELECT * FROM chats ORDER BY COALESCE(lastMessageTimestamp, createdAt) DESC")
     fun getAllChats(): Flow<List<ChatEntity>>
 
+    @Query("SELECT id FROM chats")
+    suspend fun getAllChatIds(): List<String>
+
     @Query("SELECT * FROM chats WHERE id = :chatId")
     suspend fun getChatById(chatId: String): ChatEntity?
 

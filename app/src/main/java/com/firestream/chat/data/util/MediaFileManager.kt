@@ -5,6 +5,7 @@ import android.content.Context
 import android.net.Uri
 import android.os.Environment
 import android.provider.MediaStore
+import com.firestream.chat.data.backup.LegacyMediaBackupFetcher
 import com.firestream.chat.data.crypto.MediaCrypto
 import com.firestream.chat.data.crypto.MediaEncryptionParams
 import com.firestream.chat.data.sticker.StickerDownloads
@@ -31,6 +32,7 @@ class MediaFileManager @Inject constructor(
     private val httpClient: OkHttpClient,
     private val documentFiles: DocumentFiles,
     private val stickerDownloads: StickerDownloads,
+    private val legacyMediaBackupFetcher: LegacyMediaBackupFetcher,
 ) {
 
     private val inFlightDownloads = ConcurrentHashMap<String, CompletableDeferred<File>>()
@@ -54,16 +56,38 @@ class MediaFileManager @Inject constructor(
     /** Whether [file] is one of the copies this manager keeps — the durable local file of a sent or received message. */
     fun isManagedFile(file: File): Boolean = file.parentFile == mediaRoot
 
-    suspend fun downloadAndSave(chatId: String, messageId: String, mediaUrl: String): File =
+    suspend fun downloadAndSave(
+        chatId: String,
+        messageId: String,
+        mediaUrl: String,
+        backupMessageId: String = messageId,
+    ): File =
         withContext(Dispatchers.IO) {
             if (isEncryptedBlobUrl(mediaUrl)) {
                 throw SecurityException("Refusing to download encrypted blob without decryption parameters: $messageId")
             }
+            check(!KlipyUrls.isMedia(mediaUrl)) { "This picture is shown from KLIPY and can't be saved" }
             val extension = extractExtension(mediaUrl)
             val localFile = getLocalFile(chatId, messageId, extension)
-            if (localFile.exists()) return@withContext localFile
+            if (isReadableFile(localFile)) return@withContext localFile
             deduplicated(messageId) {
-                fetch(mediaUrl) { input -> writeViaMediaStore(localFile.name, mimeFromExtension(extension), input) }
+                if (isReadableFile(localFile)) return@deduplicated localFile
+                try {
+                    fetch(mediaUrl) { input -> writeViaMediaStore(localFile.name, mimeFromExtension(extension), input) }
+                } catch (e: Exception) {
+                    e.rethrowIfCancellation()
+                    val decPart = File.createTempFile("legacy_dec_${messageId}_", ".$extension", context.cacheDir)
+                    try {
+                        if (!legacyMediaBackupFetcher.downloadAndDecrypt(backupMessageId, decPart)) {
+                            throw e
+                        }
+                        decPart.inputStream().use { input ->
+                            writeViaMediaStore(localFile.name, mimeFromExtension(extension), input)
+                        }
+                    } finally {
+                        decPart.delete()
+                    }
+                }
                 localFile
             }
         }
@@ -153,6 +177,7 @@ class MediaFileManager @Inject constructor(
             mimeType = message.mimeType,
             stickerId = message.stickerId,
             encryption = encryption,
+            backupMessageId = message.id,
         )
     }
 
@@ -165,6 +190,7 @@ class MediaFileManager @Inject constructor(
         mimeType: String?,
         stickerId: String?,
         encryption: MediaEncryptionParams? = null,
+        backupMessageId: String = messageId,
     ): File? = when {
         KlipyUrls.isMedia(mediaUrl) -> null
         type == MessageType.STICKER -> stickerDownloads.ensureLocal(stickerId, mediaUrl)
@@ -172,10 +198,20 @@ class MediaFileManager @Inject constructor(
         isEncryptedBlobUrl(mediaUrl) ->
             throw SecurityException("Refusing to download encrypted blob without decryption parameters: $messageId")
         type == MessageType.DOCUMENT || type == MessageType.GIF ->
-            downloadToFile(messageId, mediaUrl, documentFiles.fileFor(messageId, fileName, mimeType, mediaUrl))
+            downloadToFile(
+                messageId,
+                mediaUrl,
+                documentFiles.fileFor(messageId, fileName, mimeType, mediaUrl),
+                backupMessageId,
+            )
         type == MessageType.VOICE ->
-            downloadToFile(messageId, mediaUrl, documentFiles.fileFor(messageId, fileName, mimeType ?: "audio/aac", mediaUrl))
-        else -> downloadAndSave(chatId, messageId, mediaUrl)
+            downloadToFile(
+                messageId,
+                mediaUrl,
+                documentFiles.fileFor(messageId, fileName, mimeType ?: "audio/aac", mediaUrl),
+                backupMessageId,
+            )
+        else -> downloadAndSave(chatId, messageId, mediaUrl, backupMessageId)
     }
 
     private fun isEncryptedBlobUrl(mediaUrl: String): Boolean =
@@ -267,13 +303,28 @@ class MediaFileManager @Inject constructor(
     }
 
     /** Downloads [mediaUrl] into [target] through a `.part` sibling, so a cut-off download never looks finished. */
-    private suspend fun downloadToFile(messageId: String, mediaUrl: String, target: File): File =
+    private suspend fun downloadToFile(
+        messageId: String,
+        mediaUrl: String,
+        target: File,
+        backupMessageId: String = messageId,
+    ): File =
         withContext(Dispatchers.IO) {
-            if (target.exists()) return@withContext target
+            check(!KlipyUrls.isMedia(mediaUrl)) { "This picture is shown from KLIPY and can't be saved" }
+            if (isReadableFile(target)) return@withContext target
             deduplicated(messageId) {
+                if (isReadableFile(target)) return@deduplicated target
                 val partial = File(target.parentFile, "${target.name}.part")
                 try {
-                    fetch(mediaUrl) { input -> partial.outputStream().use { input.copyTo(it) } }
+                    try {
+                        fetch(mediaUrl) { input -> partial.outputStream().use { input.copyTo(it) } }
+                    } catch (e: Exception) {
+                        e.rethrowIfCancellation()
+                        partial.delete()
+                        if (!legacyMediaBackupFetcher.downloadAndDecrypt(backupMessageId, partial)) {
+                            throw e
+                        }
+                    }
                     if (!partial.renameTo(target)) throw IOException("Cannot finish download of $messageId")
                 } finally {
                     partial.delete()
@@ -281,6 +332,10 @@ class MediaFileManager @Inject constructor(
                 target
             }
         }
+
+    private fun isReadableFile(file: File): Boolean =
+        file.exists() && file.isFile && file.canRead() &&
+            runCatching { file.inputStream().use { true } }.getOrDefault(false)
 
     /**
      * Runs [download] for [messageId] unless one is already in flight, in which
