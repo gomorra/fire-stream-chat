@@ -20,9 +20,23 @@ class PocketBaseKeySource @Inject constructor() : KeySource {
         identityKey: IdentityKey,
         registrationId: Int,
         signedPreKey: SignedPreKeyRecord,
-        preKey: PreKeyRecord,
-        kyberPreKey: KyberPreKeyRecord
+        preKeys: List<PreKeyRecord>,
+        kyberPreKey: KyberPreKeyRecord,
     ): Unit = throw NotImplementedError("PB v0 stub — Signal is gated off in this flavor")
+
+    override suspend fun uploadPreKeys(
+        uid: String,
+        registrationId: Int,
+        preKeys: List<PreKeyRecord>,
+    ): Unit = throw NotImplementedError("PB v0 stub — Signal is gated off in this flavor")
+
+    override suspend fun countRemotePreKeys(
+        uid: String,
+        registrationId: Int,
+    ): Int? = throw NotImplementedError("PB v0 stub — Signal is gated off in this flavor")
+
+    override suspend fun fetchIdentityKey(uid: String): IdentityKey? =
+        throw NotImplementedError("PB v0 stub — Signal is gated off in this flavor")
 
     override suspend fun fetchPreKeyBundle(uid: String): PreKeyBundle? =
         throw NotImplementedError("PB v0 stub — Signal is gated off in this flavor")

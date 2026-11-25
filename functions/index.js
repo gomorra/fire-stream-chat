@@ -5,6 +5,7 @@ const { defineSecret } = require("firebase-functions/params");
 const admin = require("firebase-admin");
 const { logger } = require("firebase-functions");
 const { callMessagePushData, incomingCallAndroidConfig, unreadUpdates } = require("./callPush");
+const { parseTargetUid, claimBundleInTransaction } = require("./preKeyBundle");
 
 admin.initializeApp();
 
@@ -62,6 +63,25 @@ exports.getTurnCredentials = onCall(
         return { iceServers: body.iceServers };
     }
 );
+
+// Atomically claims one unused one-time pre-key from `/keyBundles/{targetUid}/oneTimePreKeys`
+// and returns the peer's full Signal PreKeyBundle. Senders never read or delete
+// another user's oneTimePreKeys directly, preventing concurrent senders from
+// claiming the same one-time pre-key or draining a peer's pool.
+exports.claimPreKeyBundle = onCall(async (request) => {
+    if (!request.auth) {
+        throw new HttpsError("unauthenticated", "Sign in to fetch encryption keys.");
+    }
+    const targetUid = parseTargetUid(request.data);
+    if (!targetUid) {
+        throw new HttpsError("invalid-argument", "targetUid must be a non-empty string.");
+    }
+    const result = await claimBundleInTransaction(admin.firestore(), targetUid, request.auth.uid);
+    if (result.blocked) {
+        throw new HttpsError("permission-denied", "Cannot fetch encryption keys for this user.");
+    }
+    return result;
+});
 
 // Mirrors RTDB presence changes to Firestore.
 // This is the fallback for abrupt disconnects (power off, crash) where the Android

@@ -66,7 +66,15 @@ class AppDatabaseMigrationTest {
     @Test
     fun `SignalDatabase baseline v1 migrates cleanly to current version`() {
         val dbName = "signal-migration-v1-test.db"
-        signalHelper.createDatabase(dbName, 1).close()
+        signalHelper.createDatabase(dbName, 1).apply {
+            execSQL(
+                "INSERT INTO signal_identity (id, identityKeyPair, registrationId) VALUES (1, X'0102', 42)"
+            )
+            execSQL(
+                "INSERT INTO signal_prekeys (preKeyId, record) VALUES (1, X'0304')"
+            )
+            close()
+        }
 
         val context = ApplicationProvider.getApplicationContext<Context>()
         val db = Room.databaseBuilder(context, SignalDatabase::class.java, dbName)
@@ -76,6 +84,15 @@ class AppDatabaseMigrationTest {
         try {
             db.openHelper.writableDatabase
             assertEquals(SignalDatabase.CURRENT_VERSION, db.openHelper.readableDatabase.version)
+
+            val identity = db.signalDao().getIdentity()!!
+            assertEquals(42, identity.registrationId)
+            assertEquals(2, identity.nextPreKeyId)
+            assertFalse(identity.bundlePublished)
+
+            val preKey = db.signalDao().getPreKey(1)!!
+            assertTrue(preKey.uploaded)
+            assertEquals(0, db.signalDao().getUnuploadedPreKeys().size)
         } finally {
             db.close()
         }

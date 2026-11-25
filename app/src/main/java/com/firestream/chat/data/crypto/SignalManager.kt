@@ -1,12 +1,27 @@
+// region: AGENT-NOTE
+// Responsibility: High-level Signal Protocol manager — key generation, rotating
+//   one-time pre-key pool replenishment, session setup, and 1:1 encrypt/decrypt.
+//   All public methods execute on Dispatchers.IO.
+// Owns: Per-peer session locks (`sessionLocks`), initial registration lock
+//   (`initMutex`), and pre-key replenishment lock (`preKeyMutex`). Never holds
+//   `sessionLocks` across pre-key replenishment network IO.
+// Collaborators: SignalProtocolStoreImpl (SignalDatabase persistence),
+//   KeySource (Firestore + claimPreKeyBundle Cloud Function), AuthSource.
+// Don't put here: outbox retries or plaintext-vs-ciphertext policy
+//   (MessageWriter / OutboxSender), Room message persistence (MessageRepositoryImpl).
+// endregion
+
 package com.firestream.chat.data.crypto
 
 import android.util.Base64
 import com.firestream.chat.data.remote.source.AuthSource
 import com.firestream.chat.data.remote.source.KeySource
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 import org.signal.libsignal.protocol.IdentityKey
 import org.signal.libsignal.protocol.IdentityKeyPair
 import org.signal.libsignal.protocol.SessionBuilder
@@ -41,71 +56,116 @@ data class EncryptedMessage(
 /**
  * High-level Signal Protocol manager.
  *
- * Coordinates key generation, Firestore publication, session establishment, and
- * message encryption/decryption. All public methods execute on [Dispatchers.IO].
+ * Coordinates key generation, rotating one-time pre-key publication, session
+ * establishment, and message encryption/decryption. All public methods execute
+ * on [Dispatchers.IO].
  */
 @Singleton
-class SignalManager @Inject constructor(
+class SignalManager internal constructor(
     private val store: SignalProtocolStoreImpl,
     private val keySource: KeySource,
-    private val authSource: AuthSource
+    private val authSource: AuthSource,
+    private val preKeyBatchSize: Int,
+    private val preKeyLowWatermark: Int,
+    private val replenishTimeoutMs: Long = DEFAULT_REPLENISH_TIMEOUT_MS,
 ) {
+    @Inject
+    constructor(
+        store: SignalProtocolStoreImpl,
+        keySource: KeySource,
+        authSource: AuthSource,
+    ) : this(
+        store = store,
+        keySource = keySource,
+        authSource = authSource,
+        preKeyBatchSize = DEFAULT_PREKEY_BATCH_SIZE,
+        preKeyLowWatermark = DEFAULT_PREKEY_LOW_WATERMARK,
+    )
+
     private val initMutex = Mutex()
 
     // One lock per peer, shared by encrypt and decrypt: both load that peer's
     // session record, advance its ratchet and store it back, so two interleaved
-    // calls would lose one of the updates. Never held across network IO. One
-    // entry per contact ever messaged — small enough never to evict.
+    // calls would lose one of the updates. Steady-state encrypts fetch the peer's
+    // identity outside the lock; only initial session setup and stale-identity
+    // re-verification do network IO under it.
     private val sessionLocks = ConcurrentHashMap<String, Mutex>()
 
-    // Replenishment checks, publishes and stores the one pre-key id; two PREKEY
-    // decrypts from different peers must not publish one key and store another.
+    // Replenishment generates, persists and uploads one-time pre-key batches.
+    // Serialized so two concurrent PREKEY decrypts or startup calls do not
+    // allocate colliding IDs or upload duplicate batches.
     private val preKeyMutex = Mutex()
 
     private val deviceId = 1
-    private val preKeyId = 1
     private val signedPreKeyId = 1
     private val kyberPreKeyId = 1
 
     /**
-     * Generates and publishes keys if this device has never been registered.
-     * Safe to call multiple times — no-op after first successful init.
+     * Generates and publishes keys if this device has never been registered, or
+     * retries publishing an unconfirmed bundle (including v1→v2 upgrades that
+     * rewrite `/keyBundles/{uid}` without legacy top-level `preKeyId`). Then
+     * checks both local and remote pre-key counts and replenishes best-effort.
      */
-    suspend fun ensureInitialized() = withContext(Dispatchers.IO) {
-        if (store.isInitialized()) return@withContext
+    suspend fun ensureInitialized(): Unit = withContext(Dispatchers.IO) {
         initMutex.withLock {
-            if (store.isInitialized()) return@withLock
-            generateAndPublishKeys()
+            if (!store.isInitialized()) {
+                generateLocalKeys()
+            }
+            if (!store.isBundlePublished()) {
+                publishInitialBundle()
+            }
+        }
+        try {
+            withTimeout(replenishTimeoutMs) {
+                replenishPreKeysIfNeeded(checkRemote = true)
+            }
+        } catch (t: Throwable) {
+            if (t is CancellationException && t !is kotlinx.coroutines.TimeoutCancellationException) throw t
         }
     }
 
     /**
      * Encrypts [plaintext] for [recipientId].
-     * Establishes an X3DH session on first message if needed.
+     *
+     * Uses a cheap identity-key read on steady-state sends so existing sessions
+     * never consume a peer's one-time pre-keys. Claims a full pre-key bundle only
+     * when establishing a new session (or rebuilding one after re-registration).
      */
     suspend fun encrypt(recipientId: String, plaintext: String): EncryptedMessage =
         withContext(Dispatchers.IO) {
-            // Always fetch the current bundle so we can detect if the remote party re-registered
-            // (e.g. after clearing app data or reinstalling). If their identity key changed we
-            // must throw away the stale session and establish a fresh one — otherwise we would
-            // send WHISPER_TYPE ciphertext that the recipient can no longer decrypt.
-            // Fetched before taking the session lock: it is a network read.
-            val bundle = keySource.fetchPreKeyBundle(recipientId)
+            // Read the remote identity outside the lock so steady-state sends do
+            // not hold the per-peer mutex across normal network IO.
+            val remoteIdentity = keySource.fetchIdentityKey(recipientId)
                 ?: error("No key bundle found for $recipientId — they may not have set up encryption")
 
             sessionLock(recipientId).withLock {
                 val address = SignalProtocolAddress(recipientId, deviceId)
                 val storedIdentity = store.getIdentity(address)
-                val remoteIdentityChanged = storedIdentity != null && storedIdentity != bundle.identityKey
-                if (remoteIdentityChanged) {
-                    // Remote party re-registered: clear stale session and trust record so that
-                    // isTrustedIdentity() falls back to TOFU and allows the new identity.
-                    store.deleteAllSessions(recipientId)
-                    store.deleteTrustedIdentity(recipientId)
+                var effectiveIdentity = remoteIdentity
+
+                if (storedIdentity != null && storedIdentity != remoteIdentity) {
+                    // Stale-bundle race guard: another encrypt may have just rebuilt
+                    // the session on a newer identity while our unlocked read held an
+                    // older one. Re-fetch once under the lock before tearing down.
+                    val freshIdentity = keySource.fetchIdentityKey(recipientId)
+                        ?: error("No key bundle found for $recipientId — they may not have set up encryption")
+                    effectiveIdentity = freshIdentity
+                    if (freshIdentity != storedIdentity) {
+                        store.deleteAllSessions(recipientId)
+                        store.deleteTrustedIdentity(recipientId)
+                    }
                 }
 
                 if (!store.containsSession(address)) {
+                    val bundle = keySource.fetchPreKeyBundle(recipientId)
+                        ?: error("No key bundle found for $recipientId — they may not have set up encryption")
+                    val currentTrusted = store.getIdentity(address)
+                    if (currentTrusted != null && currentTrusted != bundle.identityKey) {
+                        store.deleteAllSessions(recipientId)
+                        store.deleteTrustedIdentity(recipientId)
+                    }
                     SessionBuilder(store, address).process(bundle)
+                    effectiveIdentity = bundle.identityKey
                 }
 
                 val cipher = SessionCipher(store, address)
@@ -113,23 +173,20 @@ class SignalManager @Inject constructor(
                 EncryptedMessage(
                     ciphertext = Base64.encodeToString(ciphertextMessage.serialize(), Base64.NO_WRAP),
                     signalType = ciphertextMessage.type,
-                    peerIdentity = encodeIdentity(bundle.identityKey),
+                    peerIdentity = encodeIdentity(effectiveIdentity),
                 )
             }
         }
 
     /**
      * Whether [recipientId] still publishes [peerIdentity], the identity a stored
-     * ciphertext was encrypted for. `false` once they re-registered (or never set up
-     * encryption): that ciphertext belongs to a session they no longer have, and
-     * the caller must encrypt again — [encrypt] rebuilds the session on the new
-     * identity. A network read, taken outside the session lock like the fetch in
-     * [encrypt].
+     * ciphertext was encrypted for. Reads only the identity key so it never
+     * consumes a one-time pre-key.
      */
     suspend fun isCurrentIdentity(recipientId: String, peerIdentity: String): Boolean =
         withContext(Dispatchers.IO) {
-            val bundle = keySource.fetchPreKeyBundle(recipientId) ?: return@withContext false
-            encodeIdentity(bundle.identityKey) == peerIdentity
+            val identityKey = keySource.fetchIdentityKey(recipientId) ?: return@withContext false
+            encodeIdentity(identityKey) == peerIdentity
         }
 
     /**
@@ -149,12 +206,16 @@ class SignalManager @Inject constructor(
                 }
             }
             if (message.signalType == CiphertextMessage.PREKEY_TYPE) {
-                // The Signal library consumed our one-time pre-key during decryption.
-                // Replenish it so the next new contact can establish a fresh session.
-                // After the session lock is released: it publishes over the network, and
-                // every send to this peer would otherwise wait on it.
-                // Best-effort: a replenishment failure must not mask the successful decryption.
-                runCatching { replenishPreKeyIfNeeded() }
+                // Replenish outside the session lock so sends to this peer never
+                // wait on pre-key network IO. Bounded by timeout so offline commits
+                // never hang decryption; next ensureInitialized() retries pending keys.
+                try {
+                    withTimeout(replenishTimeoutMs) {
+                        replenishPreKeysIfNeeded(checkRemote = false)
+                    }
+                } catch (t: Throwable) {
+                    if (t is CancellationException && t !is kotlinx.coroutines.TimeoutCancellationException) throw t
+                }
             }
             String(plaintext, Charsets.UTF_8)
         }
@@ -167,39 +228,55 @@ class SignalManager @Inject constructor(
         Base64.encodeToString(identityKey.serialize(), Base64.NO_WRAP)
 
     /**
-     * Generates a fresh one-time pre-key and publishes the updated bundle to Firestore.
-     * Called after a [PreKeySignalMessage] is successfully decrypted to ensure the next
-     * new contact always finds a valid pre-key in our published bundle.
+     * Ensures at least [preKeyLowWatermark] one-time pre-keys are available and
+     * uploads every locally persisted pre-key whose public half has not yet been
+     * acknowledged by [KeySource].
+     *
+     * When [checkRemote] is true (startup), also queries the backend pool count
+     * so remote exhaustion (e.g. abandoned claims) cannot strand Firestore at 0
+     * keys while local keys sit unused in `signal.db`.
      */
-    private suspend fun replenishPreKeyIfNeeded() = preKeyMutex.withLock {
-        if (store.containsPreKey(preKeyId)) return@withLock  // still available, nothing to do
+    internal suspend fun replenishPreKeysIfNeeded(checkRemote: Boolean = false) = preKeyMutex.withLock {
+        if (!store.isInitialized() || !store.isBundlePublished()) return@withLock
         val uid = authSource.currentUserId ?: return@withLock
-        val identityKeyPair = store.getIdentityKeyPair()
-        val newPreKeyPair = ECKeyPair.generate()
-        val newPreKeyRecord = PreKeyRecord(preKeyId, newPreKeyPair)
-        val signedPreKeyRecord = store.loadSignedPreKey(signedPreKeyId)
-        val kyberPreKeyRecord = store.loadKyberPreKey(kyberPreKeyId)
-        // Publish to Firestore first. If this throws, the local store is not updated, so
-        // containsPreKey() stays false and the next PREKEY decryption will retry.
-        keySource.publishKeys(
-            uid = uid,
-            identityKey = identityKeyPair.publicKey,
-            registrationId = store.getLocalRegistrationId(),
-            signedPreKey = signedPreKeyRecord,
-            preKey = newPreKeyRecord,
-            kyberPreKey = kyberPreKeyRecord
-        )
-        store.storePreKey(preKeyId, newPreKeyRecord)
+        val registrationId = store.getLocalRegistrationId()
+
+        val localCount = store.countPreKeys()
+        val pendingCount = store.getUnuploadedPreKeys().size
+        val remoteCount = if (checkRemote) {
+            try {
+                keySource.countRemotePreKeys(uid, registrationId)
+            } catch (t: Throwable) {
+                if (t is CancellationException) throw t
+                null
+            }
+        } else {
+            null
+        }
+        // Account for locally generated keys still waiting to upload so offline
+        // retries flush the existing pending batch instead of generating duplicates.
+        val projectedRemoteCount = remoteCount?.let { it + pendingCount }
+        val effectiveCount = if (projectedRemoteCount != null) minOf(localCount, projectedRemoteCount) else localCount
+
+        if (effectiveCount < preKeyLowWatermark) {
+            val needed = (preKeyBatchSize - effectiveCount).coerceAtLeast(1)
+            val startId = maxOf(store.getNextPreKeyId(), (store.getMaxPreKeyId() ?: 0) + 1)
+            val newRecords = generatePreKeyBatch(startId, needed)
+            store.storePreKeys(newRecords, uploaded = false)
+            store.updateNextPreKeyId(startId + needed)
+        }
+
+        val pending = store.getUnuploadedPreKeys()
+        if (pending.isNotEmpty()) {
+            keySource.uploadPreKeys(uid, registrationId, pending)
+            store.markPreKeysUploaded(pending.map { it.id })
+        }
     }
 
-    private suspend fun generateAndPublishKeys() {
-        val uid = authSource.currentUserId
-            ?: error("Cannot initialize Signal: user not authenticated")
-
+    private fun generateLocalKeys() {
         val identityKeyPair = IdentityKeyPair.generate()
         val registrationId = KeyHelper.generateRegistrationId(false)
 
-        // Signed pre-key
         val signedPreKeyPair = ECKeyPair.generate()
         val signedPreKeySignature = identityKeyPair.privateKey
             .calculateSignature(signedPreKeyPair.publicKey.serialize())
@@ -207,14 +284,9 @@ class SignalManager @Inject constructor(
             signedPreKeyId,
             System.currentTimeMillis(),
             signedPreKeyPair,
-            signedPreKeySignature
+            signedPreKeySignature,
         )
 
-        // One-time pre-key
-        val preKeyPair = ECKeyPair.generate()
-        val preKeyRecord = PreKeyRecord(preKeyId, preKeyPair)
-
-        // Kyber last-resort pre-key
         val kyberKeyPair = KEMKeyPair.generate(KEMKeyType.KYBER_1024)
         val kyberSignature = identityKeyPair.privateKey
             .calculateSignature(kyberKeyPair.publicKey.serialize())
@@ -222,23 +294,51 @@ class SignalManager @Inject constructor(
             kyberPreKeyId,
             System.currentTimeMillis(),
             kyberKeyPair,
-            kyberSignature
+            kyberSignature,
         )
 
-        // Persist locally first
-        store.saveIdentityKeyPair(identityKeyPair, registrationId)
-        store.storeSignedPreKey(signedPreKeyId, signedPreKeyRecord)
-        store.storePreKey(preKeyId, preKeyRecord)
-        store.storeKyberPreKey(kyberPreKeyId, kyberPreKeyRecord)
+        val preKeys = generatePreKeyBatch(startId = 1, count = preKeyBatchSize)
 
-        // Publish public keys to Firestore
+        // Single SQLite transaction: identity is never visible without its pre-keys.
+        store.saveInitialKeys(
+            pair = identityKeyPair,
+            registrationId = registrationId,
+            signedPreKey = signedPreKeyRecord,
+            kyberPreKey = kyberPreKeyRecord,
+            preKeys = preKeys,
+            nextPreKeyId = 1 + preKeyBatchSize,
+        )
+    }
+
+    private suspend fun publishInitialBundle() = preKeyMutex.withLock {
+        val uid = authSource.currentUserId
+            ?: error("Cannot initialize Signal: user not authenticated")
+        val identityKeyPair = store.getIdentityKeyPair()
+        val registrationId = store.getLocalRegistrationId()
+        val signedPreKeyRecord = store.loadSignedPreKey(signedPreKeyId)
+        val kyberPreKeyRecord = store.loadKyberPreKey(kyberPreKeyId)
+        val pendingPreKeys = store.getUnuploadedPreKeys()
+
         keySource.publishKeys(
             uid = uid,
             identityKey = identityKeyPair.publicKey,
             registrationId = registrationId,
             signedPreKey = signedPreKeyRecord,
-            preKey = preKeyRecord,
-            kyberPreKey = kyberPreKeyRecord
+            preKeys = pendingPreKeys,
+            kyberPreKey = kyberPreKeyRecord,
         )
+        store.markBundlePublished()
+        store.markPreKeysUploaded(pendingPreKeys.map { it.id })
+    }
+
+    private fun generatePreKeyBatch(startId: Int, count: Int): List<PreKeyRecord> =
+        (0 until count).map { offset ->
+            PreKeyRecord(startId + offset, ECKeyPair.generate())
+        }
+
+    companion object {
+        const val DEFAULT_PREKEY_BATCH_SIZE = 50
+        const val DEFAULT_PREKEY_LOW_WATERMARK = 20
+        const val DEFAULT_REPLENISH_TIMEOUT_MS = 10_000L
     }
 }

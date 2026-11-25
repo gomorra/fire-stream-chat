@@ -218,8 +218,64 @@ class SignalProtocolStoreImpl @Inject constructor(
 
     fun isInitialized(): Boolean = signalDao.getIdentity() != null
 
-    fun saveIdentityKeyPair(pair: IdentityKeyPair, registrationId: Int) {
-        signalDao.saveIdentity(SignalIdentityEntity(identityKeyPair = pair.serialize(), registrationId = registrationId))
+    fun isBundlePublished(): Boolean = signalDao.getIdentity()?.bundlePublished == true
+
+    fun markBundlePublished() = signalDao.markBundlePublished()
+
+    fun saveIdentityKeyPair(
+        pair: IdentityKeyPair,
+        registrationId: Int,
+        nextPreKeyId: Int = 1,
+        bundlePublished: Boolean = false,
+    ) {
+        signalDao.saveIdentity(
+            SignalIdentityEntity(
+                identityKeyPair = pair.serialize(),
+                registrationId = registrationId,
+                nextPreKeyId = nextPreKeyId,
+                bundlePublished = bundlePublished,
+            )
+        )
+    }
+
+    fun saveInitialKeys(
+        pair: IdentityKeyPair,
+        registrationId: Int,
+        signedPreKey: SignedPreKeyRecord,
+        kyberPreKey: KyberPreKeyRecord,
+        preKeys: List<PreKeyRecord>,
+        nextPreKeyId: Int,
+    ) {
+        signalDao.saveInitialKeys(
+            identity = SignalIdentityEntity(
+                identityKeyPair = pair.serialize(),
+                registrationId = registrationId,
+                nextPreKeyId = nextPreKeyId,
+                bundlePublished = false,
+            ),
+            signedPreKey = SignalSignedPreKeyEntity(signedPreKey.id, signedPreKey.serialize()),
+            kyberPreKey = SignalKyberPreKeyEntity(kyberPreKey.id, kyberPreKey.serialize()),
+            preKeys = preKeys.map { SignalPreKeyEntity(it.id, it.serialize(), uploaded = false) },
+        )
+    }
+
+    fun getNextPreKeyId(): Int = signalDao.getIdentity()?.nextPreKeyId ?: 1
+
+    fun updateNextPreKeyId(nextPreKeyId: Int) = signalDao.updateNextPreKeyId(nextPreKeyId)
+
+    fun getMaxPreKeyId(): Int? = signalDao.getMaxPreKeyId()
+
+    fun countPreKeys(): Int = signalDao.countPreKeys()
+
+    fun storePreKeys(records: List<PreKeyRecord>, uploaded: Boolean = false) {
+        signalDao.savePreKeys(records.map { SignalPreKeyEntity(it.id, it.serialize(), uploaded) })
+    }
+
+    fun getUnuploadedPreKeys(): List<PreKeyRecord> =
+        signalDao.getUnuploadedPreKeys().map { PreKeyRecord(it.record) }
+
+    fun markPreKeysUploaded(ids: List<Int>) {
+        if (ids.isNotEmpty()) signalDao.markPreKeysUploaded(ids)
     }
 
     fun deleteTrustedIdentity(name: String) {

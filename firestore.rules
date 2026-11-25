@@ -30,9 +30,81 @@ service cloud.firestore {
     }
 
     // ── Key Bundles (Signal Protocol) ────────────────────────────
+    // Public Signal key material for each user (no PII). Any signed-in user may
+    // fetch a specific user's bundle by uid, but cannot list the collection.
+    // Only the owner may create, update, or delete their own bundle.
+    //
+    // Assumed Data Model:
+    //   Collection: keyBundles/{uid}
+    //     - registrationId     : int (>= 0, required)
+    //     - identityKey        : string (1..256 chars, base64, required)
+    //     - signedPreKeyId     : int (>= 0, required)
+    //     - signedPreKeyPublic : string (1..256 chars, base64, required)
+    //     - signedPreKeySig    : string (1..256 chars, base64, required)
+    //     - kyberPreKeyId      : int (>= 0, required)
+    //     - kyberPreKeyPublic  : string (1..4096 chars, base64 Kyber-1024, required)
+    //     - kyberPreKeySig     : string (1..256 chars, base64, required)
+    //     - preKeyId           : int (>= 0, optional/nullable legacy field)
+    //     - preKeyPublic       : string (1..256 chars, optional/nullable legacy field)
+    //
+    //   Subcollection: keyBundles/{uid}/oneTimePreKeys/{preKeyId}
+    //     Only the owner reads, lists, writes, or deletes; senders claim a
+    //     pre-key exclusively via the claimPreKeyBundle Cloud Function (Admin SDK).
+    //     - preKeyId           : int (>= 0, matches doc ID ^[0-9]+$, required)
+    //     - preKeyPublic       : string (1..256 chars, base64, required)
+    //     - registrationId     : int (>= 0, required)
+    //     - createdAt          : timestamp (== request.time, required)
     match /keyBundles/{uid} {
-      allow read:   if isAuth();
-      allow write:  if isOwner(uid);
+      function isValidKeyBundle(data) {
+        return data.keys().hasAll([
+            'registrationId', 'identityKey',
+            'signedPreKeyId', 'signedPreKeyPublic', 'signedPreKeySig',
+            'kyberPreKeyId', 'kyberPreKeyPublic', 'kyberPreKeySig'
+          ])
+          && data.keys().hasOnly([
+            'registrationId', 'identityKey',
+            'signedPreKeyId', 'signedPreKeyPublic', 'signedPreKeySig',
+            'kyberPreKeyId', 'kyberPreKeyPublic', 'kyberPreKeySig',
+            'preKeyId', 'preKeyPublic'
+          ])
+          && data.registrationId is int && data.registrationId >= 0
+          && data.identityKey is string && data.identityKey.size() > 0 && data.identityKey.size() <= 256
+          && data.signedPreKeyId is int && data.signedPreKeyId >= 0
+          && data.signedPreKeyPublic is string && data.signedPreKeyPublic.size() > 0 && data.signedPreKeyPublic.size() <= 256
+          && data.signedPreKeySig is string && data.signedPreKeySig.size() > 0 && data.signedPreKeySig.size() <= 256
+          && data.kyberPreKeyId is int && data.kyberPreKeyId >= 0
+          && data.kyberPreKeyPublic is string && data.kyberPreKeyPublic.size() > 0 && data.kyberPreKeyPublic.size() <= 4096
+          && data.kyberPreKeySig is string && data.kyberPreKeySig.size() > 0 && data.kyberPreKeySig.size() <= 256
+          && (!('preKeyId' in data) || data.preKeyId == null || (data.preKeyId is int && data.preKeyId >= 0))
+          && (!('preKeyPublic' in data) || data.preKeyPublic == null || (data.preKeyPublic is string && data.preKeyPublic.size() > 0 && data.preKeyPublic.size() <= 256));
+      }
+
+      allow get:    if isAuth();
+      allow create: if isOwner(uid) && isValidKeyBundle(request.resource.data);
+      allow update: if isOwner(uid) && isValidKeyBundle(request.resource.data);
+      allow delete: if isOwner(uid);
+
+      match /oneTimePreKeys/{preKeyId} {
+        function isValidOneTimePreKey(docId, data) {
+          return docId.matches('^[0-9]+$')
+            && data.keys().hasAll(['preKeyId', 'preKeyPublic', 'registrationId', 'createdAt'])
+            && data.keys().hasOnly(['preKeyId', 'preKeyPublic', 'registrationId', 'createdAt'])
+            && data.preKeyId is int
+            && data.preKeyId >= 0
+            && string(data.preKeyId) == docId
+            && data.preKeyPublic is string
+            && data.preKeyPublic.size() > 0
+            && data.preKeyPublic.size() <= 256
+            && data.registrationId is int
+            && data.registrationId >= 0
+            && data.createdAt == request.time;
+        }
+
+        allow read:   if isOwner(uid);
+        allow create: if isOwner(uid) && isValidOneTimePreKey(preKeyId, request.resource.data);
+        allow update: if isOwner(uid) && isValidOneTimePreKey(preKeyId, request.resource.data);
+        allow delete: if isOwner(uid);
+      }
     }
 
     // ── Chats ────────────────────────────────────────────────────

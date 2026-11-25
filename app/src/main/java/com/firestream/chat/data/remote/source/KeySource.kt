@@ -18,9 +18,34 @@ interface KeySource {
         identityKey: IdentityKey,
         registrationId: Int,
         signedPreKey: SignedPreKeyRecord,
-        preKey: PreKeyRecord,
-        kyberPreKey: KyberPreKeyRecord
+        preKeys: List<PreKeyRecord>,
+        kyberPreKey: KyberPreKeyRecord,
     )
 
+    suspend fun uploadPreKeys(
+        uid: String,
+        registrationId: Int,
+        preKeys: List<PreKeyRecord>,
+    )
+
+    /**
+     * Returns the number of unused one-time pre-keys currently stored on the
+     * backend for [uid] and [registrationId], or `null` if unavailable.
+     */
+    suspend fun countRemotePreKeys(
+        uid: String,
+        registrationId: Int,
+    ): Int?
+
+    /**
+     * Fetches the peer's public identity key without consuming a one-time
+     * pre-key. Used for steady-state re-registration checks.
+     */
+    suspend fun fetchIdentityKey(uid: String): IdentityKey?
+
+    /**
+     * Atomically claims one one-time pre-key (if any remain) and returns the
+     * peer's full [PreKeyBundle] for establishing a new X3DH/PQXDH session.
+     */
     suspend fun fetchPreKeyBundle(uid: String): PreKeyBundle?
 }
