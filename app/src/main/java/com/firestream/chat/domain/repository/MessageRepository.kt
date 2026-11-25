@@ -4,6 +4,7 @@ import com.firestream.chat.domain.model.ListDiff
 import com.firestream.chat.domain.model.Message
 import com.firestream.chat.domain.model.MessageAvailability
 import com.firestream.chat.domain.model.OnlineMedia
+import com.firestream.chat.domain.model.PushReconcileResult
 import com.firestream.chat.domain.model.MessageSearchFilter
 import com.firestream.chat.domain.model.MessageSearchResults
 import com.firestream.chat.domain.model.TimerAlarmSound
@@ -137,10 +138,12 @@ interface MessageRepository {
      * Pulls the one message a push notification names into the local store —
      * decrypted, and with its media downloaded per the auto-download preference —
      * so a photo received while the app was closed is on the phone before the
-     * chat is ever opened. A no-op while that chat is open (its listener owns
-     * it). Best-effort: never throws, since the push handler cannot retry.
+     * chat is ever opened. Returns [PushReconcileResult.Reconciled] when written
+     * or already present, [PushReconcileResult.Suppressed] when the chat is open
+     * or the sender is blocked, and [PushReconcileResult.Unavailable] on fetch
+     * failure or missing document. Best-effort: never throws.
      */
-    suspend fun reconcileFromPush(chatId: String, messageId: String)
+    suspend fun reconcileFromPush(chatId: String, messageId: String): PushReconcileResult
     /**
      * Where a deep-linked message stands, for deciding whether a jump to it can
      * still land. Read-only: it never writes the message into the local store —

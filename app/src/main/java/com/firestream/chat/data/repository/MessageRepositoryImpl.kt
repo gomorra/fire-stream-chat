@@ -8,10 +8,11 @@
 //   delivers it (docs/PATTERNS.md "Sends are idempotent by client id and drained
 //   by OutboxWorker"). Also media download with in-flight dedup,
 //   per-chat backfill scan, block-state filtering and Signal decryption on
-//   receive — over three receive paths: the open chat's listener, the chat-list
-//   sync, and the one message a push names (reconcileFromPush). The chat-list
-//   sync asks each chat for what Room lacks (MessageSyncPlan): the whole chat
-//   once, then the tail after the chat's cursor.
+//   receive — serialized per message id via `receiveLocks` (`KeyedMutex`) over
+//   all three receive paths: the open chat's listener, the chat-list sync, and
+//   the one message a push names (`reconcileFromPush`). The chat-list sync asks
+//   each chat for what Room lacks (MessageSyncPlan): the whole chat once, then
+//   the tail after the chat's cursor.
 // Owns: MessageEntity rows. The message_sync_state rows: only the chat-list
 //   sync writes them, after a server answer reached Room (docs/PATTERNS.md
 //   "A sync cursor lives beside the rows it describes"). The one read that addresses a send
@@ -78,6 +79,7 @@ import com.firestream.chat.data.remote.source.RawMessage
 import com.firestream.chat.data.remote.source.UserSource
 import com.firestream.chat.data.sticker.StickerFiles
 import com.firestream.chat.data.util.DocumentFiles
+import com.firestream.chat.data.util.KeyedMutex
 import com.firestream.chat.data.util.MediaFileManager
 import com.firestream.chat.data.util.VideoTranscoder
 import com.firestream.chat.data.util.parseMessageStatus
@@ -102,6 +104,7 @@ import com.firestream.chat.domain.model.MessageStatus
 import com.firestream.chat.domain.model.MessageType
 import com.firestream.chat.domain.model.OnlineMedia
 import com.firestream.chat.domain.model.OnlineMediaKind
+import com.firestream.chat.domain.model.PushReconcileResult
 import com.firestream.chat.domain.model.RecipientBlockedException
 import com.firestream.chat.domain.model.StickerPackKind
 import com.firestream.chat.domain.model.TimerAlarmSound
@@ -201,6 +204,7 @@ private const val LIST_MESSAGE_MERGE_WINDOW_MS = 10L * 60L * 1000L
 // enough intent to answer mid-word, which is what makes search useful while it
 // is still being typed and what finds "Geschenk" inside "Geburtstagsgeschenk".
 private const val PARTIAL_MATCH_MIN_LENGTH = 2
+internal const val DECRYPT_ERROR_PLACEHOLDER = "[Encrypted message — unable to decrypt]"
 
 @Singleton
 class MessageRepositoryImpl @Inject constructor(
@@ -231,6 +235,11 @@ class MessageRepositoryImpl @Inject constructor(
 ) : MessageRepository {
 
     private val downloadScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    // One lock per message id shared across all three receive paths (open-chat
+    // listener, chat-list sync, and push reconcile) so two concurrent readers
+    // never decrypt the same Signal ciphertext twice against an advancing ratchet.
+    internal val receiveLocks = KeyedMutex<String>()
 
     override val uploadProgress: StateFlow<Map<String, Float>> = outboxSender.uploadProgress
 
@@ -472,17 +481,26 @@ class MessageRepositoryImpl @Inject constructor(
      * status updates, the optimistic-echo guard for our own sends, and
      * decrypt-then-insert for incoming messages.
      *
-     * Every early `return` means "nothing left to do for this [raw] in this
-     * state" — the caller records the raw as reconciled once this returns
-     * normally, so a throw here leaves it to be retried on the next snapshot.
+     * Serialized per `raw.id` via [receiveLocks] across all three receive paths
+     * (open-chat listener, chat-list sync, and push reconcile) so concurrent
+     * arrivals never double-decrypt one Signal message.
+     *
+     * Returns the resulting domain [Message] when present in Room, or `null`
+     * when skipped (e.g. an un-usable row or a pending optimistic own send).
      */
-    private suspend fun reconcileRawMessage(raw: RawMessage, currentUid: String, chatId: String) {
+    private suspend fun reconcileRawMessage(
+        raw: RawMessage,
+        currentUid: String,
+        chatId: String,
+        autoDownload: Boolean = true,
+        syncLists: Boolean = true,
+    ): Message? = receiveLocks.withLock(raw.id) {
         val existing = messageDao.getMessageById(raw.id)
 
         // Handle deletion update for any message (own or incoming)
         if (existing != null && existing.deletedAt == null && raw.deletedAt != null) {
             messageDao.softDeleteMessage(raw.id, raw.deletedAt!!)
-            return
+            return@withLock existing.toDomain().copy(deletedAt = raw.deletedAt, content = "")
         }
 
         // Update reactions from remote even if message is already cached
@@ -496,33 +514,34 @@ class MessageRepositoryImpl @Inject constructor(
         if (raw.senderId == currentUid) {
             if (existing != null) {
                 acknowledgeOwnEcho(raw, existing)
-                return
+                return@withLock existing.toDomain()
             }
             // Skip if there's a pending optimistic message being replaced
             val pending = messageDao.getPendingSendingMessage(raw.chatId, raw.timestamp, raw.senderId)
-            if (pending != null) return
+            if (pending != null) return@withLock null
             val content = raw.content ?: "[Sent message]"
             val message = raw.toMessage(content)
             messageDao.upsertRecord(MessageRecord.fromDomain(message))
-            return
+            return@withLock message
         }
 
-        if (existing != null && existing.editedAt == raw.editedAt && existing.deletedAt == raw.deletedAt) return
+        if (existing != null && existing.editedAt == raw.editedAt && existing.deletedAt == raw.deletedAt) {
+            return@withLock existing.toDomain()
+        }
 
         // Determine whether this message needs Signal decryption.
         val needsDecryption = raw.ciphertext != null && raw.signalType != null
                 && !(raw.editedAt != null && raw.content != null)
 
         // Guard: skip messages with no usable content (unless deleted).
-        if (raw.deletedAt == null && !needsDecryption && raw.content == null) return
+        if (raw.deletedAt == null && !needsDecryption && raw.content == null) {
+            return@withLock existing?.toDomain()
+        }
 
         // Wrap decrypt+save in NonCancellable so that cancelling the
-        // collector (the user leaving the chat) cannot interrupt between
-        // Signal decryption (which advances the ratchet) and the Room
-        // insert (which records that decryption happened). Without this,
-        // a re-emitted snapshot would attempt to decrypt the same
-        // ciphertext again against an already-advanced ratchet, causing
-        // sporadic "unable to decrypt" errors.
+        // collector (the user leaving the chat or a sync cancelling mid-flight)
+        // cannot interrupt between Signal decryption (which advances the ratchet)
+        // and the Room insert (which records that decryption happened).
         withContext(NonCancellable) {
             val content = when {
                 raw.deletedAt != null -> ""
@@ -536,9 +555,14 @@ class MessageRepositoryImpl @Inject constructor(
                             )
                         else -> raw.content!!
                     }
-                } catch (e: Exception) {
-                    Log.e(TAG, "observeMessages: decrypt failed for msg=${raw.id} sender=${raw.senderId} chat=$chatId", e)
-                    "[Encrypted message — unable to decrypt]"
+                } catch (t: Throwable) {
+                    Log.e(TAG, "reconcileRawMessage: decrypt failed for msg=${raw.id} sender=${raw.senderId} chat=$chatId", t)
+                    // Never overwrite a previously decrypted message with an error placeholder.
+                    if (existing != null && existing.content != DECRYPT_ERROR_PLACEHOLDER && existing.deletedAt == null) {
+                        existing.content
+                    } else {
+                        DECRYPT_ERROR_PLACEHOLDER
+                    }
                 }
             }
 
@@ -547,19 +571,20 @@ class MessageRepositoryImpl @Inject constructor(
             // not the backend's to overwrite, and the partial entity cannot.
             writeRecord(MessageRecord.fromDomain(message), existing)
 
-            // Auto-download media for incoming messages
-            if (message.mediaUrl != null && existing?.localUri == null &&
+            // Auto-download media for incoming messages (listener and push paths only).
+            if (autoDownload && message.mediaUrl != null && existing?.localUri == null &&
                 message.type in AUTO_DOWNLOAD_TYPES
             ) {
                 tryAutoDownload(message)
             }
 
-            // Sync shared/unshared list to Room so ListsScreen updates immediately
-            if (message.type == MessageType.LIST && message.listId != null &&
+            // Sync shared/unshared list to Room so ListsScreen updates immediately.
+            if (syncLists && message.type == MessageType.LIST && message.listId != null &&
                 (message.listDiff?.shared == true || message.listDiff?.unshared == true)
             ) {
                 listRepository.get().fetchAndCacheList(message.listId!!)
             }
+            message
         }
     }
 
@@ -1466,93 +1491,45 @@ class MessageRepositoryImpl @Inject constructor(
         blockedUserIds: Set<String>
     ) {
         for (raw in rawList) {
+            currentCoroutineContext().ensureActive()
             if (raw.senderId != currentUid && raw.senderId in blockedUserIds) {
                 Log.d(TAG, "syncChatMessages: filtered blocked sender=${raw.senderId} msg=${raw.id} chat=$chatId")
                 continue
             }
-
-            val existing = messageDao.getMessageById(raw.id)
-
-            if (existing != null && existing.deletedAt == null && raw.deletedAt != null) {
-                messageDao.softDeleteMessage(raw.id, raw.deletedAt!!)
-                continue
-            }
-
-            if (existing != null && existing.reactions != raw.reactions) {
-                val reactionsJson = JSONObject().apply {
-                    raw.reactions.forEach { (k, v) -> put(k, v) }
-                }.toString()
-                messageDao.updateReactions(raw.id, reactionsJson)
-            }
-
-            if (raw.senderId == currentUid) {
-                if (existing != null) {
-                    acknowledgeOwnEcho(raw, existing)
-                    continue
-                }
-                val content = raw.content ?: "[Sent message]"
-                val message = raw.toMessage(content)
-                messageDao.upsertRecord(MessageRecord.fromDomain(message))
-                continue
-            }
-
-            // Incoming messages
-            if (existing != null && existing.editedAt == raw.editedAt && existing.deletedAt == raw.deletedAt) continue
-
-            val needsDecryption = raw.ciphertext != null && raw.signalType != null
-                    && !(raw.editedAt != null && raw.content != null)
-            if (raw.deletedAt == null && !needsDecryption && raw.content == null) continue
-
-            // NonCancellable for the same reason as in reconcileRawMessage: the
-            // decrypt advances the ratchet, so a cancellation between it and the
-            // insert — withContext discards its result when the job was cancelled
-            // while the block ran — would lose a plaintext no second decrypt can
-            // recover.
-            withContext(NonCancellable) {
-                val content = when {
-                    raw.deletedAt != null -> ""
-                    else -> try {
-                        when {
-                            raw.editedAt != null && raw.content != null -> raw.content
-                            needsDecryption -> signalManager.decrypt(
-                                raw.senderId, EncryptedMessage(raw.ciphertext!!, raw.signalType!!)
-                            )
-                            else -> raw.content!!
-                        }
-                    } catch (t: Throwable) {
-                        Log.e(TAG, "syncChatMessages: decrypt failed for msg=${raw.id} sender=${raw.senderId} chat=$chatId", t)
-                        "[Encrypted message — unable to decrypt]"
-                    }
-                }
-
-                val message = raw.toMessage(content)
-                writeRecord(MessageRecord.fromDomain(message), existing)
-            }
+            reconcileRawMessage(
+                raw = raw,
+                currentUid = currentUid,
+                chatId = chatId,
+                autoDownload = false,
+                syncLists = false,
+            )
         }
     }
 
     /**
-     * The one message a push names, through the same reconcile as the listener
-     * — so it inherits the own-echo guard, the decrypt and the auto-download.
-     * Skipped for the open chat, whose listener holds or is about to hold it;
-     * the blocked-sender filter is the listener's cached read. Everything else
-     * is logged and swallowed: the push handler has no way to retry, and the
-     * chat-list sync or opening the chat picks the message up regardless.
+     * The one message a push names, through the same locked reconcile as the
+     * listener — so it inherits the own-echo guard, the per-message decrypt
+     * lock, and auto-download. Skipped for the open chat, whose listener owns
+     * it; the blocked-sender filter is the listener's cached read. Returns the
+     * reconciled [Message] so the push handler can build a decrypted local
+     * notification preview without plaintext ever crossing FCM.
      */
-    override suspend fun reconcileFromPush(chatId: String, messageId: String) {
-        if (activeChatTracker.isActive(chatId)) return
-        val currentUid = authSource.currentUserId ?: return
-        try {
-            val raw = fetchMessageWithRetry(chatId, messageId) ?: return
+    override suspend fun reconcileFromPush(chatId: String, messageId: String): PushReconcileResult {
+        if (activeChatTracker.isActive(chatId)) return PushReconcileResult.Suppressed
+        val currentUid = authSource.currentUserId ?: return PushReconcileResult.Unavailable
+        return try {
+            val raw = fetchMessageWithRetry(chatId, messageId) ?: return PushReconcileResult.Unavailable
             if (raw.senderId != currentUid && raw.senderId in blockedUserIds(currentUid, chatId)) {
                 Log.d(TAG, "reconcileFromPush: filtered blocked sender=${raw.senderId} msg=$messageId chat=$chatId")
-                return
+                return PushReconcileResult.Suppressed
             }
             if (raw.ciphertext != null && raw.signalType != null) signalManager.ensureInitialized()
-            reconcileRawMessage(raw, currentUid, chatId)
+            val message = reconcileRawMessage(raw, currentUid, chatId)
+            if (message != null) PushReconcileResult.Reconciled(message) else PushReconcileResult.Unavailable
         } catch (t: Throwable) {
             t.rethrowIfCancellation()
             Log.w(TAG, "reconcileFromPush: failed for msg=$messageId chat=$chatId", t)
+            PushReconcileResult.Unavailable
         }
     }
 

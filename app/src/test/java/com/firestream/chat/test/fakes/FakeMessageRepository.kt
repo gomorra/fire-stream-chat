@@ -10,6 +10,7 @@ import com.firestream.chat.domain.model.MessageStatus
 import com.firestream.chat.domain.model.MessageType
 import com.firestream.chat.domain.model.OnlineMedia
 import com.firestream.chat.domain.model.OnlineMediaKind
+import com.firestream.chat.domain.model.PushReconcileResult
 import com.firestream.chat.domain.repository.MessageRepository
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -382,7 +383,10 @@ internal class FakeMessageRepository : MessageRepository {
 
     override suspend fun syncAllChatMessages(chatIds: List<String>) = Unit
 
-    override suspend fun reconcileFromPush(chatId: String, messageId: String) = Unit
+    var pushReconcileResult: PushReconcileResult = PushReconcileResult.Unavailable
+
+    override suspend fun reconcileFromPush(chatId: String, messageId: String): PushReconcileResult =
+        pushReconcileResult
 
     var messageAvailability: MessageAvailability =
         MessageAvailability.LOCAL

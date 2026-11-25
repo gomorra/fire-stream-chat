@@ -14,9 +14,12 @@ import com.firestream.chat.data.call.CallNotificationManager
 import com.firestream.chat.data.call.CallService
 import com.firestream.chat.data.call.CallStateHolder
 import com.firestream.chat.data.local.PreferencesDataStore
+import com.firestream.chat.data.repository.DECRYPT_ERROR_PLACEHOLDER
 import com.firestream.chat.domain.model.CallLogType
 import com.firestream.chat.domain.model.ChatType
+import com.firestream.chat.domain.model.Message
 import com.firestream.chat.domain.model.MessageType
+import com.firestream.chat.domain.model.PushReconcileResult
 import com.firestream.chat.domain.model.isOngoing
 import com.firestream.chat.domain.repository.AuthRepository
 import com.firestream.chat.domain.repository.ChatRepository
@@ -27,8 +30,11 @@ import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeoutOrNull
 import javax.inject.Inject
 
 @AndroidEntryPoint
@@ -45,6 +51,7 @@ class FCMService : FirebaseMessagingService() {
 
     private companion object {
         const val TAG = "FCMService"
+        const val PUSH_RECONCILE_TIMEOUT_MS = 4_000L
     }
 
     override fun onNewToken(token: String) {
@@ -78,17 +85,8 @@ class FCMService : FirebaseMessagingService() {
         val chatId = data["chatId"] ?: return
         val messageId = data["messageId"]
 
-        // The push is what runs for a closed chat on reconnect, so it fetches the
-        // message and its media itself; the repository yields to an open chat.
-        if (messageId != null) {
-            serviceScope.launch {
-                messageRepository.reconcileFromPush(chatId, messageId)
-            }
-        }
-
         // Suppress notification if the user is already viewing this chat
-        // in the foreground — they are actively reading messages, so an
-        // alert would be redundant noise.
+        // in the foreground — its live listener already reconciles the message.
         if (activeChatTracker.isActive(chatId)) {
             if (messageId != null) {
                 serviceScope.launch {
@@ -96,6 +94,16 @@ class FCMService : FirebaseMessagingService() {
                 }
             }
             return
+        }
+
+        // Start reconcile independently so a notification-wait timeout never
+        // cancels the background fetch, decrypt, or media auto-download.
+        val reconcileDeferred = if (messageId != null) {
+            serviceScope.async {
+                messageRepository.reconcileFromPush(chatId, messageId)
+            }
+        } else {
+            null
         }
         val chatType = data["chatType"] ?: "INDIVIDUAL"
         val chatName = data["chatName"]?.takeIf { it.isNotBlank() }
@@ -116,15 +124,19 @@ class FCMService : FirebaseMessagingService() {
             null
         }
 
-        serviceScope.launch {
+        // Await the bounded notification pipeline inside onMessageReceived so FCM's
+        // wakelock stays held until showNotification() runs (preventing Doze /
+        // cached-app freezing from dropping alerts). reconcileDeferred lives on
+        // serviceScope so a 4s timeout still lets background fetch/decrypt finish.
+        runBlocking(Dispatchers.IO) {
             // For group chats: if mention-only notifications are enabled,
             // suppress notification unless the current user is mentioned
             if (chatType == ChatType.GROUP.name) {
                 val mentionOnly = preferencesDataStore.mentionOnlyNotificationsFlow.first()
                 if (mentionOnly) {
-                    val currentUserId = authRepository.currentUserId ?: return@launch
+                    val currentUserId = authRepository.currentUserId ?: return@runBlocking
                     val isMentioned = mentions.contains(currentUserId) || mentions.contains("everyone")
-                    if (!isMentioned) return@launch
+                    if (!isMentioned) return@runBlocking
                 }
             }
 
@@ -133,14 +145,43 @@ class FCMService : FirebaseMessagingService() {
             if (chat != null) {
                 val muteUntil = chat.muteUntil
                 if (muteUntil == Long.MAX_VALUE || (muteUntil > 0 && muteUntil > System.currentTimeMillis())) {
-                    return@launch
+                    return@runBlocking
                 }
             }
 
+            val reconcileResult = if (reconcileDeferred != null && callText == null) {
+                withTimeoutOrNull(PUSH_RECONCILE_TIMEOUT_MS) { reconcileDeferred.await() }
+                    ?: PushReconcileResult.Unavailable
+            } else {
+                PushReconcileResult.Unavailable
+            }
+
+            val reconciled = when (reconcileResult) {
+                // Blocked sender or chat became active while reconciling — suppress notification.
+                PushReconcileResult.Suppressed -> return@runBlocking
+                is PushReconcileResult.Reconciled -> {
+                    // Message was deleted before the push arrived — suppress notification.
+                    if (reconcileResult.message.deletedAt != null) return@runBlocking
+                    reconcileResult.message
+                }
+                PushReconcileResult.Unavailable -> null
+            }
+
+            // Re-check after awaiting reconcile: the user may have opened the chat meanwhile.
+            if (activeChatTracker.isActive(chatId)) return@runBlocking
+
             val messageContent = data["messageContent"]
             showNotification(
-                chatId, senderId, senderName, chatName, chatType == ChatType.GROUP.name, messageType, messageContent,
-                overrideText = callText, messageId = messageId
+                chatId = chatId,
+                senderId = senderId,
+                senderName = senderName,
+                chatName = chatName,
+                isGroup = chatType == ChatType.GROUP.name,
+                messageType = messageType,
+                messageContent = messageContent,
+                reconciled = reconciled,
+                overrideText = callText,
+                messageId = messageId,
             )
         }
     }
@@ -226,6 +267,7 @@ class FCMService : FirebaseMessagingService() {
         isGroup: Boolean,
         messageType: String = "TEXT",
         messageContent: String? = null,
+        reconciled: Message? = null,
         overrideText: String? = null,
         // Target message id carried into the tap intent so the chat scrolls to
         // and highlights it: the latest message for message pushes, the reacted
@@ -250,18 +292,12 @@ class FCMService : FirebaseMessagingService() {
         if (isGroup) {
             style.setGroupConversation(true).setConversationTitle(chatName ?: chatId)
         }
-        val parsedType = runCatching { MessageType.valueOf(messageType) }.getOrNull()
-        val notificationText = overrideText ?: when (parsedType) {
-            MessageType.LIST -> messageContent?.takeIf { it.isNotBlank() } ?: "\uD83D\uDCCB Shared a list"
-            MessageType.IMAGE -> "\uD83D\uDCF7 Photo"
-            MessageType.VIDEO -> "\uD83C\uDFA5 Video"
-            MessageType.VOICE -> "\uD83C\uDF99\uFE0F Voice message"
-            MessageType.DOCUMENT -> "\uD83D\uDCCE Document"
-            MessageType.POLL -> "\uD83D\uDCCA Poll"
-            MessageType.STICKER -> "Sticker"
-            MessageType.GIF -> "\uD83C\uDF9E\uFE0F GIF"
-            else -> "New message"
-        }
+        val notificationText = notificationPreviewText(
+            messageType = messageType,
+            messageContent = messageContent,
+            reconciled = reconciled,
+            overrideText = overrideText,
+        )
         style.addMessage(notificationText, System.currentTimeMillis(), sender)
 
         val intent = Intent(this, MainActivity::class.java).apply {
@@ -298,6 +334,39 @@ class FCMService : FirebaseMessagingService() {
  */
 internal fun notificationPartnerHint(isGroup: Boolean, senderId: String): String =
     if (isGroup) "" else senderId
+
+/**
+ * Formats the notification line for a pushed message, preferring locally
+ * reconciled (decrypted) content from Room when the FCM data payload omitted
+ * `messageContent` (as release builds do for privacy). Never shows the
+ * decrypt-failure placeholder in a notification.
+ */
+internal fun notificationPreviewText(
+    messageType: String,
+    messageContent: String?,
+    reconciled: Message?,
+    overrideText: String? = null,
+): String {
+    if (overrideText != null) return overrideText
+    if (reconciled?.deletedAt != null) return "New message"
+    val resolvedType = reconciled?.type ?: runCatching { MessageType.valueOf(messageType) }.getOrNull()
+    val body = reconciled?.content
+        ?.takeIf { it.isNotBlank() && it != DECRYPT_ERROR_PLACEHOLDER }
+        ?: messageContent?.takeIf { it.isNotBlank() }
+    return when (resolvedType) {
+        MessageType.TEXT -> body ?: "New message"
+        MessageType.LIST -> body ?: "\uD83D\uDCCB Shared a list"
+        MessageType.IMAGE -> if (body != null) "\uD83D\uDCF7 $body" else "\uD83D\uDCF7 Photo"
+        MessageType.VIDEO -> if (body != null) "\uD83C\uDFA5 $body" else "\uD83C\uDFA5 Video"
+        MessageType.VOICE -> "\uD83C\uDF99\uFE0F Voice message"
+        MessageType.DOCUMENT -> if (body != null) "\uD83D\uDCCE $body" else "\uD83D\uDCCE Document"
+        MessageType.LOCATION -> if (body != null) "\uD83D\uDCCD $body" else "\uD83D\uDCCD Location"
+        MessageType.POLL -> "\uD83D\uDCCA Poll"
+        MessageType.STICKER -> "Sticker"
+        MessageType.GIF -> if (body != null) "\uD83C\uDF9E\uFE0F $body" else "\uD83C\uDF9E\uFE0F GIF"
+        else -> body ?: "New message"
+    }
+}
 
 /**
  * The notification text for a pushed call message, or null when the call needs no notification.

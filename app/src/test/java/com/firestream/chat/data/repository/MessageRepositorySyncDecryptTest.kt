@@ -2,30 +2,47 @@ package com.firestream.chat.data.repository
 
 import com.firestream.chat.data.crypto.SignalManager
 import com.firestream.chat.data.local.dao.MessageDao
+import com.firestream.chat.data.local.entity.MessageEntity
 import com.firestream.chat.data.local.entity.MessageRecord
 import com.firestream.chat.data.remote.source.AuthSource
 import com.firestream.chat.data.remote.source.MessageSource
 import com.firestream.chat.data.remote.source.RawMessage
+import com.firestream.chat.domain.model.Message
+import com.firestream.chat.domain.model.MessageStatus
+import com.firestream.chat.domain.model.MessageType
+import com.firestream.chat.domain.model.PushReconcileResult
 import io.mockk.coEvery
+import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 import org.junit.Assert.assertEquals
 import org.junit.Test
 import org.signal.libsignal.protocol.message.CiphertextMessage
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicInteger
 import kotlin.coroutines.coroutineContext
 
 /**
- * The chat-list sync decrypts incoming messages like the chat listener does,
- * and a Signal decrypt is not repeatable: it advances the ratchet, so a
- * plaintext that is not written to Room is gone. The sync must therefore
- * finish decrypt-and-insert once it has started, even if the sync is cancelled
- * meanwhile (`withContext` discards the result of a block that ran while its
- * job was cancelled). [MessageRepositoryImpl.reconcileRawMessage] has had that
- * guard since the first decrypt bug; this pins it on the sync path too.
+ * Verifies the unified locked receive path in [MessageRepositoryImpl]:
+ * - A sync cancelled mid-decrypt finishes writing the plaintext to Room.
+ * - Concurrent arrivals from listener, chat-list sync, and push reconcile for
+ *   the same encrypted message decrypt it exactly once and never race on the
+ *   ratchet.
+ * - A decrypt failure never overwrites an already-decrypted row with the error
+ *   placeholder.
  */
 class MessageRepositorySyncDecryptTest {
 
@@ -78,5 +95,107 @@ class MessageRepositorySyncDecryptTest {
         sync.join()
 
         assertEquals(listOf("hello"), inserted.map { it.content })
+    }
+
+    @Test
+    fun `concurrent listener, sync, and push arrivals decrypt an encrypted message exactly once`() = runTest {
+        every { authSource.currentUserId } returns "uid1"
+        val store = ConcurrentHashMap<String, MessageEntity>()
+        val roomRows = MutableStateFlow<List<MessageEntity>>(emptyList())
+        coEvery { messageDao.getMessageById(any()) } answers { store[firstArg()] }
+        coEvery { messageDao.upsertRecord(any()) } answers {
+            val rec = firstArg<MessageRecord>()
+            store[rec.id] = MessageEntity(record = rec)
+            roomRows.value = store.values.toList()
+        }
+        coEvery { messageDao.updateRecord(any()) } answers {
+            val rec = firstArg<MessageRecord>()
+            store[rec.id] = MessageEntity(record = rec)
+            roomRows.value = store.values.toList()
+        }
+        every { messageDao.getMessagesByChatId("chat1") } returns roomRows
+        every { messageSource.observeMessages("chat1") } returns flowOf(listOf(incoming))
+        coEvery { messageSource.fetchMessages("chat1") } returns listOf(incoming)
+        coEvery { messageSource.fetchMessage("chat1", "in1") } returns incoming
+
+        val decryptEntered = CompletableDeferred<Unit>()
+        val releaseDecrypt = CompletableDeferred<Unit>()
+        val decryptCalls = AtomicInteger(0)
+        coEvery { signalManager.decrypt("peer1", any()) } coAnswers {
+            val callNum = decryptCalls.incrementAndGet()
+            decryptEntered.complete(Unit)
+            releaseDecrypt.await()
+            if (callNum == 1) "secret hello" else throw IllegalStateException("ratchet already advanced")
+        }
+
+        val repository = messageRepository(
+            messageDao = messageDao,
+            messageSource = messageSource,
+            authSource = authSource,
+            signalManager = signalManager,
+        )
+
+        val syncJob = async(Dispatchers.IO) { repository.syncAllChatMessages(listOf("chat1")) }
+        decryptEntered.await()
+
+        // While sync holds the per-message lock mid-decrypt, push and open-chat listener arrive.
+        // The listener stays active until Room actually emits the decrypted row.
+        val pushJob = async(Dispatchers.IO) { repository.reconcileFromPush("chat1", "in1") }
+        val listenerJob = async(Dispatchers.IO) { repository.getMessages("chat1").first { it.isNotEmpty() } }
+
+        // Wait deterministically until all 3 callers (sync, push, listener) are holding/waiting on receiveLocks["in1"].
+        withContext(Dispatchers.IO) {
+            withTimeout(2_000L) {
+                while (repository.receiveLocks.userCount("in1") < 3) {
+                    delay(5)
+                }
+            }
+        }
+        releaseDecrypt.complete(Unit)
+
+        syncJob.await()
+        val pushResult = pushJob.await()
+        val listenerMessages = listenerJob.await()
+
+        assertEquals(1, decryptCalls.get())
+        assertEquals("secret hello", store["in1"]?.content)
+        assertEquals("secret hello", (pushResult as PushReconcileResult.Reconciled).message.content)
+        assertEquals(listOf("secret hello"), listenerMessages.map { it.content })
+    }
+
+    @Test
+    fun `decrypt failure never overwrites an already-decrypted row with the error placeholder`() = runTest {
+        every { authSource.currentUserId } returns "uid1"
+        val existingRow = MessageEntity.fromDomain(
+            Message(
+                id = "in1",
+                chatId = "chat1",
+                senderId = "peer1",
+                content = "original decrypted text",
+                type = MessageType.TEXT,
+                status = MessageStatus.SENT,
+                timestamp = 1_000L,
+            )
+        )
+        coEvery { messageDao.getMessageById("in1") } returns existingRow
+        val updated = mutableListOf<MessageRecord>()
+        coEvery { messageDao.updateRecord(any()) } answers { updated += firstArg<MessageRecord>() }
+        coEvery { messageSource.fetchMessages("chat1") } returns listOf(
+            incoming.copy(editedAt = 2_000L, content = null)
+        )
+        coEvery { signalManager.decrypt("peer1", any()) } throws IllegalStateException("duplicate message")
+
+        val repository = messageRepository(
+            messageDao = messageDao,
+            messageSource = messageSource,
+            authSource = authSource,
+            signalManager = signalManager,
+        )
+
+        repository.syncAllChatMessages(listOf("chat1"))
+
+        assertEquals(1, updated.size)
+        assertEquals("original decrypted text", updated.single().content)
+        coVerify(exactly = 1) { signalManager.decrypt("peer1", any()) }
     }
 }

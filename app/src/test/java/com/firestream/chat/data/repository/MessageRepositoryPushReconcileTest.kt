@@ -18,6 +18,7 @@ import com.firestream.chat.domain.model.Message
 import com.firestream.chat.domain.model.MessageAvailability
 import com.firestream.chat.domain.model.MessageStatus
 import com.firestream.chat.domain.model.MessageType
+import com.firestream.chat.domain.model.PushReconcileResult
 import io.mockk.Runs
 import io.mockk.coEvery
 import io.mockk.coVerify
@@ -127,8 +128,9 @@ class MessageRepositoryPushReconcileTest {
     fun `the open chat is left to its listener`() = runTest {
         activeChatTracker.setActive(CHAT)
 
-        repository.reconcileFromPush(CHAT, "m1")
+        val result = repository.reconcileFromPush(CHAT, "m1")
 
+        assertEquals(PushReconcileResult.Suppressed, result)
         coVerify(exactly = 0) { messageSource.fetchMessage(any(), any()) }
         coVerify(exactly = 0) { messageDao.upsertRecord(any()) }
     }
@@ -148,8 +150,9 @@ class MessageRepositoryPushReconcileTest {
         coEvery { userSource.getBlockedUserIds(SELF) } returns setOf(PEER)
         coEvery { messageSource.fetchMessage(CHAT, "m1") } returns photo("m1")
 
-        repository.reconcileFromPush(CHAT, "m1")
+        val result = repository.reconcileFromPush(CHAT, "m1")
 
+        assertEquals(PushReconcileResult.Suppressed, result)
         coVerify(exactly = 0) { messageDao.upsertRecord(any()) }
     }
 
@@ -218,8 +221,9 @@ class MessageRepositoryPushReconcileTest {
         )
         coEvery { signalManager.decrypt(PEER, any()) } returns "hello"
 
-        repository.reconcileFromPush(CHAT, "m1")
+        val result = repository.reconcileFromPush(CHAT, "m1")
 
+        assertEquals("hello", (result as PushReconcileResult.Reconciled).message.content)
         coVerify(exactly = 1) { signalManager.ensureInitialized() }
         coVerify(exactly = 1) { messageDao.upsertRecord(match { it.id == "m1" && it.content == "hello" }) }
     }

@@ -29,4 +29,7 @@ class KeyedMutex<K : Any> {
 
     /** Whether a lock object currently exists for [key] — somebody holds or waits for it. */
     fun isTracked(key: K): Boolean = synchronized(entries) { key in entries }
+
+    /** How many callers currently hold or wait for [key]. */
+    fun userCount(key: K): Int = synchronized(entries) { entries[key]?.users ?: 0 }
 }
