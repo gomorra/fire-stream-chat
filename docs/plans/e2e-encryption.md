@@ -243,11 +243,11 @@ Deploy `storage.rules`, install the release build on **both** phones, and run:
 
 ---
 
-## Phase 4 — One-Time Plaintext Scrub & Default-On E2EE
+## Phase 4 — One-Time Plaintext Scrub & Always-On 1:1 E2EE
 
-### Step 9 — One-time plaintext scrub script and E2EE default-on
+### Step 9 — One-time plaintext scrub script and always-on 1:1 E2EE
 
-Safely erase all legacy plaintext from Firestore and Firebase Storage once both phones have verified encrypted backups, and make E2EE on by default.
+Safely erase all legacy plaintext from Firestore and Firebase Storage once both phones have verified encrypted backups, and make 1:1 E2EE always on in release builds (removing the opt-out toggle).
 
 - **Host-side scrub tool (`scripts/scrub-plaintext.mjs`):**
   - Uses Firebase Admin SDK (same credential setup as `tools/sticker-namer/` or `GOOGLE_APPLICATION_CREDENTIALS`).
@@ -261,8 +261,9 @@ Safely erase all legacy plaintext from Firestore and Firebase Storage once both 
     2. Rewrites `chats/{chatId}.lastMessageContent` to `"Message"` wherever it holds plaintext on a 1:1 chat.
     3. Lists `media/{chatId}/*` in Firebase Storage: deletes every object that does **not** end in `.enc`, leaving all encrypted `.enc` blobs, `backups/`, `avatars/`, and `stickers/` untouched.
     4. Prints a summary report (docs deleted, chat previews scrubbed, Storage objects deleted, bytes freed).
-- **Default E2EE on (`PreferencesDataStore.kt`, `SettingsScreen.kt`):**
-  - Flip `e2eEncryptionEnabledFlow` default from `false` to `true` (so any release install encrypts 1:1 chats automatically; keep the Settings toggle with the existing disable warning dialog).
+- **Always-on 1:1 E2EE (`MessageWriter.kt`, `PreferencesDataStore.kt`, `SettingsScreen.kt`, `SettingsViewModel.kt`):**
+  - Remove the `e2eEncryptionEnabledFlow` opt-out gate so release builds of the `firebase` flavor always encrypt 1:1 messages (`BuildConfig.SUPPORTS_SIGNAL && !BuildConfig.DEBUG` remains the only gate).
+  - Remove the End-to-End Encryption toggle and disable-warning dialog from `SettingsScreen` (optionally replacing with a read-only status row *"End-to-End Encryption — Always on for 1:1 chats"*).
 - **Docs update:** Update `CLAUDE.md`, `docs/ARCHITECTURE.md`, `docs/SCHEMA-FIRESTORE.md`, `docs/SCHEMA-ROOM.md`, and `docs/BACKLOG.md` to reflect the shipped state.
 - **Tests:** Unit tests for the scrub script's safety gate and filtering logic (`scripts/scrub-plaintext.test.mjs`, pure logic extracted so it runs via `node --test` without live Firebase credentials).
 
