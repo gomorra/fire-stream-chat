@@ -32,8 +32,11 @@ object DatabaseModule {
             AppDatabase::class.java,
             "fire_stream_chat.db"
         )
-            .addMigrations(AppDatabase.MIGRATION_18_19)
-            .fallbackToDestructiveMigration()
+            .addMigrations(*AppDatabase.ALL_MIGRATIONS)
+            // Destructive reset is permitted only for pre-v35 legacy installs.
+            // Every bump from v35 onward must ship an explicit Migration so
+            // decrypted E2EE history is never wiped on upgrade.
+            .fallbackToDestructiveMigrationFrom(*AppDatabase.LEGACY_DESTRUCTIVE_VERSIONS)
             .build()
     }
 
@@ -44,7 +47,9 @@ object DatabaseModule {
             context,
             SignalDatabase::class.java,
             "signal.db"
-        ).fallbackToDestructiveMigration().build()
+        )
+            .addMigrations(*SignalDatabase.ALL_MIGRATIONS)
+            .build()
     }
 
     @Provides

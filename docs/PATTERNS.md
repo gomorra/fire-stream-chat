@@ -90,14 +90,14 @@ When adding a new convention, append a section here in the same shape: **definit
 
 ## Room version bump rule
 
-**Definition.** Whenever an entity column or table is added, removed, or renamed, bump the `version` field on `@Database` in `app/src/main/java/com/firestream/chat/data/local/AppDatabase.kt` or `data/local/SignalDatabase.kt`, whichever holds the entity. `fallbackToDestructiveMigration()` is enabled, so the version bump triggers a clean rebuild on next launch — but without it, Room's identity-hash check crashes the app at startup instead of running the migration.
+**Definition.** Whenever an entity column or table is added, removed, or renamed, bump the `version` field on `@Database` in `app/src/main/java/com/firestream/chat/data/local/AppDatabase.kt` or `data/local/SignalDatabase.kt`, add an explicit `Migration(n, n + 1)` to `ALL_MIGRATIONS`, commit the new schema JSON under `app/schemas/`, and add a migration test in `app/src/test/java/com/firestream/chat/data/local/AppDatabaseMigrationTest.kt`. Destructive fallback is restricted to legacy `AppDatabase` versions `1..34` and disabled completely on `SignalDatabase` so upgrades never wipe decrypted E2EE history or Signal keys.
 
 **Use when.** Touching anything in `data/local/entity/` that changes the schema.
 **Don't use when.** Adding `@Ignore` annotations or non-schema additions like a `companion object` constant.
 
-**Example.** `app/src/main/java/com/firestream/chat/data/local/AppDatabase.kt:41–52` — `MIGRATION_18_19` registered alongside the version bump from 18 → 19 when the Signal tables were split out.
+**Example.** `app/src/main/java/com/firestream/chat/data/local/AppDatabase.kt:75` (`ALL_MIGRATIONS`) and `app/src/test/java/com/firestream/chat/data/local/AppDatabaseMigrationTest.kt:30`.
 
-**Trap.** Forgetting the bump means the app crashes at first launch with a schema-mismatch error. The crash is loud but easy to misdiagnose as unrelated to the entity change in the same commit.
+**Trap.** Bumping `version` without registering a `Migration` in `ALL_MIGRATIONS` crashes at startup with `IllegalStateException: A migration from N to N+1 was required but not found`. Skipping the version bump crashes with a schema identity-hash mismatch.
 
 **Trap: two branches that both bump.** Git merges two bumps to the same number without a conflict. The merged schema is then a third one under a version that two builds already use, and a phone with either build crashes at startup. After a merge where both sides changed `AppDatabase.kt`, set the version above both sides.
 

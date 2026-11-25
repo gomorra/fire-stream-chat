@@ -2,11 +2,13 @@
 // Responsibility: Application-data Room database (`fire_stream_chat.db`).
 //   10 entities: Users, Messages, Chats, Contacts, Lists, Reminders, the sticker
 //   library's Stickers, StickerPacks and StickerPackItems, and the message sync's
-//   state per chat (MessageSyncState). Signal Protocol tables
-//   were split out into SignalDatabase (`signal.db`) at version 19 so destructive
-//   migrations on this DB no longer wipe key material.
-// Owns: @Database `version` field — bump on any column/table add/remove/rename
-//   (Pattern: docs/PATTERNS.md#room-version-bump-rule). Migration registrations.
+//   state per chat (MessageSyncState). Signal Protocol tables live in
+//   SignalDatabase (`signal.db`).
+// Owns: @Database `version` (CURRENT_VERSION) and explicit `Migration`s
+//   (ALL_MIGRATIONS). Every schema change from v35 onward bumps `version`, adds
+//   an explicit Migration, commits the exported schema JSON under `app/schemas/`,
+//   and adds a test in AppDatabaseMigrationTest
+//   (Pattern: docs/PATTERNS.md#room-version-bump-rule).
 // Collaborators: DatabaseModule (Hilt provider), all DAOs in dao/, all entities
 //   in entity/.
 // Don't put here: Signal Protocol entities (SignalDatabase), DataStore
@@ -19,7 +21,6 @@ import androidx.room.Database
 import androidx.room.RoomDatabase
 import androidx.room.TypeConverters
 import androidx.room.migration.Migration
-import androidx.sqlite.db.SupportSQLiteDatabase
 import com.firestream.chat.data.local.dao.ChatDao
 import com.firestream.chat.data.local.dao.ContactDao
 import com.firestream.chat.data.local.dao.ListDao
@@ -52,8 +53,8 @@ import com.firestream.chat.data.local.entity.UserEntity
         StickerPackItemEntity::class,
         MessageSyncStateEntity::class
     ],
-    version = 35,
-    exportSchema = false
+    version = AppDatabase.CURRENT_VERSION,
+    exportSchema = true
 )
 @TypeConverters(Converters::class)
 abstract class AppDatabase : RoomDatabase() {
@@ -67,18 +68,16 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun stickerDao(): StickerDao
 
     companion object {
-        // Signal Protocol tables moved to a dedicated SignalDatabase so that destructive
-        // schema migrations on this database no longer wipe key material.
-        val MIGRATION_18_19 = object : Migration(18, 19) {
-            override fun migrate(db: SupportSQLiteDatabase) {
-                db.execSQL("DROP TABLE IF EXISTS signal_identity")
-                db.execSQL("DROP TABLE IF EXISTS signal_prekeys")
-                db.execSQL("DROP TABLE IF EXISTS signal_signed_prekeys")
-                db.execSQL("DROP TABLE IF EXISTS signal_sessions")
-                db.execSQL("DROP TABLE IF EXISTS signal_kyber_prekeys")
-                db.execSQL("DROP TABLE IF EXISTS signal_sender_keys")
-                db.execSQL("DROP TABLE IF EXISTS signal_trusted_identities")
-            }
-        }
+        const val CURRENT_VERSION = 35
+
+        /** Pre-v35 versions allowed to upgrade destructively. Installs at v35 or newer keep their decrypted history. */
+        val LEGACY_DESTRUCTIVE_VERSIONS: IntArray = (1..34).toList().toIntArray()
+
+        /**
+         * Explicit migrations from v35 onward. Legacy pre-v35 installs upgrade via
+         * [LEGACY_DESTRUCTIVE_VERSIONS] (Room forbids overlapping migration
+         * endpoints with fallbackToDestructiveMigrationFrom).
+         */
+        val ALL_MIGRATIONS: Array<Migration> = emptyArray()
     }
 }

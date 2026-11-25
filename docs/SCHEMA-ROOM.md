@@ -2,14 +2,14 @@
 
 Local Room database schema — tables, columns, and relationships. Room is the single source of truth for the UI; Firestore and RTDB sync into it.
 
-The app uses **two Room databases** so that destructive schema migrations on the application data never wipe Signal Protocol key material:
+The app uses **two Room databases** to keep Signal Protocol key material separate from application data:
 
 | Database         | File              | Tables                                                                                                                                                  |
 | ---------------- | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `AppDatabase`    | `fire_stream_chat.db` | `users`, `chats`, `messages`, `contacts`, `lists`, `reminders`, `stickers`, `sticker_packs`, `sticker_pack_items`, `message_sync_state` |
 | `SignalDatabase` | `signal.db`       | `signal_identities`, `signal_sessions`, `signal_prekeys`, `signal_signed_prekeys`, `signal_kyber_prekeys`, `signal_sender_keys`, `signal_trusted_identities` |
 
-`AppDatabase.MIGRATION_18_19` drops the legacy Signal tables from `fire_stream_chat.db`; from version 19 onward Signal keys live exclusively in `signal.db`.
+Both databases export their schemas under `app/schemas/` and register explicit `Migration`s in `ALL_MIGRATIONS`. Destructive fallback is limited to legacy `AppDatabase` versions `1..34` and disabled completely on `SignalDatabase`.
 
 **`messages` is two halves (version 28).** `MessageEntity` embeds a `MessageRecord` — every column the backend also holds — and keeps the local-only columns beside it: `localUri`, `isStarred` and the outbox bookkeeping below. `MessageRecord` doubles as Room's partial entity for the table: a snapshot, a sync, an edit echo or a poll vote is `MessageDao.upsertRecord`, which inserts the row when it is new and otherwise overwrites exactly the record's columns, so the local ones survive without being copied across. The local columns change only through column updates, the outbox insert of an own send (`MessageDao.insertOutbox`) and the SENT transaction (`MessageDao.markSent`). `isStarred` and `outboxAttempts` carry `DEFAULT 0` so a partial insert can omit them.
 
@@ -22,7 +22,7 @@ The app uses **two Room databases** so that destructive schema migrations on the
 | `outboxPeerIdentity` | The peer identity key that ciphertext was encrypted for; a later attempt reuses the bytes only while the peer still publishes it (`SignalManager.isCurrentIdentity`), and encrypts again after a re-registration |
 | `outboxAttempts` | Pipeline runs started for the row; above 0 an earlier write may have landed, so the next write is create-if-absent |
 
-Every `AppDatabase` version is reached by destructive migration, except 18 → 19. The current version is the `version` in `AppDatabase.kt`.
+From `AppDatabase` v35 and `SignalDatabase` v1 onward, every version bump ships an explicit `Migration` and test in `AppDatabaseMigrationTest`. The current version is `CURRENT_VERSION` in `AppDatabase.kt` / `SignalDatabase.kt`.
 
 `isVideoCall` is a backend column on `MessageRecord`. It is true for a `CALL` message whose call was started as video, and it mirrors the Firestore field `video`.
 

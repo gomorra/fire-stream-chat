@@ -10,6 +10,7 @@ plugins {
     alias(libs.plugins.google.services)
     alias(libs.plugins.roborazzi)
     alias(libs.plugins.androidx.baselineprofile)
+    alias(libs.plugins.androidx.room)
 }
 
 // Runs `git <args>` at configure time. Returns "" on any failure so callers can
@@ -231,6 +232,14 @@ android {
         }
     }
 
+    sourceSets {
+        // Expose exported Room schemas to Robolectric MigrationTestHelper in debug
+        // unit tests without shipping them in release APKs.
+        getByName("debug") {
+            assets.srcDir("$projectDir/schemas")
+        }
+    }
+
     testOptions {
         // Required for Robolectric to access Android resources (res/values, fonts, etc.)
         // when running Compose UI tests on the JVM.
@@ -250,6 +259,9 @@ android {
         // and a Compose class init can fail with NoClassDefFoundError in whatever
         // test runs next (docs/GOTCHAS.md). 256 MB is the C2 default.
         unitTests.all { test ->
+            // 1800+ JVM tests (Robolectric Compose screens, Room migrations, Konsist)
+            // exceed Gradle's default 512 MB test-worker heap.
+            test.maxHeapSize = "2g"
             test.jvmArgs("-Xshare:off", "-XX:TieredStopAtLevel=1", "-XX:ReservedCodeCacheSize=256m")
         }
     }
@@ -308,6 +320,21 @@ tasks.withType<JavaCompile>().configureEach {
 }
 tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach {
     exclude("**/byRounds/**")
+}
+
+room {
+    schemaDirectory("$projectDir/schemas")
+}
+
+// Keep debug asset merging ordered after KSP so newly exported Room schema JSONs
+// are visible to MigrationTestHelper on the very first run after a schema bump.
+afterEvaluate {
+    listOf("Firebase", "Pocketbase").forEach { flavor ->
+        val kspTask = tasks.findByName("ksp${flavor}DebugKotlin")
+        if (kspTask != null) {
+            tasks.findByName("merge${flavor}DebugAssets")?.mustRunAfter(kspTask)
+        }
+    }
 }
 
 baselineProfile {
@@ -519,6 +546,7 @@ dependencies {
     testImplementation(libs.robolectric)
     testImplementation(libs.mockwebserver)
     testImplementation(libs.work.testing)
+    testImplementation(libs.room.testing)
     // Konsist parses production Kotlin sources to enforce architecture rules
     // (see test/.../architecture/ArchitectureTest.kt).
     testImplementation(libs.konsist)
