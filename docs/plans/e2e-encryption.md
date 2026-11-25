@@ -85,6 +85,8 @@ Prevent any future Room version bump from wiping decrypted messages or Signal ke
 - Add `AppDatabaseMigrationTest` verifying schema load at v35 (and establishing the harness for every subsequent migration in this plan).
 - Update `CLAUDE.md` and `docs/PATTERNS.md` § *Room version bump rule* to require an explicit `Migration` + test for every v35+ bump.
 
+**Shipped** (`90997900`): `androidx.room` plugin exports `AppDatabase/35.json` and `SignalDatabase/1.json`, `DatabaseModule` restricts destructive fallback to legacy `AppDatabase` `1..34` and removes it from `SignalDatabase`, and `AppDatabaseMigrationTest` verifies baseline schemas plus runtime refusal on unmigrated versions.
+
 ### Step 2 — Rotating pre-key pool and stale-bundle race fix *(rules via `firestore-rules-author` + `firebase-security-rules-auditor`)*
 
 Close both `SignalManager` protocol defects before turning encryption on.
@@ -102,6 +104,8 @@ Close both `SignalManager` protocol defects before turning encryption on.
   - Fix stale-bundle race in `SignalManager.encrypt`: inside `sessionLock(recipientId)`, if `storedIdentity != null && storedIdentity != bundle.identityKey`, re-fetch the bundle once under the lock before calling `deleteAllSessions` + `deleteTrustedIdentity` so a stale in-flight encrypt cannot tear down a freshly built session.
 - **Tests:** Real-libsignal tests in `SignalManagerTest` covering (a) two concurrent new contacts claiming distinct pre-keys, (b) session establishment when one-time pre-key pool is empty (signed + Kyber fallback), (c) failed replenish publish leaving remaining local pre-keys intact and retried on next init, (d) stale-bundle re-fetch guard. Update `PocketBaseKeySource` stub if `KeySource` signature changes.
 
+**Shipped** (`1c9eb76d`): `SignalDatabase` v1→v2 (`MIGRATION_1_2`, atomic `saveInitialKeys`), 50-key rotating pool with local+remote count sync and offline timeouts, `claimPreKeyBundle` callable Cloud Function with blocked-caller guard (`20/20` tests), owner-only `oneTimePreKeys` Firestore rules (`101/101` emulator tests), and locked identity re-fetch guard in `SignalManager.encrypt`.
+
 ### Step 3 — Unified locked receive path and decrypted push notifications
 
 Close the double-decrypt race across listener, chat-list sync, and push reconcile, and show decrypted text in local notifications.
@@ -114,6 +118,8 @@ Close the double-decrypt race across listener, chat-list sync, and push reconcil
 - **Notification preview (`FCMService.kt`):**
   - When a push arrives for an inactive chat and `messageId != null`, run `withTimeoutOrNull(4_000L) { messageRepository.reconcileFromPush(chatId, messageId) }` before calling `showNotification`, then read the reconciled message from Room (`messageRepository.getMessageById(messageId)` or return `Message?` from `reconcileFromPush`) to populate the notification text when `data["messageContent"]` is absent. Fall back to generic type text (`"New message"`, `"📷 Photo"`) on timeout or error.
 - **Tests:** Regression tests in `MessageRepositorySyncDecryptTest` proving concurrent calls from listener + sync + push for the same encrypted `raw.id` call `signalManager.decrypt` **exactly once**, and tests for `FCMService` using the reconciled plaintext when push payload omits `messageContent`.
+
+**Shipped** (`d06b046d`): unified all three receive paths under `MessageRepositoryImpl.receiveLocks` (`KeyedMutex`), prevented decrypt-error overwrites of already-decrypted rows, added `PushReconcileResult` (`Reconciled`/`Suppressed`/`Unavailable`), and updated `FCMService` to await bounded reconcile inside `onMessageReceived` for decrypted notification previews with blocked/deleted suppression.
 
 ### ‖ Checkpoint 1 — Hardware smoke test (1:1 text E2EE)
 
