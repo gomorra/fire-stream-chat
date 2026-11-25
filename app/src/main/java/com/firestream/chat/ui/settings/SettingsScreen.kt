@@ -29,6 +29,7 @@ import androidx.compose.material.icons.filled.Archive
 import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Description
@@ -118,6 +119,7 @@ fun SettingsScreen(
     onScheduledRemindersClick: () -> Unit = {},
     onArchivedChatsClick: () -> Unit = {},
     onStickersClick: () -> Unit = {},
+    onChatBackupClick: () -> Unit = {},
     onProfileClick: (userId: String) -> Unit,
     onSignedOut: () -> Unit = {},
     focusUpdate: Boolean = false,
@@ -249,6 +251,25 @@ fun SettingsScreen(
                 subtitle = "Chats you've archived",
                 onClick = onArchivedChatsClick
             )
+
+            if (uiState.backupStatus.isSupported) {
+                val lastBackupAt = uiState.backupStatus.lastBackupAt
+                val backupSubtitle = when {
+                    lastBackupAt != null && uiState.backupStatus.lastBackupLegacyMediaComplete ->
+                        "Backed up ✓ · ${formatBackupTimestamp(lastBackupAt)}"
+                    lastBackupAt != null ->
+                        "Last backup: ${formatBackupTimestamp(lastBackupAt)}"
+                    uiState.backupStatus.isPassphraseConfigured ->
+                        "Passphrase set · Not backed up yet"
+                    else -> "Not set up"
+                }
+                SettingsItem(
+                    icon = Icons.Default.CloudUpload,
+                    title = "Chat Backup",
+                    subtitle = backupSubtitle,
+                    onClick = onChatBackupClick
+                )
+            }
 
             Spacer(Modifier.height(8.dp))
             SectionHeader("Appearance")

@@ -14,12 +14,14 @@ import coil.ImageLoader
 import coil.ImageLoaderFactory
 import coil.disk.DiskCache
 import coil.memory.MemoryCache
+import com.firestream.chat.data.local.PreferencesDataStore
 import com.firestream.chat.data.outbox.OutboxScheduler
 import com.firestream.chat.data.reminder.ReminderNotificationChannel
 import com.firestream.chat.data.timer.TimerNotificationChannel
 import com.firestream.chat.data.util.CurrentActivityHolder
 import com.firestream.chat.data.util.ImageEditRasterizer
 import com.firestream.chat.data.util.ProfileImageManager
+import com.firestream.chat.data.worker.BackupScheduler
 import com.firestream.chat.data.worker.MediaBackfillWorker
 import com.firestream.chat.data.worker.StickerSyncScheduler
 import com.firestream.chat.data.worker.UpdateCheckWorker
@@ -28,6 +30,7 @@ import com.firestream.chat.di.FlavorBootstrap
 import com.firestream.chat.domain.repository.AuthRepository
 import dagger.hilt.android.HiltAndroidApp
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
 import java.io.File
@@ -70,6 +73,12 @@ class FireStreamApp : Application(), Configuration.Provider, ImageLoaderFactory 
     lateinit var profileImageManager: ProfileImageManager
 
     @Inject
+    lateinit var backupScheduler: BackupScheduler
+
+    @Inject
+    lateinit var preferencesDataStore: PreferencesDataStore
+
+    @Inject
     @ApplicationScope
     lateinit var appScope: CoroutineScope
 
@@ -107,6 +116,10 @@ class FireStreamApp : Application(), Configuration.Provider, ImageLoaderFactory 
 
     override fun onCreate() {
         super.onCreate()
+        // RestartActivity runs in a short-lived `:restart` process solely to kill
+        // the main process and relaunch MainActivity after a DB restore; skip all
+        // app initialization there.
+        if (getProcessName().endsWith(":restart")) return
         // Register process-level lifecycle observer for online/offline presence.
         // Must happen after super.onCreate() so Hilt completes injection.
         ProcessLifecycleOwner.get().lifecycle.addObserver(appLifecycleObserver)
@@ -130,6 +143,16 @@ class FireStreamApp : Application(), Configuration.Provider, ImageLoaderFactory 
         syncPendingStickerPacks()
         scheduleUpdateCheck()
         scheduleMediaBackfill()
+        reconcileScheduledBackup()
+    }
+
+    private fun reconcileScheduledBackup() {
+        appScope.launch {
+            runCatching {
+                val freq = preferencesDataStore.backupFrequencyFlow.first()
+                backupScheduler.reconcile(freq)
+            }.onFailure { Log.w("FireStreamApp", "reconcileScheduledBackup failed", it) }
+        }
     }
 
     // A caller offers a video line only to a user whose document says their app takes one. An

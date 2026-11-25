@@ -89,6 +89,12 @@
             android:foregroundServiceType="microphone|camera|shortService" />
 
         <activity
+            android:name=".RestartActivity"
+            android:exported="false"
+            android:process=":restart"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+
+        <activity
             android:name=".ui.call.CallActivity"
             android:exported="false"
             android:showWhenLocked="true"

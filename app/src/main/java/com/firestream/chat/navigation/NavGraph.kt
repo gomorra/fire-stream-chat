@@ -21,6 +21,7 @@
 
 package com.firestream.chat.navigation
 
+import android.content.Context
 import androidx.compose.animation.AnimatedContentTransitionScope
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -31,6 +32,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.platform.LocalContext
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavBackStackEntry
 import androidx.navigation.NavType
@@ -38,11 +40,13 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import com.firestream.chat.RestartActivity
 import com.firestream.chat.data.local.PreferencesDataStore
 import com.firestream.chat.domain.model.Message
 import com.firestream.chat.ui.auth.LoginScreen
 import com.firestream.chat.ui.auth.OtpScreen
 import com.firestream.chat.ui.auth.ProfileSetupScreen
+import com.firestream.chat.ui.auth.RestoreBackupScreen
 import com.firestream.chat.ui.broadcast.CreateBroadcastScreen
 import com.firestream.chat.ui.chat.ChatScreen
 import com.firestream.chat.ui.chat.MessageInfoScreen
@@ -56,6 +60,7 @@ import com.firestream.chat.ui.lists.ListDetailViewModel
 import com.firestream.chat.ui.lists.SharedListsScreen
 import com.firestream.chat.ui.main.MainScreen
 import com.firestream.chat.ui.profile.ProfileScreen
+import com.firestream.chat.ui.settings.BackupScreen
 import com.firestream.chat.ui.settings.SettingsScreen
 import com.firestream.chat.ui.share.SharePickerScreen
 import com.firestream.chat.ui.reminders.ScheduledRemindersScreen
@@ -93,7 +98,7 @@ internal fun isLaunchRestoreNavigation(
     targetRoute: String?,
     targetRestoredArg: Boolean,
 ): Boolean = targetRestoredArg ||
-    (initialRoute == Routes.LOGIN && targetRoute == Routes.CHAT_LIST)
+    (initialRoute == Routes.LOGIN && (targetRoute == Routes.CHAT_LIST || targetRoute == Routes.RESTORE_BACKUP))
 
 private fun AnimatedContentTransitionScope<NavBackStackEntry>.isLaunchRestore(): Boolean =
     isLaunchRestoreNavigation(
@@ -165,6 +170,8 @@ object Routes {
     const val MESSAGE_INFO = "message_info/{messageId}/{chatId}"
     // Phase 2 routes
     const val SETTINGS = "settings"
+    const val CHAT_BACKUP = "chat_backup"
+    const val RESTORE_BACKUP = "restore_backup"
     const val USER_PROFILE = "user_profile/{userId}"
     const val STARRED_MESSAGES = "starred_messages"
     const val SEARCH = "search"
@@ -363,8 +370,9 @@ fun FireStreamNavGraph(
                 onOtpSent = { verificationId, phoneNumber ->
                     navController.navigate(Routes.otp(verificationId, phoneNumber))
                 },
-                onAlreadyLoggedIn = {
-                    navController.navigate(Routes.CHAT_LIST) {
+                onAlreadyLoggedIn = { shouldOfferRestore ->
+                    val dest = if (shouldOfferRestore) Routes.RESTORE_BACKUP else Routes.CHAT_LIST
+                    navController.navigate(dest) {
                         popUpTo(Routes.LOGIN) { inclusive = true }
                     }
                 }
@@ -383,17 +391,31 @@ fun FireStreamNavGraph(
             OtpScreen(
                 verificationId = verificationId,
                 phoneNumber = phoneNumber,
-                onVerified = { isNewUser ->
-                    if (isNewUser) {
-                        navController.navigate(Routes.PROFILE_SETUP) {
+                onVerified = { isNewUser, shouldOfferRestore ->
+                    when {
+                        isNewUser -> navController.navigate(Routes.PROFILE_SETUP) {
                             popUpTo(Routes.LOGIN) { inclusive = true }
                         }
-                    } else {
-                        navController.navigate(Routes.CHAT_LIST) {
+                        shouldOfferRestore -> navController.navigate(Routes.RESTORE_BACKUP) {
+                            popUpTo(Routes.LOGIN) { inclusive = true }
+                        }
+                        else -> navController.navigate(Routes.CHAT_LIST) {
                             popUpTo(Routes.LOGIN) { inclusive = true }
                         }
                     }
                 }
+            )
+        }
+
+        composable(Routes.RESTORE_BACKUP) {
+            val context = LocalContext.current
+            RestoreBackupScreen(
+                onRestoreComplete = { RestartActivity.triggerRestart(context) },
+                onSkip = {
+                    navController.navigate(Routes.CHAT_LIST) {
+                        popUpTo(Routes.RESTORE_BACKUP) { inclusive = true }
+                    }
+                },
             )
         }
 
@@ -599,6 +621,7 @@ fun FireStreamNavGraph(
                 onScheduledRemindersClick = { navController.navigate(Routes.SCHEDULED_REMINDERS) },
                 onArchivedChatsClick = { navController.navigate(Routes.ARCHIVED_CHATS) },
                 onStickersClick = { navController.navigate(Routes.STICKERS) },
+                onChatBackupClick = { navController.navigate(Routes.CHAT_BACKUP) },
                 onProfileClick = { userId -> navController.navigate(Routes.userProfile(userId)) },
                 onSignedOut = {
                     navController.navigate(Routes.LOGIN) {
@@ -607,6 +630,10 @@ fun FireStreamNavGraph(
                 },
                 focusUpdate = settingsFocusUpdate.value
             )
+        }
+
+        composable(Routes.CHAT_BACKUP) {
+            BackupScreen(onBackClick = { navController.popBackStack() })
         }
 
         // Phase 2: User Profile

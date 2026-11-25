@@ -56,11 +56,14 @@ class MediaFileManager @Inject constructor(
     /** Whether [file] is one of the copies this manager keeps — the durable local file of a sent or received message. */
     fun isManagedFile(file: File): Boolean = file.parentFile == mediaRoot
 
-    suspend fun downloadAndSave(
+    suspend fun downloadAndSave(chatId: String, messageId: String, mediaUrl: String): File =
+        downloadAndSaveWithBackupId(chatId, messageId, mediaUrl, backupMessageId = messageId)
+
+    private suspend fun downloadAndSaveWithBackupId(
         chatId: String,
         messageId: String,
         mediaUrl: String,
-        backupMessageId: String = messageId,
+        backupMessageId: String,
     ): File =
         withContext(Dispatchers.IO) {
             if (isEncryptedBlobUrl(mediaUrl)) {
@@ -168,7 +171,7 @@ class MediaFileManager @Inject constructor(
     suspend fun downloadForMessage(message: Message, overrideId: String? = null): File? {
         val url = message.mediaUrl ?: return null
         val encryption = MediaEncryptionParams.resolve(message.mediaKey, message.mediaIv, message.mediaSha256)
-        return downloadFor(
+        return downloadForInternal(
             chatId = message.chatId,
             messageId = overrideId ?: message.id,
             type = message.type,
@@ -190,7 +193,28 @@ class MediaFileManager @Inject constructor(
         mimeType: String?,
         stickerId: String?,
         encryption: MediaEncryptionParams? = null,
-        backupMessageId: String = messageId,
+    ): File? = downloadForInternal(
+        chatId = chatId,
+        messageId = messageId,
+        type = type,
+        mediaUrl = mediaUrl,
+        fileName = fileName,
+        mimeType = mimeType,
+        stickerId = stickerId,
+        encryption = encryption,
+        backupMessageId = messageId,
+    )
+
+    private suspend fun downloadForInternal(
+        chatId: String,
+        messageId: String,
+        type: MessageType,
+        mediaUrl: String,
+        fileName: String?,
+        mimeType: String?,
+        stickerId: String?,
+        encryption: MediaEncryptionParams?,
+        backupMessageId: String,
     ): File? = when {
         KlipyUrls.isMedia(mediaUrl) -> null
         type == MessageType.STICKER -> stickerDownloads.ensureLocal(stickerId, mediaUrl)
@@ -211,7 +235,7 @@ class MediaFileManager @Inject constructor(
                 documentFiles.fileFor(messageId, fileName, mimeType ?: "audio/aac", mediaUrl),
                 backupMessageId,
             )
-        else -> downloadAndSave(chatId, messageId, mediaUrl, backupMessageId)
+        else -> downloadAndSaveWithBackupId(chatId, messageId, mediaUrl, backupMessageId)
     }
 
     private fun isEncryptedBlobUrl(mediaUrl: String): Boolean =

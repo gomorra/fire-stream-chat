@@ -11,10 +11,12 @@ import com.firestream.chat.data.local.PreferencesDataStore
 import com.firestream.chat.data.local.VideoQualityOption
 import com.firestream.chat.data.util.ApkInstaller
 import com.firestream.chat.domain.model.AppUpdate
+import com.firestream.chat.domain.model.LocalBackupStatus
 import com.firestream.chat.domain.model.UpdateCheckResult
 import com.firestream.chat.domain.model.User
 import com.firestream.chat.domain.repository.AppUpdateRepository
 import com.firestream.chat.domain.repository.AuthRepository
+import com.firestream.chat.domain.repository.BackupRepository
 import com.firestream.chat.domain.repository.DownloadProgress
 import com.firestream.chat.domain.repository.UserRepository
 import io.mockk.coEvery
@@ -53,6 +55,7 @@ class SettingsViewModelTest {
     private lateinit var apkInstaller: ApkInstaller
     private lateinit var appContext: Context
     private lateinit var fullScreenIntentAccess: FullScreenIntentAccess
+    private lateinit var backupRepository: BackupRepository
     private lateinit var viewModel: SettingsViewModel
 
     private val testUser = User(
@@ -74,6 +77,8 @@ class SettingsViewModelTest {
         fullScreenIntentAccess = mockk(relaxed = true)
         every { fullScreenIntentAccess.isSupported } returns true
         every { fullScreenIntentAccess.isGranted() } returns false
+        backupRepository = mockk(relaxed = true)
+        every { backupRepository.localStatus } returns flowOf(LocalBackupStatus())
 
         stubDefaultPreferences()
 
@@ -87,6 +92,7 @@ class SettingsViewModelTest {
             appUpdateRepository = appUpdateRepository,
             apkInstaller = apkInstaller,
             fullScreenIntentAccess = fullScreenIntentAccess,
+            backupRepository = backupRepository,
             appContext = appContext
         )
     }
@@ -178,7 +184,7 @@ class SettingsViewModelTest {
     @Test
     fun `init with no current user id skips user load`() = runTest {
         every { authRepository.currentUserId } returns null
-        val vm = SettingsViewModel(authRepository, userRepository, preferencesDataStore, appUpdateRepository, apkInstaller, fullScreenIntentAccess, appContext)
+        val vm = SettingsViewModel(authRepository, userRepository, preferencesDataStore, appUpdateRepository, apkInstaller, fullScreenIntentAccess, backupRepository, appContext)
 
         advanceUntilIdle()
 
@@ -188,7 +194,7 @@ class SettingsViewModelTest {
     @Test
     fun `init sets error state when user flow throws`() = runTest {
         every { userRepository.observeUser("user1") } returns flow { throw RuntimeException("network error") }
-        val vm = SettingsViewModel(authRepository, userRepository, preferencesDataStore, appUpdateRepository, apkInstaller, fullScreenIntentAccess, appContext)
+        val vm = SettingsViewModel(authRepository, userRepository, preferencesDataStore, appUpdateRepository, apkInstaller, fullScreenIntentAccess, backupRepository, appContext)
 
         advanceUntilIdle()
 
@@ -205,7 +211,7 @@ class SettingsViewModelTest {
         every { preferencesDataStore.notificationSoundFlow } returns flowOf(NotificationSound.SILENT)
         every { preferencesDataStore.autoDownloadFlow } returns flowOf(AutoDownloadOption.NEVER)
         every { preferencesDataStore.videoQualityFlow } returns flowOf(VideoQualityOption.HIGH)
-        val vm = SettingsViewModel(authRepository, userRepository, preferencesDataStore, appUpdateRepository, apkInstaller, fullScreenIntentAccess, appContext)
+        val vm = SettingsViewModel(authRepository, userRepository, preferencesDataStore, appUpdateRepository, apkInstaller, fullScreenIntentAccess, backupRepository, appContext)
 
         advanceUntilIdle()
 
@@ -442,7 +448,7 @@ class SettingsViewModelTest {
     @Test
     fun `init reflects persisted dictation language`() = runTest {
         every { preferencesDataStore.dictationLanguageFlow } returns flowOf(DictationLanguage.ENGLISH)
-        val vm = SettingsViewModel(authRepository, userRepository, preferencesDataStore, appUpdateRepository, apkInstaller, fullScreenIntentAccess, appContext)
+        val vm = SettingsViewModel(authRepository, userRepository, preferencesDataStore, appUpdateRepository, apkInstaller, fullScreenIntentAccess, backupRepository, appContext)
 
         advanceUntilIdle()
 
@@ -569,7 +575,7 @@ class SettingsViewModelTest {
     @Test
     fun `init reflects persisted keepOriginalImages`() = runTest {
         every { preferencesDataStore.keepOriginalImagesFlow } returns flowOf(true)
-        val vm = SettingsViewModel(authRepository, userRepository, preferencesDataStore, appUpdateRepository, apkInstaller, fullScreenIntentAccess, appContext)
+        val vm = SettingsViewModel(authRepository, userRepository, preferencesDataStore, appUpdateRepository, apkInstaller, fullScreenIntentAccess, backupRepository, appContext)
 
         advanceUntilIdle()
 
@@ -599,7 +605,7 @@ class SettingsViewModelTest {
     @Test
     fun `init reflects persisted autoDownloadUpdates`() = runTest {
         every { preferencesDataStore.autoDownloadUpdatesFlow } returns flowOf(true)
-        val vm = SettingsViewModel(authRepository, userRepository, preferencesDataStore, appUpdateRepository, apkInstaller, fullScreenIntentAccess, appContext)
+        val vm = SettingsViewModel(authRepository, userRepository, preferencesDataStore, appUpdateRepository, apkInstaller, fullScreenIntentAccess, backupRepository, appContext)
 
         advanceUntilIdle()
 

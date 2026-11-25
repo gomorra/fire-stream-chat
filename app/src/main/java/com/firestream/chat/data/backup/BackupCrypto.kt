@@ -14,6 +14,7 @@
 package com.firestream.chat.data.backup
 
 import com.firestream.chat.data.crypto.MediaCrypto
+import com.firestream.chat.domain.model.MIN_BACKUP_PASSPHRASE_LENGTH
 import com.firestream.chat.domain.model.UnsupportedBackupVersionException
 import com.firestream.chat.domain.model.WrongPassphraseException
 import org.json.JSONArray
@@ -55,7 +56,7 @@ data class BackupManifestInner(
 
 object BackupCrypto {
     const val MANIFEST_VERSION = 1
-    const val MIN_PASSPHRASE_LENGTH = 12
+    const val MIN_PASSPHRASE_LENGTH = MIN_BACKUP_PASSPHRASE_LENGTH
     const val DEFAULT_KDF_ITERATIONS = 600_000
     const val MIN_KDF_ITERATIONS = 100_000
     const val MAX_KDF_ITERATIONS = 5_000_000

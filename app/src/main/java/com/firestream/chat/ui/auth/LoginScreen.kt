@@ -56,7 +56,7 @@ private fun Context.findActivity(): Activity? {
 @Composable
 fun LoginScreen(
     onOtpSent: (verificationId: String, phoneNumber: String) -> Unit,
-    onAlreadyLoggedIn: () -> Unit,
+    onAlreadyLoggedIn: (shouldOfferRestore: Boolean) -> Unit,
     viewModel: AuthViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
@@ -67,7 +67,7 @@ fun LoginScreen(
 
     LaunchedEffect(uiState.isLoggedIn, uiState.isCheckingAuth) {
         if (!uiState.isCheckingAuth && uiState.isLoggedIn) {
-            onAlreadyLoggedIn()
+            onAlreadyLoggedIn(uiState.shouldOfferRestore)
         }
     }
 

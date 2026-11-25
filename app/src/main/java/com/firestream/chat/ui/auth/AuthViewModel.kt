@@ -8,6 +8,7 @@ import com.firestream.chat.data.remote.auth.OtpEvent
 import com.firestream.chat.domain.model.AppError
 import com.firestream.chat.domain.model.User
 import com.firestream.chat.domain.repository.AuthRepository
+import com.firestream.chat.domain.repository.BackupRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -16,6 +17,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
 import javax.inject.Inject
 
 data class AuthUiState(
@@ -25,13 +27,15 @@ data class AuthUiState(
     val error: AppError? = null,
     val verificationId: String? = null,
     val isNewUser: Boolean = false,
+    val shouldOfferRestore: Boolean = false,
     val user: User? = null
 )
 
 @HiltViewModel
 class AuthViewModel @Inject constructor(
     private val authRepository: AuthRepository,
-    private val firebasePhoneAuth: FirebasePhoneAuth
+    private val firebasePhoneAuth: FirebasePhoneAuth,
+    private val backupRepository: BackupRepository,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(AuthUiState())
@@ -48,7 +52,13 @@ class AuthViewModel @Inject constructor(
                     val result = withTimeout(5_000) { authRepository.getCurrentUser() }
                     result.onSuccess { user ->
                         if (user != null && user.displayName.isNotEmpty()) {
-                            _uiState.value = _uiState.value.copy(isLoggedIn = true, isCheckingAuth = false, user = user)
+                            val offerRestore = checkShouldOfferRestore()
+                            _uiState.value = _uiState.value.copy(
+                                isLoggedIn = true,
+                                isCheckingAuth = false,
+                                shouldOfferRestore = offerRestore,
+                                user = user,
+                            )
                             return@launch
                         }
                     }
@@ -95,9 +105,11 @@ class AuthViewModel @Inject constructor(
             authRepository.verifyOtp(verificationId, otp)
                 .onSuccess { user ->
                     val isNew = user.displayName.isEmpty()
+                    val shouldOfferRestore = if (!isNew) checkShouldOfferRestore() else false
                     _uiState.value = _uiState.value.copy(
                         isLoading = false,
                         isNewUser = isNew,
+                        shouldOfferRestore = shouldOfferRestore,
                         user = user
                     )
                 }
@@ -116,6 +128,7 @@ class AuthViewModel @Inject constructor(
 
             authRepository.createUserProfile(displayName, null)
                 .onSuccess { user ->
+                    backupRepository.markRestorePromptResolved()
                     _uiState.value = _uiState.value.copy(
                         isLoading = false,
                         user = user,
@@ -133,5 +146,21 @@ class AuthViewModel @Inject constructor(
 
     fun clearError() {
         _uiState.value = _uiState.value.copy(error = null)
+    }
+
+    private suspend fun checkShouldOfferRestore(): Boolean {
+        if (!backupRepository.isSupported) return false
+        if (backupRepository.isRestorePromptResolved()) return false
+        if (backupRepository.hasLocalMessages()) {
+            backupRepository.markRestorePromptResolved()
+            return false
+        }
+        return withTimeoutOrNull(BACKUP_CHECK_TIMEOUT_MS) {
+            backupRepository.fetchRemoteBackupSummary().getOrNull() != null
+        } ?: false
+    }
+
+    companion object {
+        private const val BACKUP_CHECK_TIMEOUT_MS = 8_000L
     }
 }

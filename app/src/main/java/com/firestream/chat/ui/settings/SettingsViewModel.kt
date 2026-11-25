@@ -24,10 +24,12 @@ import com.firestream.chat.data.local.PreferencesDataStore
 import com.firestream.chat.data.local.VideoQualityOption
 import com.firestream.chat.domain.model.AppError
 import com.firestream.chat.domain.model.AppUpdate
+import com.firestream.chat.domain.model.LocalBackupStatus
 import com.firestream.chat.domain.model.UpdateCheckResult
 import com.firestream.chat.domain.model.User
 import com.firestream.chat.domain.repository.AppUpdateRepository
 import com.firestream.chat.domain.repository.AuthRepository
+import com.firestream.chat.domain.repository.BackupRepository
 import com.firestream.chat.domain.repository.DownloadProgress
 import com.firestream.chat.domain.repository.UserRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -86,7 +88,9 @@ data class SettingsUiState(
     val mediaBackfillProgress: Pair<Int, Int>? = null,
     val mediaBackfillRunning: Boolean = false,
     // App update
-    val update: UpdateUiState = UpdateUiState.Idle
+    val update: UpdateUiState = UpdateUiState.Idle,
+    // Chat backup
+    val backupStatus: LocalBackupStatus = LocalBackupStatus(),
 )
 
 private const val WORK_MEDIA_BACKFILL = "media_backfill"
@@ -99,10 +103,16 @@ class SettingsViewModel @Inject constructor(
     private val appUpdateRepository: AppUpdateRepository,
     private val apkInstaller: ApkInstaller,
     private val fullScreenIntentAccess: FullScreenIntentAccess,
+    private val backupRepository: BackupRepository,
     @ApplicationContext private val appContext: Context
 ) : ViewModel() {
 
-    private val _uiState = MutableStateFlow(SettingsUiState(fullScreenAlerts = readFullScreenAlerts()))
+    private val _uiState = MutableStateFlow(
+        SettingsUiState(
+            fullScreenAlerts = readFullScreenAlerts(),
+            backupStatus = LocalBackupStatus(isSupported = backupRepository.isSupported),
+        )
+    )
     val uiState: StateFlow<SettingsUiState> = _uiState.asStateFlow()
 
     private var backfillObserver: Observer<List<WorkInfo>>? = null
@@ -211,6 +221,11 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch {
             preferencesDataStore.autoDownloadUpdatesFlow.collect { enabled ->
                 _uiState.value = _uiState.value.copy(autoDownloadUpdates = enabled)
+            }
+        }
+        viewModelScope.launch {
+            backupRepository.localStatus.collect { status ->
+                _uiState.value = _uiState.value.copy(backupStatus = status)
             }
         }
     }

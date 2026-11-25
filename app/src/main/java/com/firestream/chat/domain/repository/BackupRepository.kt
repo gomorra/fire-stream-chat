@@ -19,6 +19,8 @@ interface BackupRepository {
     suspend fun runBackup(): Result<RemoteBackupSummary>
     suspend fun fetchRemoteBackupSummary(): Result<RemoteBackupSummary?>
     suspend fun hasLocalMessages(): Boolean
+    suspend fun isRestorePromptResolved(): Boolean
+    suspend fun markRestorePromptResolved()
 
     /**
      * Downloads, verifies, and atomically swaps the restored `fire_stream_chat.db`

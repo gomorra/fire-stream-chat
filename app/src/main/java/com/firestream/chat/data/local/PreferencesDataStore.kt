@@ -120,6 +120,7 @@ class PreferencesDataStore @Inject constructor(
     private val lastBackupSizeBytesKey = longPreferencesKey("last_backup_size_bytes")
     private val lastBackupLegacyMediaCompleteKey = booleanPreferencesKey("last_backup_legacy_media_complete")
     private val backupFrequencyKey = stringPreferencesKey("backup_frequency")
+    private val restorePromptResolvedKey = booleanPreferencesKey("restore_prompt_resolved")
 
     // --- Theme ---
 
@@ -571,7 +572,15 @@ class PreferencesDataStore @Inject constructor(
             prefs[lastBackupAtKey] = timestampMs
             prefs[lastBackupSizeBytesKey] = sizeBytes
             prefs[lastBackupLegacyMediaCompleteKey] = legacyMediaComplete
+            prefs[restorePromptResolvedKey] = true
         }
+    }
+
+    suspend fun isRestorePromptResolved(): Boolean =
+        context.dataStore.data.first()[restorePromptResolvedKey] ?: false
+
+    suspend fun setRestorePromptResolved(resolved: Boolean) {
+        context.dataStore.edit { prefs -> prefs[restorePromptResolvedKey] = resolved }
     }
 
     suspend fun clearBackupPreferences() {
@@ -580,6 +589,7 @@ class PreferencesDataStore @Inject constructor(
             prefs.remove(lastBackupSizeBytesKey)
             prefs.remove(lastBackupLegacyMediaCompleteKey)
             prefs.remove(backupFrequencyKey)
+            prefs.remove(restorePromptResolvedKey)
         }
     }
 }

@@ -9,8 +9,8 @@
 //   rotation, SQLite WAL checkpoint + `VACUUM INTO` snapshotting, integrity &
 //   schema verification on restore, and unreadable/missing local-path scrubbing
 //   before DB swap.
-// Collaborators: BackupCrypto, BackupKeyStore, BackupSource, AppDatabase,
-//   MessageDao, ChatDao, MessageRepository, MediaFileManager,
+// Collaborators: BackupCrypto, BackupKeyStore, BackupSource, BackupScheduler,
+//   AppDatabase, MessageDao, ChatDao, MessageRepository, MediaFileManager,
 //   PreferencesDataStore, AuthSource.
 // Don't put here: UI state or dialogs (BackupViewModel / RestoreBackupViewModel),
 //   WorkManager scheduling (BackupWorker), or Signal key backup (never backed up).
@@ -30,6 +30,7 @@ import com.firestream.chat.data.remote.source.AuthSource
 import com.firestream.chat.data.util.MediaFileManager
 import com.firestream.chat.data.util.parseMessageType
 import com.firestream.chat.data.util.rethrowIfCancellation
+import com.firestream.chat.data.worker.BackupScheduler
 import com.firestream.chat.domain.model.BackupFrequency
 import com.firestream.chat.domain.model.BackupProgress
 import com.firestream.chat.domain.model.BackupStage
@@ -43,7 +44,9 @@ import com.firestream.chat.domain.repository.BackupRepository
 import com.firestream.chat.domain.repository.MessageRepository
 import com.firestream.chat.domain.util.KlipyUrls
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -72,6 +75,7 @@ class BackupManager internal constructor(
     private val backupKeyStore: BackupKeyStore,
     private val preferencesDataStore: PreferencesDataStore,
     private val authSource: AuthSource,
+    private val backupScheduler: BackupScheduler,
     private val kdfIterations: Int,
     private val minManifestIterations: Int,
     private val databaseName: String,
@@ -90,6 +94,7 @@ class BackupManager internal constructor(
         backupKeyStore: BackupKeyStore,
         preferencesDataStore: PreferencesDataStore,
         authSource: AuthSource,
+        backupScheduler: BackupScheduler,
     ) : this(
         context = context,
         appDatabase = appDatabase,
@@ -101,6 +106,7 @@ class BackupManager internal constructor(
         backupKeyStore = backupKeyStore,
         preferencesDataStore = preferencesDataStore,
         authSource = authSource,
+        backupScheduler = backupScheduler,
         kdfIterations = BackupCrypto.DEFAULT_KDF_ITERATIONS,
         minManifestIterations = BackupCrypto.MIN_KDF_ITERATIONS,
         databaseName = DATABASE_NAME,
@@ -166,8 +172,20 @@ class BackupManager internal constructor(
         messageDao.getMessageCount() > 0
     }
 
+    override suspend fun isRestorePromptResolved(): Boolean =
+        preferencesDataStore.isRestorePromptResolved()
+
+    override suspend fun markRestorePromptResolved() {
+        withContext(NonCancellable) {
+            preferencesDataStore.setRestorePromptResolved(true)
+        }
+    }
+
     override suspend fun setBackupFrequency(frequency: BackupFrequency) {
-        preferencesDataStore.setBackupFrequency(frequency)
+        withContext(NonCancellable) {
+            preferencesDataStore.setBackupFrequency(frequency)
+            backupScheduler.schedule(frequency)
+        }
     }
 
     override fun resetProgress() {
@@ -176,11 +194,12 @@ class BackupManager internal constructor(
     }
 
     /**
-     * Fences sign-out against any in-flight backup/restore, clears stored keys
-     * and backup metadata, resets progress flows, and sweeps any leftover temp
-     * snapshots from `cacheDir`.
+     * Fences sign-out against any in-flight backup/restore, cancels scheduled
+     * periodic backups, clears stored keys and backup metadata, resets progress
+     * flows, and sweeps any leftover temp snapshots from `cacheDir`.
      */
     suspend fun clearForSignOut() = operationMutex.withLock {
+        backupScheduler.cancel()
         backupKeyStore.clear()
         preferencesDataStore.clearBackupPreferences()
         resetProgress()
@@ -429,34 +448,38 @@ class BackupManager internal constructor(
             backupSource.uploadManifest(uid, BackupCrypto.serializeManifest(manifest))
             manifestCommitted = true
 
-            if (isRotating) {
-                backupKeyStore.save(targetKey)
-                val oldKeyGen = activeKey!!.keyGeneration
-                for (oldId in prevGenLegacyIds) {
-                    try {
-                        backupSource.deleteLegacyMediaBlob(uid, oldKeyGen, oldId)
-                    } catch (e: Exception) {
-                        e.rethrowIfCancellation()
-                        Log.w(TAG, "Failed to clean up old-generation legacy blob $oldId", e)
+            // Post-commit state promotion & cleanup must finish even if the caller's
+            // scope cancels right after manifest.json lands remotely.
+            withContext(NonCancellable) {
+                if (isRotating) {
+                    backupKeyStore.save(targetKey)
+                    val oldKeyGen = activeKey!!.keyGeneration
+                    for (oldId in prevGenLegacyIds) {
+                        try {
+                            backupSource.deleteLegacyMediaBlob(uid, oldKeyGen, oldId)
+                        } catch (e: Exception) {
+                            e.rethrowIfCancellation()
+                            Log.w(TAG, "Failed to clean up old-generation legacy blob $oldId", e)
+                        }
                     }
                 }
-            }
 
-            val prevDbName = previousManifest?.dbObjectName
-            if (prevDbName != null && prevDbName != dbObjectName) {
-                try {
-                    backupSource.deleteDbBlob(uid, prevDbName)
-                } catch (e: Exception) {
-                    e.rethrowIfCancellation()
-                    Log.w(TAG, "Failed to delete superseded backup blob $prevDbName", e)
+                val prevDbName = previousManifest?.dbObjectName
+                if (prevDbName != null && prevDbName != dbObjectName) {
+                    try {
+                        backupSource.deleteDbBlob(uid, prevDbName)
+                    } catch (e: Exception) {
+                        e.rethrowIfCancellation()
+                        Log.w(TAG, "Failed to delete superseded backup blob $prevDbName", e)
+                    }
                 }
-            }
 
-            preferencesDataStore.recordBackupSuccess(
-                timestampMs = nowMs,
-                sizeBytes = dbCipherInfo.ciphertextSize,
-                legacyMediaComplete = allLegacyComplete,
-            )
+                preferencesDataStore.recordBackupSuccess(
+                    timestampMs = nowMs,
+                    sizeBytes = dbCipherInfo.ciphertextSize,
+                    legacyMediaComplete = allLegacyComplete,
+                )
+            }
 
             val summary = RemoteBackupSummary(
                 createdAt = nowMs,
@@ -465,14 +488,27 @@ class BackupManager internal constructor(
             )
             _backupProgress.value = BackupProgress(stage = BackupStage.COMPLETED, fraction = 1f)
             Result.success(summary)
+        } catch (e: CancellationException) {
+            // Never leave singleton _backupProgress wedged on an active stage when
+            // WorkManager stops BackupWorker or a caller cancels.
+            withContext(NonCancellable) {
+                val orphanUid = uid
+                val orphanDb = uploadedDbObjectName
+                if (!manifestCommitted && orphanUid != null && orphanDb != null) {
+                    runCatching { backupSource.deleteDbBlob(orphanUid, orphanDb) }
+                }
+                _backupProgress.value = BackupProgress()
+            }
+            throw e
         } catch (e: Exception) {
             // Best-effort cleanup of newly uploaded orphan DB blob if manifest never committed.
             val orphanUid = uid
             val orphanDb = uploadedDbObjectName
             if (!manifestCommitted && orphanUid != null && orphanDb != null) {
-                runCatching { backupSource.deleteDbBlob(orphanUid, orphanDb) }
+                withContext(NonCancellable) {
+                    runCatching { backupSource.deleteDbBlob(orphanUid, orphanDb) }
+                }
             }
-            e.rethrowIfCancellation()
             Log.e(TAG, "Backup failed", e)
             _backupProgress.value = BackupProgress(
                 stage = BackupStage.FAILED,
@@ -548,31 +584,36 @@ class BackupManager internal constructor(
                 stagedDbFile = stageDatabaseCopy(plainDbFile)
             }
 
-            // Stage 6: Close Room and atomically rename the pre-staged DB into place,
-            // then persist key + backup metadata so a failed copy never corrupts local state.
+            // Stage 6: Close Room, atomically rename the pre-staged DB into place,
+            // and persist key + backup metadata inside NonCancellable so cancellation
+            // can never swap the DB without also persisting BackupKeyStore.
             _restoreProgress.value = RestoreProgress(stage = RestoreStage.REPLACING_DB, fraction = 0.90f)
-            withContext(Dispatchers.IO) {
-                appDatabase.close()
-                commitStagedDatabase(stagedDbFile!!)
-            }
+            withContext(NonCancellable) {
+                withContext(Dispatchers.IO) {
+                    appDatabase.close()
+                    commitStagedDatabase(stagedDbFile!!)
+                }
 
-            backupKeyStore.save(
-                StoredBackupKey(
-                    masterKey = masterKey,
-                    salt = salt,
-                    kdfIterations = manifest.kdfIterations,
+                backupKeyStore.save(
+                    StoredBackupKey(
+                        masterKey = masterKey,
+                        salt = salt,
+                        kdfIterations = manifest.kdfIterations,
+                    )
                 )
-            )
-            preferencesDataStore.recordBackupSuccess(
-                timestampMs = manifest.createdAt,
-                sizeBytes = manifest.dbCipherSizeBytes,
-                legacyMediaComplete = manifest.legacyMediaComplete,
-            )
+                preferencesDataStore.recordBackupSuccess(
+                    timestampMs = manifest.createdAt,
+                    sizeBytes = manifest.dbCipherSizeBytes,
+                    legacyMediaComplete = manifest.legacyMediaComplete,
+                )
+            }
 
             _restoreProgress.value = RestoreProgress(stage = RestoreStage.COMPLETED, fraction = 1f)
             Result.success(Unit)
+        } catch (e: CancellationException) {
+            _restoreProgress.value = RestoreProgress()
+            throw e
         } catch (e: Exception) {
-            e.rethrowIfCancellation()
             Log.e(TAG, "Restore failed", e)
             val msg = when (e) {
                 is WrongPassphraseException -> "Incorrect passphrase. Please try again."

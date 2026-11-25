@@ -1,5 +1,7 @@
 package com.firestream.chat.domain.model
 
+const val MIN_BACKUP_PASSPHRASE_LENGTH = 12
+
 enum class BackupFrequency { OFF, DAILY, WEEKLY }
 
 enum class BackupStage {
@@ -48,7 +50,7 @@ data class RemoteBackupSummary(
 )
 
 data class LocalBackupStatus(
-    val isSupported: Boolean = true,
+    val isSupported: Boolean = false,
     val isPassphraseConfigured: Boolean = false,
     val lastBackupAt: Long? = null,
     val lastBackupLegacyMediaComplete: Boolean = false,

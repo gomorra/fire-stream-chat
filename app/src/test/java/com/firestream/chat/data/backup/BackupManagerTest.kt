@@ -10,6 +10,8 @@ import com.firestream.chat.data.local.entity.MessageEntity
 import com.firestream.chat.data.local.entity.MessageSyncStateEntity
 import com.firestream.chat.data.remote.source.AuthSource
 import com.firestream.chat.data.util.MediaFileManager
+import com.firestream.chat.data.worker.BackupScheduler
+import com.firestream.chat.domain.model.BackupFrequency
 import com.firestream.chat.domain.model.BackupStage
 import com.firestream.chat.domain.model.ChatType
 import com.firestream.chat.domain.model.Message
@@ -58,6 +60,7 @@ class BackupManagerTest {
     private val authSource = mockk<AuthSource>()
     private val messageRepository = mockk<MessageRepository>(relaxed = true)
     private val mediaFileManager = mockk<MediaFileManager>(relaxed = true)
+    private val backupScheduler = mockk<BackupScheduler>(relaxed = true)
     private var nowMs = 1_750_000_000_000L
 
     private lateinit var tempFiles: MutableList<File>
@@ -98,6 +101,7 @@ class BackupManagerTest {
         backupKeyStore = backupKeyStore,
         preferencesDataStore = preferencesDataStore,
         authSource = authSource,
+        backupScheduler = backupScheduler,
         kdfIterations = 1_000,
         minManifestIterations = 1_000,
         databaseName = dbName,
@@ -376,7 +380,7 @@ class BackupManagerTest {
             )
         )
         coEvery {
-            mediaFileManager.downloadFor(any(), eq("m-missing-legacy"), any(), any(), any(), any(), any(), any(), any())
+            mediaFileManager.downloadFor(any(), eq("m-missing-legacy"), any(), any(), any(), any(), any(), any())
         } throws IOException("404 Gone")
 
         val result = manager.runBackup()
@@ -419,7 +423,7 @@ class BackupManagerTest {
         legacyFile.delete()
         appDatabase.messageDao().updateLocalUri("m-rot-1", null)
         coEvery {
-            mediaFileManager.downloadFor(any(), eq("m-rot-1"), any(), any(), any(), any(), any(), any(), any())
+            mediaFileManager.downloadFor(any(), eq("m-rot-1"), any(), any(), any(), any(), any(), any())
         } throws IOException("404 scrubbed")
 
         // Stage passphrase rotation; active key must remain oldKey until rotation commits!
@@ -537,6 +541,13 @@ class BackupManagerTest {
         assertEquals(nowMs, after.lastBackupAt)
         assertTrue(after.lastBackupLegacyMediaComplete)
         assertTrue((after.lastBackupSizeBytes ?: 0L) > 0L)
+
+        manager.setBackupFrequency(BackupFrequency.DAILY)
+        io.mockk.verify(exactly = 1) { backupScheduler.schedule(BackupFrequency.DAILY) }
+
+        manager.clearForSignOut()
+        io.mockk.verify(exactly = 1) { backupScheduler.cancel() }
+        assertEquals(BackupStage.IDLE, manager.backupProgress.value.stage)
     }
 
     private class InMemoryKeyWrapper : BackupKeyWrapper {

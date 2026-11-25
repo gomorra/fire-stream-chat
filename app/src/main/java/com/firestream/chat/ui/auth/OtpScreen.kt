@@ -43,7 +43,7 @@ import com.firestream.chat.R
 fun OtpScreen(
     verificationId: String,
     phoneNumber: String,
-    onVerified: (isNewUser: Boolean) -> Unit,
+    onVerified: (isNewUser: Boolean, shouldOfferRestore: Boolean) -> Unit,
     viewModel: AuthViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
@@ -53,7 +53,7 @@ fun OtpScreen(
     LaunchedEffect(uiState.user) {
         uiState.user?.let { user ->
             if (!uiState.isLoading) {
-                onVerified(uiState.isNewUser)
+                onVerified(uiState.isNewUser, uiState.shouldOfferRestore)
             }
         }
     }

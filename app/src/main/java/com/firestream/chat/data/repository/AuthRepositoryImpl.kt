@@ -30,9 +30,11 @@ import com.firestream.chat.domain.repository.AuthRepository
 import com.google.firebase.messaging.FirebaseMessaging
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
+import kotlinx.coroutines.withContext
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -186,13 +188,18 @@ class AuthRepositoryImpl @Inject constructor(
     }
 
     override suspend fun signOut() {
-        // Fenced: a sticker restore that is still listening must not write this
-        // user's packs back into the tables the next user starts from.
-        stickerLibrarySync.signingOut {
-            database.clearAllTables()
-            signalDatabase.clearAllTables()
-            backupManager.clearForSignOut()
-            authSource.signOut()
+        // NonCancellable: callers (e.g. SettingsScreen) pop out immediately after
+        // triggering signOut(), which cancels viewModelScope. Every local wipe,
+        // WorkManager cancellation, and auth teardown must finish atomically.
+        withContext(NonCancellable) {
+            // Fenced: a sticker restore that is still listening must not write this
+            // user's packs back into the tables the next user starts from.
+            stickerLibrarySync.signingOut {
+                database.clearAllTables()
+                signalDatabase.clearAllTables()
+                backupManager.clearForSignOut()
+                authSource.signOut()
+            }
         }
     }
 }
