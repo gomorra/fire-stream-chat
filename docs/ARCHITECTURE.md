@@ -144,9 +144,11 @@ sequenceDiagram
     App_B->>Firestore: Marks Message as "Read" (if receipts enabled)
 ```
 
-> **Debug builds**: Encryption is bypassed — `MessageRepositoryImpl` calls `sendPlainMessage()` instead of the encrypted path, avoiding key-loss issues during development.
+> **Debug builds**: Encryption is bypassed (`BuildConfig.DEBUG` gate in `MessageWriter`). Messages go through `sendPlainMessage()` to avoid stranding history during development.
 >
-> **Release builds**: Users may opt out of Signal end-to-end encryption from Settings → Privacy. The flag is read from `PreferencesDataStore.e2eEncryptionEnabledFlow` (default `true`) and gates the same `sendPlainMessage()` branch.
+> **Release builds (`firebase` flavor)**: 1:1 end-to-end encryption is always on (`BuildConfig.SUPPORTS_SIGNAL && !BuildConfig.DEBUG`, with no user opt-out). Messages, edits, locations, hidden sticker references, and AES-256-GCM media keys travel inside a v1 `MessageEnvelope` encrypted by `SignalManager`, which manages a rotating 50-key one-time pre-key pool claimed atomically via `claimPreKeyBundle`. Media files and video thumbnails are encrypted in 64 KiB chunks by `MediaCrypto` and stored as `.enc` blobs in Firebase Storage. Group and broadcast messages remain plaintext. Settings → Privacy displays a read-only "Always on for 1:1 chats" status row. The `pocketbase` flavor never encrypts (`BuildConfig.SUPPORTS_SIGNAL = false`).
+>
+> **Encrypted cloud backup**: Because Signal ratchets are forward-only and Firestore stores only ciphertext, `BackupManager` backs up `AppDatabase` (`VACUUM INTO` snapshot, gzipped and encrypted) plus pre-E2EE legacy media under `backups/{uid}/` in Firebase Storage using a user passphrase (PBKDF2-HMAC-SHA256 + HKDF-SHA256 + AES-256-GCM). `SignalDatabase` is never backed up. Restoring onto a new device registers a fresh Signal identity.
 
 ---
 
@@ -424,6 +426,12 @@ graph TD
 ```
 com.firestream.chat/
 ├── data/
+│   ├── backup/                  # Passphrase-protected Firebase Storage backups
+│   │   ├── BackupCrypto.kt      # PBKDF2-HMAC-SHA256 + HKDF-SHA256 subkeys + manifest AAD + legacy-media framing
+│   │   ├── BackupKeyStore.kt    # Android Keystore-wrapped master backup key + atomic rotation staging
+│   │   ├── BackupManager.kt     # VACUUM INTO snapshot, gzip + MediaCrypto, atomic commit, restore & verify
+│   │   ├── BackupSource.kt      # Backend abstraction (FirebaseBackupSource / PocketBaseBackupSource)
+│   │   └── LegacyMediaBackupFetcher.kt # Lazy on-demand download & decrypt from backups/{uid}/legacy-media/
 │   ├── call/                    # WebRTC infrastructure
 │   │   ├── CallService.kt       # Foreground service — Android side of a call, one CallSession at a time
 │   │   ├── CallSession.kt       # One call's transitions, timer and end-of-call writes (JVM-testable)
@@ -445,7 +453,9 @@ com.firestream.chat/
 │   │   ├── ProximityLock.kt     # Wake lock held only while the earpiece is playing and no video shows
 │   │   └── WebRtcPeerConnectionFactory.kt  # Factory, video codecs and the call's EGL context
 │   ├── crypto/
-│   │   ├── SignalManager.kt
+│   │   ├── MediaCrypto.kt       # Streaming 64 KiB chunked AES-256-GCM + SHA-256 for chat media & backups
+│   │   ├── MessageEnvelope.kt   # Versioned (v=1) JSON payload codec for 1:1 messages & encrypted edits
+│   │   ├── SignalManager.kt     # Session locks, rotating 50-key pre-key pool, encrypt/decrypt
 │   │   └── SignalProtocolStoreImpl.kt
 │   ├── local/
 │   │   ├── dao/                 # ChatDao, ContactDao, ListDao, MessageDao, MessageSyncStateDao, ReminderDao, SignalDao, StickerDao, UserDao
@@ -488,6 +498,9 @@ com.firestream.chat/
 │   │   ├── ResultExt.kt         # Result extension helpers
 │   │   └── CurrentActivityHolder.kt
 │   ├── worker/
+│   │   ├── ApkDownloadWorker.kt   # Foreground APK download worker for in-app updates
+│   │   ├── BackupScheduler.kt     # Periodic WorkManager schedule (Daily/Weekly, Wi-Fi + charging)
+│   │   ├── BackupWorker.kt        # Scheduled encrypted cloud backup worker
 │   │   ├── OutboxWorker.kt        # One delivery attempt per queued message (offline outbox)
 │   │   ├── WorkerForeground.kt    # Shared foreground promotion + data-sync ForegroundInfo
 │   │   ├── MediaBackfillWorker.kt # WorkManager job to backfill local media
@@ -499,7 +512,7 @@ com.firestream.chat/
 │   │   └── UpdateCheckWorker.kt   # 24h periodic check; notifies on new release
 │   ├── remote/
 │   │   ├── fcm/                 # FCMService, ActiveChatTracker
-│   │   ├── firebase/            # FirebaseAuthSource, FirestoreChatSource,
+│   │   ├── firebase/            # FirebaseAuthSource, FirebaseBackupSource, FirestoreChatSource,
 │   │   │                        # FirestoreCallSource, FirestoreListSource,
 │   │   │                        # FirestoreListHistorySource, FirestoreMessageSource,
 │   │   │                        # FirestoreUserSource, FirebaseKeySource,
@@ -519,6 +532,7 @@ com.firestream.chat/
 ├── di/                          # AppModule, DatabaseModule, CryptoModule, NetworkModule, SystemModule
 ├── domain/
 │   ├── model/                   # Chat, Message, User, Contact, Poll, PollOption,
+│   │                            # BackupModels (BackupProgress, RestoreProgress, LocalBackupStatus, BackupFrequency),
 │   │                            # CallState, CallLogEntry, CallSignalingData, SdpData,
 │   │                            # IceCandidateData, IceServerData, GroupPermissions, GroupRole,
 │   │                            # ListData, ListItem, ListDiff, ListType, GenericListStyle,
@@ -526,7 +540,7 @@ com.firestream.chat/
 │   │                            # SharedContent, MessageStatus, MessageType, ChatType,
 │   │                            # AppUpdate, UpdateCheckResult, Sticker, StickerFormat,
 │   │                            # StickerPack, StickerPackKind, StickerImportResult, WhatsAppStickerFile
-│   ├── repository/              # AuthRepository, CallRepository, ChatRepository, ContactRepository,
+│   ├── repository/              # AuthRepository, BackupRepository, CallRepository, ChatRepository, ContactRepository,
 │   │                            # ListRepository, MessageRepository, PollRepository, UserRepository,
 │   │                            # AppUpdateRepository, StickerRepository
 │   ├── usecase/
@@ -539,7 +553,7 @@ com.firestream.chat/
 │       └── ConnectivityObserver.kt # Validated-network StateFlow — display only, never the send path
 ├── navigation/NavGraph.kt
 ├── ui/
-│   ├── auth/                    # Login, Otp, ProfileSetup, AuthViewModel
+│   ├── auth/                    # Login, Otp, ProfileSetup, AuthViewModel, RestoreBackupScreen, RestoreBackupViewModel
 │   ├── broadcast/               # CreateBroadcastScreen, CreateBroadcastViewModel
 │   ├── call/                    # CallActivity, CallScreen, CallViewModel, CallControlButton,
 │   │                            # CallAudioRouteSheet (route button + picker sheet)
@@ -576,7 +590,7 @@ com.firestream.chat/
 │   │                            # GlobalSearchViewModel, GlobalSearchLabels;
 │   │                            # plus the rendering both scopes share —
 │   │                            # SearchResults, SearchFilterBar
-│   ├── settings/                # SettingsScreen, SettingsViewModel
+│   ├── settings/                # SettingsScreen, SettingsViewModel, BackupScreen, BackupViewModel
 │   ├── share/                   # SharePickerScreen, SharePickerViewModel
 │   ├── starred/                 # StarredMessagesScreen, StarredMessagesViewModel
 │   ├── stickers/                # StickerLibraryScreen, AllStickersTab, StickerDetailSheet, StickerWordsEditor, StickerLibraryViewModel, WhatsAppImportScreen, StickerLabels,
@@ -584,7 +598,8 @@ com.firestream.chat/
 │   └── theme/                   # Color, Shape, Theme, Type
 ├── AppLifecycleObserver.kt      # Process-level lifecycle — drives RTDB online/offline presence
 ├── FireStreamApp.kt
-└── MainActivity.kt
+├── MainActivity.kt
+└── RestartActivity.kt           # Isolated :restart process trampoline for clean post-restore restart
 ```
 
 ---

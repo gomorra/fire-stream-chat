@@ -208,7 +208,6 @@ class OutboxSenderTest {
         every { messageSource.lastContentFor(any(), any()) } returns "preview"
         every { preferencesDataStore.videoQualityFlow } returns flowOf(VideoQualityOption.STANDARD)
         every { preferencesDataStore.keepOriginalImagesFlow } returns flowOf(false)
-        every { preferencesDataStore.e2eEncryptionEnabledFlow } returns flowOf(true)
         // The peer keeps its identity unless a test re-registers it.
         coEvery { signalManager.isCurrentIdentity(any(), any()) } returns true
         // Only the media dir is a place the app keeps files; a staged copy or a cache path is not.
@@ -237,7 +236,7 @@ class OutboxSenderTest {
 
     private fun newSender(buildEncrypts: Boolean) = OutboxSender(
         messageDao, chatDao, messageSource, storageSource,
-        MessageWriter(messageSource, signalManager, preferencesDataStore, buildEncrypts),
+        MessageWriter(messageSource, signalManager, buildEncrypts),
         outboxFiles, imageCompressor, videoTranscoder, mediaFileManager, preferencesDataStore, documentFiles,
         StickerUploads(stickerDao, stickerFiles, stickerObjectSource),
     )

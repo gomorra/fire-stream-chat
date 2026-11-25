@@ -60,7 +60,7 @@ class MessageRepositoryForwardTest {
         every { authSource.currentUserId } returns "uid1"
         coEvery { messageDao.insertOutbox(capture(inserted)) } just Runs
         coEvery { outboxFiles.stage(any(), any(), any()) } returns null
-        coEvery { messageWriter.willEncrypt(any(), any()) } returns false
+        every { messageWriter.willEncrypt(any()) } returns false
 
         repository = messageRepository(
             messageDao = messageDao,

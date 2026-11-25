@@ -3,7 +3,6 @@ package com.firestream.chat.data.outbox
 import com.firestream.chat.data.crypto.EncryptedMessage
 import com.firestream.chat.data.crypto.MessageEnvelope
 import com.firestream.chat.data.crypto.SignalManager
-import com.firestream.chat.data.local.PreferencesDataStore
 import com.firestream.chat.data.remote.source.MessageSource
 import com.firestream.chat.domain.model.Message
 import com.firestream.chat.domain.model.MessageStatus
@@ -11,10 +10,8 @@ import com.firestream.chat.domain.model.MessageType
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.coVerifyOrder
-import io.mockk.every
 import io.mockk.mockk
 import io.mockk.slot
-import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -32,7 +29,6 @@ class MessageWriterTest {
 
     private val messageSource = mockk<MessageSource>(relaxed = true)
     private val signalManager = mockk<SignalManager>(relaxed = true)
-    private val preferencesDataStore = mockk<PreferencesDataStore>()
 
     private val text = Message(
         id = "msg1",
@@ -46,12 +42,11 @@ class MessageWriterTest {
 
     @Before
     fun setUp() {
-        every { preferencesDataStore.e2eEncryptionEnabledFlow } returns flowOf(true)
         coEvery { signalManager.encrypt("peer1", any()) } returns EncryptedMessage("cipher-1", signalType = 3)
     }
 
     private fun writer(buildEncrypts: Boolean = true) =
-        MessageWriter(messageSource, signalManager, preferencesDataStore, buildEncrypts)
+        MessageWriter(messageSource, signalManager, buildEncrypts)
 
     @Test
     fun `a 1-to-1 message in a build that encrypts encodes a v1 envelope for its peer, after Signal is initialised`() = runTest {
@@ -102,10 +97,11 @@ class MessageWriterTest {
     }
 
     @Test
-    fun `a user who opted out of end-to-end encryption writes plaintext`() = runTest {
-        every { preferencesDataStore.e2eEncryptionEnabledFlow } returns flowOf(false)
-
-        assertPlain(writer().encode(text, SendTarget.Peer("peer1")))
+    fun `willEncrypt is always true for 1-to-1 targets when buildEncrypts is true, and false otherwise`() {
+        assertTrue(writer(buildEncrypts = true).willEncrypt(SendTarget.Peer("peer1")))
+        assertFalse(writer(buildEncrypts = true).willEncrypt(SendTarget.NoPeer))
+        assertFalse(writer(buildEncrypts = false).willEncrypt(SendTarget.Peer("peer1")))
+        assertFalse(writer(buildEncrypts = false).willEncrypt(SendTarget.NoPeer))
     }
 
     @Test

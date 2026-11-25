@@ -165,7 +165,7 @@ class OutboxSender @Inject constructor(
         val isReattempt = entity.outboxAttempts > 0
         messageDao.incrementOutboxAttempts(messageId)
 
-        val encryptMedia = messageWriter.willEncrypt(stored, target)
+        val encryptMedia = messageWriter.willEncrypt(target)
 
         val row = when (stored.type) {
             MessageType.IMAGE, MessageType.VIDEO -> prepareMedia(stored, encryptMedia)

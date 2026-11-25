@@ -7,11 +7,15 @@ The app uses **two Room databases** to keep Signal Protocol key material separat
 | Database         | File              | Tables                                                                                                                                                  |
 | ---------------- | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `AppDatabase`    | `fire_stream_chat.db` | `users`, `chats`, `messages`, `contacts`, `lists`, `reminders`, `stickers`, `sticker_packs`, `sticker_pack_items`, `message_sync_state` |
-| `SignalDatabase` | `signal.db`       | `signal_identities`, `signal_sessions`, `signal_prekeys`, `signal_signed_prekeys`, `signal_kyber_prekeys`, `signal_sender_keys`, `signal_trusted_identities` |
+| `SignalDatabase` | `signal.db`       | `signal_identity`, `signal_sessions`, `signal_prekeys`, `signal_signed_prekeys`, `signal_kyber_prekeys`, `signal_sender_keys`, `signal_trusted_identities` |
 
 Both databases export their schemas under `app/schemas/` and register explicit `Migration`s in `ALL_MIGRATIONS`. Destructive fallback is limited to legacy `AppDatabase` versions `1..34` and disabled completely on `SignalDatabase`.
 
-**`messages` is two halves (version 28).** `MessageEntity` embeds a `MessageRecord` — every column the backend also holds — and keeps the local-only columns beside it: `localUri`, `isStarred` and the outbox bookkeeping below. `MessageRecord` doubles as Room's partial entity for the table: a snapshot, a sync, an edit echo or a poll vote is `MessageDao.upsertRecord`, which inserts the row when it is new and otherwise overwrites exactly the record's columns, so the local ones survive without being copied across. The local columns change only through column updates, the outbox insert of an own send (`MessageDao.insertOutbox`) and the SENT transaction (`MessageDao.markSent`). `isStarred` and `outboxAttempts` carry `DEFAULT 0` so a partial insert can omit them.
+**`messages` is two halves (version 28).** `MessageEntity` embeds a `MessageRecord` — every column the backend or decrypted `MessageEnvelope` holds — and keeps the local-only columns beside it: `localUri`, `localThumbUri`, `isStarred`, and the outbox bookkeeping below. `MessageRecord` doubles as Room's partial entity for the table: a snapshot, a sync, an edit echo or a poll vote is `MessageDao.upsertRecord`, which inserts the row when it is new and otherwise overwrites exactly the record's columns, so the local ones survive without being copied across. The local columns change only through column updates, the outbox insert of an own send (`MessageDao.insertOutbox`) and the SENT transaction (`MessageDao.markSent`). `isStarred` and `outboxAttempts` carry `DEFAULT 0` so a partial insert can omit them.
+
+**Encrypted media columns (AppDatabase v36, `MIGRATION_35_36`).** `MessageRecord` carries six nullable Base64 columns for chunked AES-256-GCM media decryption (`mediaKey`, `mediaIv`, `mediaSha256`, `thumbKey`, `thumbIv`, `thumbSha256`). They are populated from the decrypted v1 `MessageEnvelope` (or on upload in `OutboxSender`) and remain `NULL` for legacy plaintext or group media. `localThumbUri` sits beside `localUri` on `MessageEntity` (local-only, never wiped by `upsertRecord`) and caches decrypted video thumbnails under `filesDir/thumbs/{messageId}.jpg`.
+
+**Rotating pre-key metadata (SignalDatabase v2, `MIGRATION_1_2`).** `signal_identity` adds `nextPreKeyId` (default `2`, monotonic so deleted pre-key IDs are never reused) and `bundlePublished` (default `0`, forcing v1→v2 upgrades to republish the subcollection-backed key bundle). `signal_prekeys` adds `uploaded` (default `1`) to track which local one-time pre-keys have been published to Firestore.
 
 **Outbox columns.** Local send bookkeeping for an own row that has not reached `SENT`, written by the outbox insert and `OutboxSender`'s column updates, and cleared by one statement — `MessageDao.clearOutbox` — inside `markSent` and `acknowledge` (the heal of a row the backend turns out to hold):
 
@@ -108,7 +112,14 @@ erDiagram
         String status
         String mediaUrl
         String mediaThumbnailUrl
+        String mediaKey
+        String mediaIv
+        String mediaSha256
+        String thumbKey
+        String thumbIv
+        String thumbSha256
         String localUri
+        String localThumbUri
         Int mediaWidth
         Int mediaHeight
         String fileName
@@ -201,11 +212,12 @@ erDiagram
         Int position
     }
 
-    signal_identities {
-        String address PK
-        String identityKey
-        String direction
-        String verifiedStatus
+    signal_identity {
+        Int id PK
+        Blob identityKeyPair
+        Int registrationId
+        Int nextPreKeyId
+        Boolean bundlePublished
     }
 
     signal_sessions {
@@ -217,6 +229,7 @@ erDiagram
     signal_prekeys {
         Int preKeyId PK
         String preKeyRecord
+        Boolean uploaded
     }
 
     signal_signed_prekeys {
@@ -244,7 +257,7 @@ erDiagram
     stickers ||--o{ sticker_pack_items : "is in"
 ```
 
-_The seven Signal tables (`signal_identities`, `signal_sessions`, `signal_prekeys`, `signal_signed_prekeys`, `signal_kyber_prekeys`, `signal_sender_keys`, `signal_trusted_identities`) live in the dedicated `signal.db` and preserve the persistent cryptographic state required by the Signal Protocol, including post-quantum Kyber pre-keys. `signal_trusted_identities` is omitted from the diagram above for clarity but follows the same shape as `signal_identities`._
+_The seven Signal tables (`signal_identity`, `signal_sessions`, `signal_prekeys`, `signal_signed_prekeys`, `signal_kyber_prekeys`, `signal_sender_keys`, `signal_trusted_identities`) live in the dedicated `signal.db` (v2) and preserve the persistent cryptographic state required by the Signal Protocol, including post-quantum Kyber pre-keys. `signal_trusted_identities` is omitted from the diagram above for clarity._
 
 ---
 

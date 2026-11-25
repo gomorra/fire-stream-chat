@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -71,6 +72,7 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
@@ -134,7 +136,7 @@ fun SettingsScreen(
     var showDictationLanguagePicker by remember { mutableStateOf(false) }
     var showChatFontSizePicker by remember { mutableStateOf(false) }
     var showClearCacheDialog by remember { mutableStateOf(false) }
-    var showDisableEncryptionDialog by remember { mutableStateOf(false) }
+    var showEncryptionInfoDialog by remember { mutableStateOf(false) }
     var showBuildInfo by remember { mutableStateOf(false) }
     // Ephemeral confirm dialog for cancelling an in-flight APK download. Lives
     // here rather than in SettingsUiState because it's pure UI intent and
@@ -319,22 +321,9 @@ fun SettingsScreen(
                 onCheckedChange = { viewModel.setScreenSecurity(it) }
             )
 
-            // Hidden in debug — debug builds always send plaintext regardless of this toggle.
-            if (!BuildConfig.DEBUG) {
-                SettingsToggleItem(
-                    icon = Icons.Default.Lock,
-                    title = "End-to-End Encryption",
-                    subtitle = if (uiState.e2eEncryption) {
-                        "Encrypt 1:1 messages with Signal Protocol (recommended)"
-                    } else {
-                        "Off — outgoing 1:1 messages are sent as plaintext"
-                    },
-                    checked = uiState.e2eEncryption,
-                    onCheckedChange = { enabled ->
-                        if (enabled) viewModel.setE2eEncryption(true)
-                        else showDisableEncryptionDialog = true
-                    }
-                )
+            // Hidden in debug builds and flavors without Signal — those builds always send plaintext.
+            if (BuildConfig.SUPPORTS_SIGNAL && !BuildConfig.DEBUG) {
+                EndToEndEncryptionRow(onClick = { showEncryptionInfoDialog = true })
             }
 
             // Notifications section
@@ -687,31 +676,8 @@ fun SettingsScreen(
         BuildInfoDialog(onDismiss = { showBuildInfo = false })
     }
 
-    if (showDisableEncryptionDialog) {
-        AlertDialog(
-            onDismissRequest = { showDisableEncryptionDialog = false },
-            title = { Text("Disable End-to-End Encryption?") },
-            text = {
-                Text(
-                    "New 1:1 messages you send will be readable by anyone with access to the " +
-                        "server. Messages already in your chats stay as they were sent. " +
-                        "Group and broadcast messages were never encrypted."
-                )
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    viewModel.setE2eEncryption(false)
-                    showDisableEncryptionDialog = false
-                }) {
-                    Text("Disable", color = MaterialTheme.colorScheme.error)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showDisableEncryptionDialog = false }) {
-                    Text("Cancel")
-                }
-            }
-        )
+    if (showEncryptionInfoDialog) {
+        EndToEndEncryptionInfoDialog(onDismiss = { showEncryptionInfoDialog = false })
     }
 
     if (showSignOutDialog) {
@@ -956,6 +922,84 @@ internal fun FullScreenAlertsRow(granted: Boolean, onClick: () -> Unit) {
             "Off. Incoming calls and timer alarms show only as a notification"
         },
         onClick = onClick
+    )
+}
+
+/**
+ * Normal-contrast read-only status row for always-on 1:1 E2EE in Firebase release
+ * builds. Displays an active "Always on" badge and opens [EndToEndEncryptionInfoDialog]
+ * when tapped.
+ */
+@Composable
+internal fun EndToEndEncryptionRow(onClick: () -> Unit) {
+    ListItem(
+        headlineContent = { Text("End-to-End Encryption") },
+        supportingContent = {
+            Text(
+                "Always on for 1:1 chats",
+                style = MaterialTheme.typography.bodySmall
+            )
+        },
+        leadingContent = {
+            Icon(
+                Icons.Default.Lock,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurface
+            )
+        },
+        trailingContent = {
+            Surface(
+                shape = RoundedCornerShape(12.dp),
+                color = MaterialTheme.colorScheme.primaryContainer
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.CheckCircle,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Text(
+                        text = "Always on",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Medium,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                    )
+                }
+            }
+        },
+        modifier = Modifier.clickable(onClick = onClick)
+    )
+}
+
+@Composable
+internal fun EndToEndEncryptionInfoDialog(onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("End-to-End Encryption") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    "1:1 chats are always end-to-end encrypted using the Signal Protocol " +
+                        "for messages, edits, locations, and stickers, and AES-256-GCM for " +
+                        "photos, videos, voice notes, documents, and GIFs. Only you and the " +
+                        "recipient can read them."
+                )
+                Text(
+                    "Group and broadcast chats are not end-to-end encrypted yet — group " +
+                        "encryption is planned for a future update."
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text("OK")
+            }
+        }
     )
 }
 

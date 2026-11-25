@@ -3,12 +3,13 @@
 //   plaintext, and hands the write to MessageSource. The one owner of that
 //   decision for every 1:1-capable send.
 // Owns: the SUPPORTS_SIGNAL / BuildConfig.DEBUG build gate (a constructor value,
-//   so tests can take the encrypted branch), the e2e opt-out read, and packing
-//   1:1 messages into a v=1 MessageEnvelope before encrypting.
+//   so tests can take the encrypted branch) and packing 1:1 messages into a
+//   v=1 MessageEnvelope before encrypting. 1:1 E2EE is always on in Firebase
+//   release builds (no user opt-out).
 // Collaborators: OutboxSender (encode, persist the ciphertext on the row, then
 //   write — every queued send), MessageRepositoryImpl's broadcast fan-out (send —
-//   no row to keep the ciphertext on), SignalManager, MessageSource,
-//   PreferencesDataStore. SendTarget says whether there is a peer to encrypt for.
+//   no row to keep the ciphertext on), SignalManager, MessageSource.
+//   SendTarget says whether there is a peer to encrypt for.
 // Don't put here: attempts, retries or any Room access — the row belongs to
 //   OutboxSender and this class keeps no state.
 // endregion
@@ -19,12 +20,10 @@ import com.firestream.chat.BuildConfig
 import com.firestream.chat.data.crypto.EncryptedMessage
 import com.firestream.chat.data.crypto.MessageEnvelope
 import com.firestream.chat.data.crypto.SignalManager
-import com.firestream.chat.data.local.PreferencesDataStore
 import com.firestream.chat.data.remote.source.FileMetadata
 import com.firestream.chat.data.remote.source.MessageSource
 import com.firestream.chat.data.remote.source.StickerRef
 import com.firestream.chat.domain.model.Message
-import kotlinx.coroutines.flow.first
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -32,7 +31,6 @@ import javax.inject.Singleton
 class MessageWriter internal constructor(
     private val messageSource: MessageSource,
     private val signalManager: SignalManager,
-    private val preferencesDataStore: PreferencesDataStore,
     private val buildEncrypts: Boolean,
 ) {
 
@@ -40,13 +38,12 @@ class MessageWriter internal constructor(
     constructor(
         messageSource: MessageSource,
         signalManager: SignalManager,
-        preferencesDataStore: PreferencesDataStore,
     ) : this(
         messageSource,
         signalManager,
-        preferencesDataStore,
         // Debug builds send plaintext so a reinstall during development cannot
         // strand history nobody can decrypt; the pocketbase flavor has no Signal.
+        // Release builds of the firebase flavor always encrypt 1:1 messages.
         buildEncrypts = BuildConfig.SUPPORTS_SIGNAL && !BuildConfig.DEBUG,
     )
 
@@ -54,22 +51,20 @@ class MessageWriter internal constructor(
      * True when a message sent to [target] should be encrypted end-to-end
      * (both its Signal envelope and any uploaded 1:1 media/thumbnail blobs).
      */
-    suspend fun willEncrypt(message: Message, target: SendTarget): Boolean =
-        target.peerId != null &&
-            buildEncrypts &&
-            preferencesDataStore.e2eEncryptionEnabledFlow.first()
+    fun willEncrypt(target: SendTarget): Boolean =
+        target.peerId != null && buildEncrypts
 
     /**
      * [message]'s v=1 [MessageEnvelope] encrypted for [target]'s peer when this
-     * build encrypts and the user has not opted out; `null` when it travels in
-     * plaintext — always for [SendTarget.NoPeer], since a Signal session cannot
-     * address a group or a broadcast.
+     * build encrypts; `null` when it travels in plaintext — always for
+     * [SendTarget.NoPeer], since a Signal session cannot address a group or a
+     * broadcast.
      *
      * Encrypting advances the peer's session. A caller that may write the same
      * message again keeps the result instead of calling this twice.
      */
     suspend fun encode(message: Message, target: SendTarget): EncryptedMessage? {
-        if (!willEncrypt(message, target)) return null
+        if (!willEncrypt(target)) return null
         val peer = target.peerId ?: return null
         signalManager.ensureInitialized()
         val envelopeJson = MessageEnvelope.fromMessage(message).encode()
@@ -85,8 +80,8 @@ class MessageWriter internal constructor(
         emojiSizes: Map<Int, Float>,
         target: SendTarget,
     ): EncryptedMessage? {
+        if (!willEncrypt(target)) return null
         val peer = target.peerId ?: return null
-        if (!buildEncrypts || !preferencesDataStore.e2eEncryptionEnabledFlow.first()) return null
         signalManager.ensureInitialized()
         val envelopeJson = MessageEnvelope.forEdit(newContent, emojiSizes).encode()
         return signalManager.encrypt(peer, envelopeJson)

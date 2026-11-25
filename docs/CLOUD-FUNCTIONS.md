@@ -1,6 +1,6 @@
 # Firebase Cloud Functions
 
-Five functions in `functions/index.js` (Node.js 20 runtime):
+Six functions in `functions/index.js` (Node.js 22 runtime):
 
 ### `sendPushNotification`
 
@@ -39,6 +39,13 @@ Five functions in `functions/index.js` (Node.js 20 runtime):
 - **Secrets**: `CLOUDFLARE_TURN_KEY_ID` and `CLOUDFLARE_TURN_API_TOKEN`, both `defineSecret`. Set them with `firebase functions:secrets:set <name>` before the deploy. The deploy fails while one is missing.
 - It logs the HTTP status of a failed request and nothing else. The token, the request and the answer are never logged, because the answer is a credential.
 - Every signed-in user can ask for a login, as often as they like. Nothing limits it. See `docs/BACKLOG.md` § *The relay hands a login to every signed-in user*.
+
+### `claimPreKeyBundle`
+
+- **Trigger**: a callable function (`onCall`), in the default region. The app calls it through `FirebaseKeySource`.
+- Rejects a caller who is not signed in with `unauthenticated`, and rejects callers blocked by the target user without popping any pre-key.
+- Inside a Firestore transaction, reads `keyBundles/{targetUid}` and atomically pops one matching document from `keyBundles/{targetUid}/oneTimePreKeys/{preKeyId}` (deleting it on claim).
+- Falls back to legacy top-level `preKeyId`/`preKeyPublic` if present, or returns `preKeyId: null, preKeyPublic: null` when the pool is temporarily empty so Signal PQXDH can still establish a session via the signed pre-key and Kyber last-resort key.
 
 ### `syncPresenceToFirestore`
 

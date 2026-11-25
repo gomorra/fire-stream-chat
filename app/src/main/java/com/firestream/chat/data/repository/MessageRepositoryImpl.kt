@@ -1041,7 +1041,7 @@ class MessageRepositoryImpl @Inject constructor(
             !KlipyUrls.isMedia(message.mediaUrl) &&
             message.type != MessageType.STICKER
         val needsFreshMediaUpload = (message.mediaKey != null || message.thumbKey != null) ||
-            (isReuploadableMedia && messageWriter.willEncrypt(optimisticMessage, target))
+            (isReuploadableMedia && messageWriter.willEncrypt(target))
         if (needsFreshMediaUpload) {
             val decryptedFile = resolveDecryptedLocalFile(message)
                 ?: throw IllegalStateException("Cannot forward encrypted media ${message.id}: local file unavailable")

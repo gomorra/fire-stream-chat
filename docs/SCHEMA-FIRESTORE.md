@@ -18,8 +18,9 @@ users/{userId}
 keyBundles/{userId}                             # Signal Protocol pre-key bundles
 ├── registrationId, identityKey
 ├── signedPreKeyId, signedPreKeyPublic, signedPreKeySig
-├── preKeyId, preKeyPublic
-└── kyberPreKeyId, kyberPreKeyPublic, kyberPreKeySig
+├── kyberPreKeyId, kyberPreKeyPublic, kyberPreKeySig
+└── oneTimePreKeys/{preKeyId}                   # subcollection (owner-only in firestore.rules;
+    └── preKeyPublic, createdAt                 # popped atomically by claimPreKeyBundle Cloud Function)
 
 chats/{chatId}
 ├── type                                        # "INDIVIDUAL" | "GROUP" | "BROADCAST"
@@ -35,28 +36,26 @@ chats/{chatId}
 │   └── isAnnouncementMode
 └── messages/{messageId}                        # subcollection; id = client UUID (the Room row id)
     │                                           # for retryable sends, Firestore auto-id for poll/list/call/timer
-    ├── senderId, content, type, status, timestamp
-    ├── ciphertext, signalType                  # present when E2E encrypted (release builds)
-    ├── mediaUrl, mediaThumbnailUrl, mediaWidth, mediaHeight
-    ├── fileName, fileSize, mimeType            # DOCUMENT — plaintext, like mediaUrl (docs/plans/file-handling.md).
-    │                                           # A STICKER and a GIF carry mimeType alone
-    ├── stickerId, stickerPackId                # STICKER only — the SHA-256 of the sticker's bytes, and the pack it
-    │                                           # was sent from (absent for favourites and loose stickers). Plaintext.
-    │                                           # mediaUrl then points at the shared Storage object stickers/<id>.<ext>
-    │                                           # A GIF or STICKER picked from Klipy has a mediaUrl on static.klipy.com,
-    │                                           # static1.klipy.com or static2.klipy.com, and no stickerId. Nothing of it
-    │                                           # is in Storage, and no device keeps a copy (KlipyUrls.isMedia)
-    ├── localUri                                # NOT synced to Firestore — Room only
-    ├── replyToId, isForwarded, isPinned, duration
+    ├── senderId, type, status, timestamp, isForwarded
+    ├── ciphertext, signalType                  # 1:1 E2EE (firebase release): Signal-encrypted v1 MessageEnvelope JSON
+    ├── editCiphertext, editSignalType          # 1:1 E2EE edits: Signal-encrypted MessageEnvelope(kind = EDIT)
+    ├── content                                 # plaintext only (groups, broadcasts, debug builds, poll/list/call/timer)
+    ├── mediaUrl, mediaThumbnailUrl, mediaWidth, mediaHeight   # plaintext only (hidden inside ciphertext for 1:1 E2EE)
+    ├── fileName, fileSize, mimeType            # plaintext only (hidden inside ciphertext for 1:1 E2EE)
+    ├── stickerId, stickerPackId                # plaintext only (hidden inside ciphertext for 1:1 E2EE;
+    │                                           # blob still lives in shared stickers/<sha256>.<ext>;
+    │                                           # Klipy URLs on static/static1/static2.klipy.com have no stickerId)
+    ├── localUri, localThumbUri                 # NOT synced to Firestore — Room only
+    ├── replyToId, isPinned, duration, isHd     # replyToId / duration / isHd hidden inside ciphertext for 1:1 E2EE
     ├── editedAt, deletedAt
-    ├── reactions: { emoji → ? }
-    ├── mentions[]
+    ├── reactions: { userId → emoji }
+    ├── mentions[]                              # plaintext only (hidden inside ciphertext for 1:1 E2EE)
     ├── readBy: { userId → timestamp }
     ├── deliveredTo: { userId → timestamp }
-    ├── emojiSizes: { charIndex → multiplier }
+    ├── emojiSizes: { charIndex → multiplier }  # plaintext only (hidden inside ciphertext for 1:1 E2EE)
     ├── pollData: { options[], isMultipleChoice, isClosed }
     ├── listId, listDiff: { added[], removed[], checked[], ... }
-    ├── latitude, longitude                     # LOCATION messages
+    ├── latitude, longitude                     # plaintext only (hidden inside ciphertext for 1:1 E2EE)
     └── video                                   # CALL only — the call was started as video; absent = voice
 
 calls/{callId}
@@ -120,11 +119,27 @@ stickerNames/{stickerId}                       # one sticker's automatic name; i
 
 The RTDB presence path uses the `.info/connected` pattern: on connect, set `isOnline = true`; register `onDisconnect()` to set `isOnline = false` and `lastSeen = ServerValue.TIMESTAMP`. The `syncPresenceToFirestore` Cloud Function mirrors RTDB writes to Firestore `users/{userId}` with a `lastSeen` transaction guard to reject out-of-order invocations.
 
+### Firebase Storage Layout
+
+Access is enforced by `storage.rules` (deployed alongside `firestore.rules` via `firebase.json`):
+
+```
+avatars/{uid}/profile.jpg                       # signed-in get; owner create/update/delete (< 10 MB, image/*)
+avatars/groups/{chatId}/group.jpg               # signed-in get; chat participant create/update (< 10 MB, image/*)
+media/{chatId}/{storageId}.{ext|enc}            # chat participant get/create/update (< 100 MB); no client delete
+                                                # 1:1 E2EE blobs are chunked AES-256-GCM .enc (application/octet-stream)
+stickers/{sha256}.{webp|tgs}                    # signed-in get/create-only (< 2 MB); no listing, update, or delete
+backups/{uid}/                                  # strictly owner-only (request.auth.uid == uid)
+├── manifest.json                               # application/json (< 10 MB); outer header + AAD-bound encryptedMetaB64
+├── db_<timestamp>_<hex>.enc                    # application/octet-stream (< 512 MB); gzipped & encrypted AppDatabase
+└── legacy-media/{keyGen}/{messageId}.enc       # application/octet-stream (< 100 MB); pre-E2EE media, keyGen = 16-hex SHA-256(salt)
+```
+
 ### Key Patterns
 
 - **Array mutations** (`participants`, `admins`, `pendingMembers`, `sharedChatIds`): Use `FieldValue.arrayUnion()` / `arrayRemove()` for atomic updates.
 - **Per-key maps** (`typingUsers`, `unreadCounts`, `readBy`, `deliveredTo`, a call's `media`): Updated via `FieldValue` dot-notation paths (e.g., `"unreadCounts.$userId"`, `"media.$userId.camera"`).
-- **Encryption duality**: Messages store either `content` (plaintext — debug builds, or release builds where the user has opted out) or `ciphertext` + `signalType` (Signal-encrypted, release builds with E2E enabled). Never both.
+- **Encryption duality**: 1:1 messages in `firebase` release builds are always Signal-encrypted (`ciphertext` + `signalType` carrying a v1 `MessageEnvelope`, plus `editCiphertext` + `editSignalType` for edits) and omit plaintext `content` and metadata. Their chat preview carries only a generic type placeholder (`"Message"`, `"📷 Photo"`, etc.). Group, broadcast, debug-build, and structured (`POLL`/`LIST`/`CALL`/`TIMER`) messages write plaintext `content`. Never both.
 - **List items live in a subcollection.** Each item mutation is a single-doc write under `lists/{listId}/items/{itemId}`; `itemCount` / `checkedCount` on the parent metadata doc are kept in sync via `FieldValue.increment()` in the same batch. A one-shot `migrateEmbeddedItemsIfNeeded` upgrade runs on first observe for legacy lists that still carry an embedded `items[]` array.
 - **`callVideoLine` is a capability, written only as `true`.** An app that can take a video line in a call offer writes it when it starts and when an existing user signs in (`AuthRepository.announceCallVideoLine`). A new user document carries it from its creation. A caller reads the callee's field before it creates the call document (`CallRepository.createCall`) and offers the video line only on a stored `true`. Never write `false` and never remove the field: an app from before video calls crashes on an offer with a video line.
 - **`firestore.rules` lists what a call document may hold.** A call is created with `video` or without it, and never with `media`. An update may change only the writer's own entry under `media`, as two booleans. `video` never changes. A new field needs the rules changed and deployed before an app writes it. Tests: `firestore-rules-tests/calls.test.js`.

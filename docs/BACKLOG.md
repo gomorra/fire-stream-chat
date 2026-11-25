@@ -21,6 +21,16 @@ It is not a feature gap and not tech debt — it is an unfinished check, and it 
 here because a cloud agent has no other way to learn that the work is not fully done.
 Delete an item once it has been verified (or once a fix for what the check found ships).
 
+### Full 1:1 E2EE, encrypted backups, and plaintext scrub (2026-11-25)
+
+`docs/plans/e2e-encryption.md` Phases 1–4 (Steps 1–9). JVM, Robolectric, Cloud Functions, Firestore rules, and `scripts/scrub-plaintext.test.mjs` tests cover the migrations, pre-key pool, locked receive path, v1 envelope, chunked AES-256-GCM media, encrypted edits, passphrase backup/restore, Settings status row, and scrub safety gate. Before running Step 9's plaintext scrub on production data:
+
+1. Deploy `functions` (`claimPreKeyBundle`), `firestore.rules`, and `storage.rules` (diffing `storage.rules` against the currently deployed Firebase Console rules first).
+2. Install the **firebase release** build on both phones. Confirm Settings → Privacy shows the read-only *End-to-End Encryption · Always on for 1:1 chats* row (tapping opens the 1:1 vs group info dialog) with no opt-out toggle.
+3. Send text, photo, HD photo, video + thumbnail, voice note, document, GIF, location, sticker, forward, and edit in a 1:1 chat. Verify Firestore holds zero plaintext metadata and Storage holds `.enc` blobs (`application/octet-stream`), and that cold-start FCM notifications show decrypted previews.
+4. On both phones: set a passphrase in Settings → Chat Backup, run *Back up now*, and verify both report `All legacy media backed up ✓`. Test a real fresh-install restore on a wiped/test install (confirming text, stars, legacy media, and Phase-2 encrypted media all recover).
+5. Run `node scripts/scrub-plaintext.mjs --users <uid1,uid2>` (dry-run) to confirm the safety gate passes, then run `--execute --users <uid1,uid2>` to erase legacy 1:1 plaintext while leaving group chats and `.enc` blobs intact.
+
 ### The message sync asks for the tail (2026-10-10)
 
 `docs/plans/message-sync.md` step 1. JVM tests cover the plan, the state table, the sync and the
@@ -667,7 +677,7 @@ phones, with auto-download on:
 Shipped in 1.36.1 (`d63ae9b1`, `7abdf337`, `f411a330`, `58de0f05`); nothing has
 been on hardware. The JVM tests prove which target each row records. Only a device proves that
 the people a message is for can read it. Encryption is off in debug builds, so every check needs
-a **release build of the firebase flavor with the E2E toggle on** (Settings), on at least two
+a **release build of the firebase flavor** (where 1:1 E2EE is always on), on at least two
 phones plus a third account for the group:
 
 - (a) Receive a message in a group, tap its notification, send a reply from the screen that
@@ -849,7 +859,7 @@ over an existing install**, with a second device as recipient:
    the sender's row stays deleted (the tombstone path).
 6. Send to a user who blocked you: online → the banner as before; offline → a clock, then
    "failed" once connected (the worker's authoritative check).
-7. Release build, two devices, E2E on (once encryption is switched on): a burst of mixed media
+7. Release build, two devices (1:1 E2EE always on): a burst of mixed media
    and text offline → all decrypt on the recipient.
 8. Compose→SENT latency online, before vs after step 6 (logcat timestamps). Confirm no
    notification flashes for a text send; an upload shows the low-importance "Sending"
@@ -1214,9 +1224,9 @@ stack is saved, so a rotation mid-crop is a supported path and an untested one.
 - Files: new `ui/verification/SafetyNumberScreen.kt`, `data/crypto/SignalManager.kt`
 
 ### Group E2E encryption — sender keys (3.5)
-- Still scaffolding only: `SignalSenderKeyEntity` / `SignalProtocolStoreImpl` exist, but there is no `SenderKeyDistributionMessage` / `GroupCipher` usage anywhere. Group and broadcast messages are **not** encrypted, and the encryption toggle has no effect on them.
+- Still scaffolding only: `SignalSenderKeyEntity` / `SignalProtocolStoreImpl` exist, but there is no `SenderKeyDistributionMessage` / `GroupCipher` usage anywhere. 1:1 chats are always end-to-end encrypted in `firebase` release builds, while group and broadcast messages remain plaintext.
 - Implement Sender Key Distribution Messages on group creation and member join
-- Encrypt group messages using `SenderKeyMessage`
+- Encrypt group messages using `SenderKeyMessage` (reusing `MessageEnvelope` and `MediaCrypto`)
 - Files: `data/crypto/SignalManager.kt`, `data/repository/MessageRepositoryImpl.kt`
 
 ### Screen security (3.6)
@@ -1362,11 +1372,6 @@ in 1.37.0 (`docs/plans/file-handling.md`). Ideas for the next round, none decide
 - **Stream audio files that are not downloaded yet** — the inline player shows only for a local
   file; needs the asynchronous prepare in TECH_DEBT "The voice-message player prepares on the main
   thread" first.
-- **End-to-end encryption of files** — today a file's bytes go to Storage unencrypted, and its name,
-  size and type sit in plaintext beside the encrypted caption (privacy note in the plan). The usual
-  shape: encrypt the bytes with a fresh per-file key before upload, and send that key plus the file
-  metadata inside the Signal-encrypted message body. A message-format change for every media type,
-  not just documents — plan it with encryption switched on in release builds.
 - Cloud storage integration (Google Drive picker)
 - Files: `data/util/FilePreviewLoader.kt`, `data/util/MediaFileManager.kt`, `ui/chat/FileMessageBubble.kt`,
   `ui/chat/ChatScreen.kt` (see FEATURE-MAP "File Messages (documents)")
@@ -1374,13 +1379,6 @@ in 1.37.0 (`docs/plans/file-handling.md`). Ideas for the next round, none decide
 ---
 
 ## Platform & Reliability
-
-### Chat backup & restore (6.1)
-- Encrypted backup to Google Drive
-- Backup scheduling (daily / weekly / manual)
-- Restore flow during new-device setup
-- Include-media option, with a size warning
-- Files: new `data/backup/` package, `ui/settings/`
 
 ### Multi-device support (6.2)
 - Link secondary devices (tablet, web) via QR code
@@ -1498,7 +1496,6 @@ Less-specified than the items above — kept because the thinking is worth not r
 - **Export chat as PDF/HTML** — export full conversation history
 
 ### Infrastructure & technical
-- **End-to-end encrypted backups** — user-derived key, not Google's, for backup encryption
 - **Certificate pinning** — pin Firebase and API certificates to prevent MITM
 - **Reproducible builds** — deterministic builds for security auditing
 - **Crash reporting** — Firebase Crashlytics for production monitoring

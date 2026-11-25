@@ -1,4 +1,4 @@
-<!-- last-verified: 2026-09-20 -->
+<!-- last-verified: 2026-11-25 -->
 
 # Feature → File Map
 
@@ -424,31 +424,64 @@ The start of the app and pull to refresh ask each chat for what Room lacks. A ch
 
 ---
 
-## E2E Encryption (with release-mode opt-out)
+## E2E Encryption (always-on 1:1)
 
-Signal Protocol message encryption. Disabled in debug builds; release users can opt out via Settings → Privacy.
+Signal Protocol 1:1 message, edit, metadata, and chunked AES-256-GCM media encryption. Always on in `firebase` release builds (`BuildConfig.SUPPORTS_SIGNAL && !BuildConfig.DEBUG`, no user opt-out); bypassed in debug builds and unavailable in `pocketbase`. Group and broadcast chats remain plaintext.
 
 | File | Role |
 |---|---|
-| `app/src/main/java/com/firestream/chat/data/crypto/SignalManager.kt` | Encrypt / decrypt orchestration; one session `Mutex` per peer shared by both, pre-key replenishment after it is released under its own lock; `isCurrentIdentity` says whether a stored ciphertext's peer identity is still the published one |
+| `app/src/main/java/com/firestream/chat/data/crypto/SignalManager.kt` | Encrypt / decrypt orchestration; per-peer session `Mutex`, rotating 50-key one-time pre-key pool (low-watermark 20, replenished outside session lock), locked stale-bundle re-fetch guard, `isCurrentIdentity` |
 | `app/src/main/java/com/firestream/chat/data/crypto/SignalProtocolStoreImpl.kt` | `SignalProtocolStore` backed by `SignalDatabase` |
-| `app/src/main/java/com/firestream/chat/data/local/SignalDatabase.kt` | Dedicated `signal.db` — keys survive `AppDatabase` destructive migrations |
-| `app/src/firebase/java/com/firestream/chat/data/remote/firebase/FirebaseKeySource.kt` | `keyBundles/{userId}` pre-key bundle exchange |
-| `app/src/main/java/com/firestream/chat/data/outbox/MessageWriter.kt` | `encode` / `write` / `send` — the build gate (`SUPPORTS_SIGNAL && !DEBUG`, a constructor value so tests can encrypt), `e2eEncryptionEnabledFlow` and the always-plaintext types (LOCATION) around the Signal branch |
-| `app/src/main/java/com/firestream/chat/data/outbox/OutboxSender.kt` | Encrypts once per message: keeps `outboxCiphertext` and the peer identity on the row before the write, and a retry reuses it while that identity is still current |
-| `app/src/firebase/java/com/firestream/chat/data/remote/firebase/FirestoreMessageSource.kt` | `sendMessage` writes ciphertext only; the chat preview of an encrypted message carries the type, never the text or caption |
-| `app/src/main/java/com/firestream/chat/data/local/PreferencesDataStore.kt` | `e2eEncryptionEnabledFlow` (default `true`) |
-| `app/src/main/java/com/firestream/chat/ui/settings/SettingsScreen.kt` | Privacy → Encryption toggle (release builds) |
-| `app/src/main/java/com/firestream/chat/ui/settings/SettingsViewModel.kt` | Wires the toggle |
-| `app/src/test/java/com/firestream/chat/data/local/SignalDatabaseSmokeTest.kt` | Dedicated DB smoke |
-| `app/src/test/java/com/firestream/chat/data/crypto/SignalManagerTest.kt` | Real libsignal, two parties: per-peer lock for encrypt + encrypt and encrypt + decrypt, lock released before the pre-key publish, a peer identity stops being current on re-registration |
-| `app/src/test/java/com/firestream/chat/data/repository/MessageRepositorySyncDecryptTest.kt` | The chat-list sync finishes decrypt-and-insert once started, even when cancelled meanwhile |
-| `app/src/testFirebase/java/com/firestream/chat/data/remote/firebase/FirestoreMessageSourceTest.kt` | The encrypted write holds no `content`, and its chat preview no plaintext |
-| `app/src/test/java/com/firestream/chat/data/outbox/MessageWriterTest.kt` | The encrypt-or-plaintext policy, one test per plaintext reason |
-| `app/src/test/java/com/firestream/chat/data/local/dao/MessageDaoOutboxColumnsTest.kt` | A `MessageRecord` upsert cannot touch `localUri`, the star or the outbox columns; `markSent` and `acknowledge` are what clear the outbox |
-| `app/src/test/java/com/firestream/chat/ui/settings/SettingsViewModelTest.kt` | Toggle persistence |
+| `app/src/main/java/com/firestream/chat/data/crypto/MessageEnvelope.kt` | Versioned (`v = 1`) JSON envelope codec for `MSG` and `EDIT` payloads (body, mentions, emoji sizes, reply target, location coords, hidden sticker ref, AES-GCM media/thumb descriptors) with legacy plain-string fallback |
+| `app/src/main/java/com/firestream/chat/data/crypto/MediaCrypto.kt` | Streaming 64 KiB chunked AES-256-GCM cipher with per-chunk nonce XOR + AAD `(version, index, isFinal)`, SHA-256 verification, and atomic `.dec.part` rename |
+| `app/src/main/java/com/firestream/chat/data/local/SignalDatabase.kt` | Dedicated `signal.db` (v2, explicit `MIGRATION_1_2`, no destructive fallback) storing Signal identities, `nextPreKeyId`, `bundlePublished`, sessions, pre-keys, and Kyber pre-keys |
+| `app/src/firebase/java/com/firestream/chat/data/remote/firebase/FirebaseKeySource.kt` | Publishes `keyBundles/{uid}` + `oneTimePreKeys/{id}` subcollection; claims peer bundles atomically via `claimPreKeyBundle` |
+| `functions/index.js` | `claimPreKeyBundle` callable Cloud Function — atomically pops one pre-key inside a Firestore transaction (with blocked-caller guard and signed/Kyber fallback when pool is empty) |
+| `firestore.rules` | Owner-only access on `keyBundles/{uid}/oneTimePreKeys/{id}` |
+| `app/src/main/java/com/firestream/chat/data/outbox/MessageWriter.kt` | `willEncrypt` / `encode` / `encodeEdit` / `write` / `send` — owns the `SUPPORTS_SIGNAL && !DEBUG` build gate and packs 1:1 messages/edits into v1 `MessageEnvelope` |
+| `app/src/main/java/com/firestream/chat/data/outbox/OutboxSender.kt` | Encrypts 1:1 media and video thumbnails via `MediaCrypto` before `.enc` upload, caches local thumbs, and persists `outboxCiphertext` + peer identity for idempotent retries |
+| `app/src/firebase/java/com/firestream/chat/data/remote/firebase/FirestoreMessageSource.kt` | `sendMessage` writes routing/delivery fields + `ciphertext` only (zero plaintext metadata) and generic type-only chat previews; `editEncryptedMessage` writes `editCiphertext` and clears plaintext `content` |
+| `app/src/firebase/java/com/firestream/chat/data/remote/firebase/FirebaseStorageSource.kt` | `uploadEncryptedMedia` writes `media/{chatId}/{storageId}.enc` (`application/octet-stream`) |
+| `app/src/main/java/com/firestream/chat/data/repository/MessageRepositoryImpl.kt` | Unified `reconcileRawMessage` under per-message `KeyedMutex` (`receiveLocks`) across listener, chat-list sync, and push reconcile; encrypted edits; forward re-encryption across chats; `downloadMedia` on-demand decrypt |
+| `app/src/main/java/com/firestream/chat/data/util/MediaFileManager.kt` | Decrypts `.enc` blobs + encrypted thumbnails to local storage before UI display; refuses direct raw `.enc` playback |
+| `app/src/main/java/com/firestream/chat/data/remote/fcm/FCMService.kt` | Bounded `reconcileFromPush` inside `onMessageReceived` for decrypted notification previews with blocked/deleted suppression |
+| `app/src/main/java/com/firestream/chat/ui/settings/SettingsScreen.kt` | Privacy → read-only `EndToEndEncryptionRow` ("Always on for 1:1 chats" + active badge) opening `EndToEndEncryptionInfoDialog` (hidden in debug / non-Signal builds) |
+| `scripts/scrub-plaintext.mjs` | Host-side Admin SDK one-time plaintext scrub tool (dry-run default, backup safety gate on versioned `db_<ts>_<hex>.enc` & `legacy-media/{keyGen}/`, 1:1 chats only) + `scripts/scrub-plaintext.test.mjs` |
+| `app/src/test/java/com/firestream/chat/data/crypto/SignalManagerTest.kt` | Real libsignal: per-peer lock, rotating pre-key pool, empty-pool Kyber fallback, replenish retry, locked stale-bundle re-fetch |
+| `app/src/test/java/com/firestream/chat/data/crypto/MessageEnvelopeTest.kt` | Envelope v1 round-trip for every message type + legacy plain-string fallback |
+| `app/src/test/java/com/firestream/chat/data/crypto/MediaCryptoTest.kt` | Empty, single-chunk, multi-chunk, wrong key, tamper, truncation, swapped-chunk tests |
+| `app/src/test/java/com/firestream/chat/data/repository/MessageRepositorySyncDecryptTest.kt` | Concurrent listener + sync + push calls `decrypt` exactly once; never overwrites already-decrypted rows |
+| `app/src/test/java/com/firestream/chat/data/repository/MessageRepositoryEditEncryptTest.kt` | Encrypted 1:1 edits, edits arriving before original sync, sequential edits, failure recovery |
+| `app/src/test/java/com/firestream/chat/data/outbox/MessageWriterTest.kt` | Always-on 1:1 policy, metadata-stripped encrypted writes, `willEncrypt` build gate |
+| `app/src/test/java/com/firestream/chat/ui/settings/EndToEndEncryptionRowUiTest.kt` | Robolectric Compose test for the read-only status row and 1:1 vs group info dialog |
 
-**Entry point:** every 1:1 send reaches `MessageWriter` — `OutboxSender.send()` calls `encode` (skipped when the row already holds ciphertext for the peer's current identity) and then `write` for text / media / voice / location / forward; the broadcast fan-out calls `send`, which does both — and `encode` picks plaintext or Signal by the row's `SendTarget`.
+**Entry point:** every 1:1 send reaches `MessageWriter` (`OutboxSender.send` for queued messages; `MessageRepositoryImpl.editMessage` for edits). Incoming messages from listener, sync, and FCM push all converge on `MessageRepositoryImpl.reconcileRawMessage` under `receiveLocks`.
+
+---
+
+## Encrypted Cloud Backup & Restore
+
+Passphrase-protected backup of `AppDatabase` (`fire_stream_chat.db`) plus pre-E2EE legacy media under `backups/{uid}/` in Firebase Storage. `SignalDatabase` (`signal.db`) is never backed up.
+
+| File | Role |
+|---|---|
+| `storage.rules` | Strict owner-only `backups/{uid}/` rules split by object class (`manifest.json`, `db_<ts>_<hex>.enc`, `legacy-media/{keyGen}/{id}.enc`), plus participant checks on `media/` |
+| `app/src/main/java/com/firestream/chat/data/backup/BackupCrypto.kt` | PBKDF2-HMAC-SHA256 (600,000 iters) + HKDF-SHA256 subkeys (`db`, `manifest`, per-message legacy media), AAD-bound `manifest.json`, key-generation namespacing, and legacy-media framing |
+| `app/src/main/java/com/firestream/chat/data/backup/BackupKeyStore.kt` | Android Keystore-wrapped backup key in DataStore with atomic passphrase rotation staging |
+| `app/src/main/java/com/firestream/chat/data/backup/BackupSource.kt` | Backend interface for manifest, versioned DB blobs, and key-generation legacy-media blobs |
+| `app/src/firebase/java/com/firestream/chat/data/remote/firebase/FirebaseBackupSource.kt` | Firebase Storage implementation of `BackupSource` |
+| `app/src/pocketbase/java/com/firestream/chat/data/remote/pocketbase/PocketBaseBackupSource.kt` | Unsupported stub (`isSupported = false`) for the PocketBase flavor |
+| `app/src/main/java/com/firestream/chat/data/backup/BackupManager.kt` | Syncs chats, downloads legacy media, snapshots via `PRAGMA wal_checkpoint(FULL)` + `VACUUM INTO`, gzips + encrypts with `MediaCrypto`, uploads versioned `db_<ts>_<hex>.enc` and `legacy-media/{keyGen}/{id}.enc`, commits `manifest.json` last; verifies SQLite integrity + schema version on restore |
+| `app/src/main/java/com/firestream/chat/data/backup/LegacyMediaBackupFetcher.kt` | On-demand fallback in `MediaFileManager` that decrypts pre-E2EE media from `backups/{uid}/legacy-media/{keyGen}/` after server plaintext scrub |
+| `app/src/main/java/com/firestream/chat/data/worker/BackupWorker.kt` + `BackupScheduler.kt` | `@HiltWorker` scheduled periodic backup (`Off` / `Daily` / `Weekly`, Wi-Fi + charging constraints, startup `KEEP` reconciliation in `FireStreamApp`) |
+| `app/src/main/java/com/firestream/chat/domain/model/BackupModels.kt` + `domain/repository/BackupRepository.kt` | Progress stages, `LocalBackupStatus`, `RemoteBackupSummary`, `BackupFrequency`, `WrongPassphraseException` |
+| `app/src/main/java/com/firestream/chat/ui/settings/BackupScreen.kt` + `BackupViewModel.kt` | Settings → Chat Backup: passphrase setup/change (≥ 12 chars), determinate stage progress, `All legacy media backed up ✓` status, and auto-backup frequency picker |
+| `app/src/main/java/com/firestream/chat/ui/auth/RestoreBackupScreen.kt` + `RestoreBackupViewModel.kt` | Post-sign-in and cold-start restore prompt when local Room DB is empty and a remote backup exists |
+| `app/src/main/java/com/firestream/chat/RestartActivity.kt` | Isolated `:restart` process trampoline for clean app restart after swapping `fire_stream_chat.db` |
+| `app/src/test/java/com/firestream/chat/data/backup/BackupCryptoTest.kt` + `BackupManagerTest.kt` | KDF, subkey isolation, wrong passphrase rejection, full backup → wipe → restore round-trip, atomic passphrase rotation |
+| `app/src/test/java/com/firestream/chat/ui/settings/BackupViewModelTest.kt` + `BackupScreensUiTest.kt` | ViewModel validation/errors and Robolectric Compose UI tests for `BackupScreen` & `RestoreBackupScreen` |
+
+**Entry points:** manual/scheduled backups via Settings → Chats → *Chat Backup* (`Routes.CHAT_BACKUP`) or `BackupWorker`; fresh-install restore via `AuthViewModel` / `MainActivity` → `Routes.RESTORE_BACKUP` → `BackupManager.restoreBackup` → `RestartActivity`.
 
 ---
 

@@ -20,7 +20,6 @@ import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.slot
-import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -37,8 +36,7 @@ class MessageRepositoryEditEncryptTest {
 
     private fun repo(buildEncrypts: Boolean = true): MessageRepositoryImpl {
         every { authSource.currentUserId } returns "uid1"
-        every { preferencesDataStore.e2eEncryptionEnabledFlow } returns flowOf(true)
-        val writer = MessageWriter(messageSource, signalManager, preferencesDataStore, buildEncrypts)
+        val writer = MessageWriter(messageSource, signalManager, buildEncrypts)
         return messageRepository(
             messageDao = messageDao,
             chats = listOf(
