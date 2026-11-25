@@ -34,6 +34,7 @@ package com.firestream.chat.data.outbox
 
 import android.net.Uri
 import com.firestream.chat.data.crypto.EncryptedMessage
+import com.firestream.chat.data.crypto.MediaCipherInfo
 import com.firestream.chat.data.local.PreferencesDataStore
 import com.firestream.chat.data.local.dao.ChatDao
 import com.firestream.chat.data.local.dao.MessageDao
@@ -164,13 +165,18 @@ class OutboxSender @Inject constructor(
         val isReattempt = entity.outboxAttempts > 0
         messageDao.incrementOutboxAttempts(messageId)
 
+        val encryptMedia = messageWriter.willEncrypt(stored, target)
+
         val row = when (stored.type) {
-            MessageType.IMAGE, MessageType.VIDEO -> prepareMedia(stored)
-            MessageType.DOCUMENT -> keepDocument(prepareMedia(withAudioDuration(stored)))
+            MessageType.IMAGE, MessageType.VIDEO -> prepareMedia(stored, encryptMedia)
+            MessageType.DOCUMENT -> keepDocument(prepareMedia(withAudioDuration(stored), encryptMedia))
             // The document route: the bytes go out as they are, and the sender keeps the copy.
-            MessageType.GIF -> keepDocument(prepareMedia(withImageBounds(stored)))
+            MessageType.GIF -> keepDocument(prepareMedia(withImageBounds(stored), encryptMedia))
             MessageType.STICKER -> withStickerUrl(stored)
-            MessageType.VOICE -> uploadIfNeeded(stored, VOICE_MIME_TYPE)
+            MessageType.VOICE -> {
+                val uploaded = uploadIfNeeded(stored, VOICE_MIME_TYPE, encryptMedia)
+                if (encryptMedia) keepDocument(uploaded) else uploaded
+            }
             else -> stored
         }
 
@@ -234,6 +240,9 @@ class OutboxSender @Inject constructor(
         // By this message's id, so a queued forward — whose localUri is its
         // source's file — never takes the source's copy with it.
         documentFiles.discard(entity.id)
+        if (entity.localThumbUri != null) {
+            mediaFileManager.getLocalThumbFile(entity.id).delete()
+        }
         return entity.toDomain().copy(status = MessageStatus.SENT)
     }
 
@@ -261,33 +270,69 @@ class OutboxSender @Inject constructor(
         return stored.takeIf { messageWriter.isReusable(peer, it) }
     }
 
-    private suspend fun prepareMedia(stored: Message): Message {
+    private suspend fun prepareMedia(stored: Message, encryptMedia: Boolean): Message {
         // Already uploaded — a resumed row past its upload, or a forward, whose
-        // media is the source message's. Nothing here applies: re-encoding would
-        // want a local file the row may not have.
-        if (stored.mediaUrl != null) return stored
-        var row = stored
+        // media is the source message's — ONLY when its encryption state matches
+        // the current mode (so toggling E2EE between retries never pairs a
+        // plaintext write with an `.enc` URL or vice versa).
+        val mediaMatchesMode = stored.mediaUrl != null && (stored.mediaKey != null) == encryptMedia
+        if (mediaMatchesMode) return stored
+        var row = if (stored.mediaUrl != null) {
+            stored.copy(mediaUrl = null, mediaKey = null, mediaIv = null, mediaSha256 = null)
+        } else {
+            stored
+        }
         // Decided only for a row no attempt has encoded yet: one an earlier run
         // compressed into the media dir finishes as it began, whatever the
         // preference says now, so the local file and the upload never disagree.
         if (row.type == MessageType.IMAGE && row.mediaWidth == null &&
             preferencesDataStore.keepOriginalImagesFlow.first()
         ) {
-            return uploadKeepingOriginal(row)
+            return uploadKeepingOriginal(row, encryptMedia)
         }
         if (row.type in LOCAL_FILE_TYPES && row.mediaWidth == null) {
             row = persist(encodeToLocalFile(row))
         }
-        if (row.type == MessageType.VIDEO && row.mediaThumbnailUrl == null) {
+        val thumbMatchesMode = row.mediaThumbnailUrl != null && (row.thumbKey != null) == encryptMedia
+        if (row.type == MessageType.VIDEO && !thumbMatchesMode) {
             val thumbFile = videoTranscoder.extractThumbnail(localUriOf(row))
-            val thumbnailUrl = try {
-                storageSource.uploadMedia(
-                    row.chatId, thumbStorageId(row.id), Uri.fromFile(thumbFile), LocalFormat.JPEG.mimeType
-                )
+            row = try {
+                if (encryptMedia) {
+                    val localThumb = mediaFileManager.saveLocalThumbnail(row.id, thumbFile)
+                    val (encThumb, thumbCipher) = outboxFiles.encryptToTempFile(
+                        thumbStorageId(row.id),
+                        Uri.fromFile(thumbFile),
+                    )
+                    val thumbnailUrl = try {
+                        storageSource.uploadEncryptedMedia(row.chatId, thumbStorageId(row.id), encThumb)
+                    } finally {
+                        encThumb.delete()
+                    }
+                    persist(
+                        row.copy(
+                            mediaThumbnailUrl = thumbnailUrl,
+                            localThumbUri = localThumb.absolutePath,
+                            thumbKey = thumbCipher.keyB64,
+                            thumbIv = thumbCipher.ivB64,
+                            thumbSha256 = thumbCipher.sha256B64,
+                        )
+                    )
+                } else {
+                    val thumbnailUrl = storageSource.uploadMedia(
+                        row.chatId, thumbStorageId(row.id), Uri.fromFile(thumbFile), LocalFormat.JPEG.mimeType
+                    )
+                    persist(
+                        row.copy(
+                            mediaThumbnailUrl = thumbnailUrl,
+                            thumbKey = null,
+                            thumbIv = null,
+                            thumbSha256 = null,
+                        )
+                    )
+                }
             } finally {
                 thumbFile.delete()
             }
-            row = persist(row.copy(mediaThumbnailUrl = thumbnailUrl))
         }
         val uploadMimeType = if (row.type in LOCAL_FILE_TYPES) {
             LocalFormat.of(row.type).mimeType
@@ -296,7 +341,7 @@ class OutboxSender @Inject constructor(
             // that was a column, under the type its staged copy's extension carries.
             row.mimeType ?: row.localUri?.let(outboxFiles::mimeTypeOf) ?: FALLBACK_MIME_TYPE
         }
-        return uploadIfNeeded(row, uploadMimeType)
+        return uploadIfNeeded(row, uploadMimeType, encryptMedia)
     }
 
     /**
@@ -351,7 +396,8 @@ class OutboxSender @Inject constructor(
      */
     private suspend fun keepDocument(row: Message): Message {
         val staged = row.localUri?.takeIf { row.mediaUrl != null && outboxFiles.isStaged(it) } ?: return row
-        val kept = documentFiles.adopt(row.id, staged, row.fileName, row.mimeType) ?: return row
+        val effectiveMime = row.mimeType ?: if (row.type == MessageType.VOICE) VOICE_MIME_TYPE else null
+        val kept = documentFiles.adopt(row.id, staged, row.fileName, effectiveMime) ?: return row
         messageDao.updateLocalUri(row.id, kept)
         return row.copy(localUri = kept)
     }
@@ -401,11 +447,11 @@ class OutboxSender @Inject constructor(
      * itself lands before the persist, so the same mix-up needs the process to
      * die in that gap *and* the preference to flip before the retry.)
      */
-    private suspend fun uploadKeepingOriginal(row: Message): Message {
+    private suspend fun uploadKeepingOriginal(row: Message, encryptMedia: Boolean): Message {
         val source = localUriOf(row)
         val encoded = imageCompressor.processImage(source, row.isHd)
-        val mediaUrl = try {
-            upload(row, Uri.fromFile(encoded.file), LocalFormat.JPEG.mimeType)
+        val (mediaUrl, cipher) = try {
+            upload(row, Uri.fromFile(encoded.file), LocalFormat.JPEG.mimeType, encryptMedia)
         } finally {
             encoded.file.delete()
         }
@@ -419,24 +465,49 @@ class OutboxSender @Inject constructor(
                 mediaWidth = encoded.width,
                 mediaHeight = encoded.height,
                 mediaUrl = mediaUrl,
+                mediaKey = cipher?.keyB64,
+                mediaIv = cipher?.ivB64,
+                mediaSha256 = cipher?.sha256B64,
             )
         )
     }
 
-    /** Uploads the row's local file unless an earlier attempt already did, then persists `mediaUrl`. */
-    private suspend fun uploadIfNeeded(row: Message, mimeType: String): Message {
-        if (row.mediaUrl != null) return row
-        return persist(row.copy(mediaUrl = upload(row, localUriOf(row), mimeType)))
+    /** Uploads the row's local file unless an earlier attempt already uploaded in the matching encryption mode. */
+    private suspend fun uploadIfNeeded(row: Message, mimeType: String, encryptMedia: Boolean): Message {
+        if (row.mediaUrl != null && (row.mediaKey != null) == encryptMedia) return row
+        val (mediaUrl, cipher) = upload(row, localUriOf(row), mimeType, encryptMedia)
+        return persist(
+            row.copy(
+                mediaUrl = mediaUrl,
+                mediaKey = cipher?.keyB64,
+                mediaIv = cipher?.ivB64,
+                mediaSha256 = cipher?.sha256B64,
+            )
+        )
     }
 
-    /** Uploads [uri] under the row's id, publishing progress for every type but voice, and returns the URL. */
-    private suspend fun upload(row: Message, uri: Uri, mimeType: String): String {
+    /** Uploads [uri] under the row's id, publishing progress for every type but voice, and returns the URL (+ cipher info). */
+    private suspend fun upload(
+        row: Message,
+        uri: Uri,
+        mimeType: String,
+        encryptMedia: Boolean,
+    ): Pair<String, MediaCipherInfo?> {
         // Voice sends have never reported upload progress.
         val onProgress: ((Float) -> Unit)? = if (row.type == MessageType.VOICE) null else { progress ->
             _uploadProgress.update { it + (row.id to progress) }
         }
         return try {
-            storageSource.uploadMedia(row.chatId, row.id, uri, mimeType, onProgress)
+            if (encryptMedia) {
+                val (encFile, cipherInfo) = outboxFiles.encryptToTempFile(row.id, uri)
+                try {
+                    storageSource.uploadEncryptedMedia(row.chatId, row.id, encFile, onProgress) to cipherInfo
+                } finally {
+                    encFile.delete()
+                }
+            } else {
+                storageSource.uploadMedia(row.chatId, row.id, uri, mimeType, onProgress) to null
+            }
         } finally {
             _uploadProgress.update { it - row.id }
         }
@@ -447,11 +518,18 @@ class OutboxSender @Inject constructor(
         messageDao.updateSendProgress(
             messageId = row.id,
             localUri = row.localUri,
+            localThumbUri = row.localThumbUri,
             mediaWidth = row.mediaWidth,
             mediaHeight = row.mediaHeight,
             duration = row.duration,
             mediaThumbnailUrl = row.mediaThumbnailUrl,
             mediaUrl = row.mediaUrl,
+            mediaKey = row.mediaKey,
+            mediaIv = row.mediaIv,
+            mediaSha256 = row.mediaSha256,
+            thumbKey = row.thumbKey,
+            thumbIv = row.thumbIv,
+            thumbSha256 = row.thumbSha256,
         )
         return row
     }

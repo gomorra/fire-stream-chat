@@ -60,6 +60,7 @@ class MessageRepositoryForwardTest {
         every { authSource.currentUserId } returns "uid1"
         coEvery { messageDao.insertOutbox(capture(inserted)) } just Runs
         coEvery { outboxFiles.stage(any(), any(), any()) } returns null
+        coEvery { messageWriter.willEncrypt(any(), any()) } returns false
 
         repository = messageRepository(
             messageDao = messageDao,
@@ -117,7 +118,8 @@ class MessageRepositoryForwardTest {
         // Its media is already uploaded, so the work is not an upload.
         verify(exactly = 1) { outboxScheduler.enqueue(inserted.captured.id, uploads = false) }
         // No direct write any more: the worker writes the row.
-        verify { messageWriter wasNot Called }
+        coVerify(exactly = 0) { messageWriter.send(any(), any()) }
+        coVerify(exactly = 0) { messageWriter.write(any(), any(), any()) }
         verify { messageSource wasNot Called }
     }
 

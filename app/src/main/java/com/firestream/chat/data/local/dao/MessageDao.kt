@@ -24,10 +24,16 @@ private const val LOCAL_MEDIA_TYPES = "'IMAGE', 'VIDEO', 'DOCUMENT', 'STICKER', 
  * copied. The patterns match fewer urls than `KlipyUrls.isMedia` does (a port,
  * capitals), and `MediaFileManager.downloadFor` refuses those.
  */
-private const val OWED_LOCAL_MEDIA = "type IN ($LOCAL_MEDIA_TYPES) AND localUri IS NULL AND mediaUrl IS NOT NULL" +
+private const val OWED_LOCAL_MEDIA =
+    "((type IN ($LOCAL_MEDIA_TYPES)) OR (type = 'VOICE' AND mediaKey IS NOT NULL))" +
+    " AND localUri IS NULL AND mediaUrl IS NOT NULL" +
     " AND mediaUrl NOT LIKE 'https://${KlipyUrls.MEDIA_HOST}/%'" +
     " AND mediaUrl NOT LIKE 'https://${KlipyUrls.MEDIA_HOST_1}/%'" +
     " AND mediaUrl NOT LIKE 'https://${KlipyUrls.MEDIA_HOST_2}/%'"
+
+private const val OWED_LOCAL_THUMB =
+    "thumbKey IS NOT NULL AND thumbIv IS NOT NULL AND thumbSha256 IS NOT NULL" +
+    " AND mediaThumbnailUrl IS NOT NULL AND localThumbUri IS NULL"
 
 @Dao
 interface MessageDao {
@@ -223,22 +229,32 @@ interface MessageDao {
     )
     suspend fun storeOutboxCiphertext(messageId: String, ciphertext: String, signalType: Int, peerIdentity: String?)
 
-    /** A finished pipeline step's output — the encoded file, the thumbnail, the upload. */
+    /** A finished pipeline step's output — the encoded file, the thumbnail, the upload and crypto keys. */
     @Query(
         """
-        UPDATE messages SET localUri = :localUri, mediaWidth = :mediaWidth, mediaHeight = :mediaHeight,
-            duration = :duration, mediaThumbnailUrl = :mediaThumbnailUrl, mediaUrl = :mediaUrl
+        UPDATE messages SET localUri = :localUri, localThumbUri = :localThumbUri,
+            mediaWidth = :mediaWidth, mediaHeight = :mediaHeight, duration = :duration,
+            mediaThumbnailUrl = :mediaThumbnailUrl, mediaUrl = :mediaUrl,
+            mediaKey = :mediaKey, mediaIv = :mediaIv, mediaSha256 = :mediaSha256,
+            thumbKey = :thumbKey, thumbIv = :thumbIv, thumbSha256 = :thumbSha256
         WHERE id = :messageId
         """
     )
     suspend fun updateSendProgress(
         messageId: String,
         localUri: String?,
+        localThumbUri: String? = null,
         mediaWidth: Int?,
         mediaHeight: Int?,
         duration: Int?,
         mediaThumbnailUrl: String?,
         mediaUrl: String?,
+        mediaKey: String? = null,
+        mediaIv: String? = null,
+        mediaSha256: String? = null,
+        thumbKey: String? = null,
+        thumbIv: String? = null,
+        thumbSha256: String? = null,
     )
 
     @Query("UPDATE messages SET isPinned = :pinned WHERE id = :messageId")
@@ -329,11 +345,17 @@ interface MessageDao {
     @Query("SELECT * FROM messages WHERE $OWED_LOCAL_MEDIA")
     suspend fun getMessagesWithoutLocalMedia(): List<MessageEntity>
 
-    @Query("SELECT * FROM messages WHERE type IN ($LOCAL_MEDIA_TYPES)")
+    @Query("SELECT * FROM messages WHERE type IN ($LOCAL_MEDIA_TYPES) OR (type = 'VOICE' AND mediaKey IS NOT NULL)")
     suspend fun getAllMediaMessages(): List<MessageEntity>
 
     @Query("SELECT * FROM messages WHERE chatId = :chatId AND $OWED_LOCAL_MEDIA")
     suspend fun getMessagesWithoutLocalMediaForChat(chatId: String): List<MessageEntity>
+
+    @Query("SELECT * FROM messages WHERE $OWED_LOCAL_THUMB")
+    suspend fun getMessagesWithoutLocalThumb(): List<MessageEntity>
+
+    @Query("SELECT * FROM messages WHERE chatId = :chatId AND $OWED_LOCAL_THUMB")
+    suspend fun getMessagesWithoutLocalThumbForChat(chatId: String): List<MessageEntity>
 
     // Call log
     @Query("SELECT * FROM messages WHERE type = 'CALL' ORDER BY timestamp DESC")

@@ -66,6 +66,7 @@ class MessageRepositoryLocalUriTest {
         coEvery { messageDao.upsertRecord(capture(upsertSlot)) } just Runs
         coEvery { messageDao.updateRecord(capture(updateSlot)) } just Runs
         coEvery { messageDao.getMessagesWithoutLocalMediaForChat("chat1") } returns emptyList()
+        coEvery { messageDao.getMessagesWithoutLocalThumbForChat("chat1") } returns emptyList()
         coEvery { messageDao.updateReactions(any(), any()) } just Runs
         every { preferencesDataStore.autoDownloadFlow } returns flowOf(AutoDownloadOption.NEVER)
 

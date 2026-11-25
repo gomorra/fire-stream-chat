@@ -3,7 +3,9 @@
 //   media. Streams determinate progress for media uploads via
 //   `addOnProgressListener` wrapped in `suspendCancellableCoroutine`.
 // Owns: Storage path conventions: `avatars/{userId}/profile.jpg`,
-//   `avatars/groups/{chatId}/group.jpg`, message media under `messages/{chatId}/`.
+//   `avatars/groups/{chatId}/group.jpg`, plaintext media under `media/{chatId}/{id}.{ext}`,
+//   and encrypted 1:1 media/thumbnail blobs under `media/{chatId}/{storageId}.enc`
+//   (`application/octet-stream`).
 // Collaborators: ChatRepositoryImpl (group avatars), UserRepositoryImpl
 //   (user avatars), OutboxSender (message media + uploadProgress flow).
 // Don't put here: local media file management (MediaFileManager), image
@@ -16,8 +18,10 @@ import android.net.Uri
 import com.firestream.chat.data.remote.source.StorageSource
 import com.firestream.chat.data.util.DocumentFiles
 import com.google.firebase.storage.FirebaseStorage
+import com.google.firebase.storage.StorageMetadata
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.tasks.await
+import java.io.File
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlin.coroutines.resume
@@ -55,6 +59,37 @@ class FirebaseStorageSource @Inject constructor(
 
         suspendCancellableCoroutine { cont ->
             val task = ref.putFile(uri)
+
+            if (onProgress != null) {
+                task.addOnProgressListener { snapshot ->
+                    if (snapshot.totalByteCount > 0) {
+                        onProgress(snapshot.bytesTransferred.toFloat() / snapshot.totalByteCount.toFloat())
+                    }
+                }
+            }
+
+            task.addOnSuccessListener { cont.resume(Unit) }
+                .addOnFailureListener { cont.resumeWithException(it) }
+
+            cont.invokeOnCancellation { task.cancel() }
+        }
+
+        return ref.downloadUrl.await().toString()
+    }
+
+    override suspend fun uploadEncryptedMedia(
+        chatId: String,
+        storageId: String,
+        file: File,
+        onProgress: ((Float) -> Unit)?,
+    ): String {
+        val ref = storage.reference.child("media/$chatId/$storageId.enc")
+        val metadata = StorageMetadata.Builder()
+            .setContentType("application/octet-stream")
+            .build()
+
+        suspendCancellableCoroutine { cont ->
+            val task = ref.putFile(Uri.fromFile(file), metadata)
 
             if (onProgress != null) {
                 task.addOnProgressListener { snapshot ->

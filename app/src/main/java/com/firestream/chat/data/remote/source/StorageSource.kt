@@ -1,6 +1,7 @@
 package com.firestream.chat.data.remote.source
 
 import android.net.Uri
+import java.io.File
 
 /** Backend-neutral binary-blob storage boundary. */
 interface StorageSource {
@@ -12,5 +13,16 @@ interface StorageSource {
         uri: Uri,
         mimeType: String,
         onProgress: ((Float) -> Unit)? = null
+    ): String
+
+    /**
+     * Uploads an AES-256-GCM encrypted media or thumbnail blob to
+     * `media/{chatId}/{storageId}.enc` with `application/octet-stream`.
+     */
+    suspend fun uploadEncryptedMedia(
+        chatId: String,
+        storageId: String,
+        file: File,
+        onProgress: ((Float) -> Unit)? = null,
     ): String
 }

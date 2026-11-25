@@ -2,6 +2,7 @@ package com.firestream.chat.data.remote.pocketbase
 
 import android.net.Uri
 import com.firestream.chat.data.remote.source.StorageSource
+import java.io.File
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -20,5 +21,12 @@ class PocketBaseStorageSource @Inject constructor() : StorageSource {
         uri: Uri,
         mimeType: String,
         onProgress: ((Float) -> Unit)?
+    ): String = throw NotImplementedError("PB v0 stub")
+
+    override suspend fun uploadEncryptedMedia(
+        chatId: String,
+        storageId: String,
+        file: File,
+        onProgress: ((Float) -> Unit)?,
     ): String = throw NotImplementedError("PB v0 stub")
 }

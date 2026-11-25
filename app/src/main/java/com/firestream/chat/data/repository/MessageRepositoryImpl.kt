@@ -53,6 +53,7 @@ import android.net.NetworkCapabilities
 import android.net.Uri
 import android.util.Log
 import com.firestream.chat.data.crypto.EncryptedMessage
+import com.firestream.chat.data.crypto.MediaEncryptionParams
 import com.firestream.chat.data.crypto.MessageEnvelope
 import com.firestream.chat.data.crypto.SignalManager
 import com.firestream.chat.data.local.AutoDownloadOption
@@ -614,9 +615,14 @@ class MessageRepositoryImpl @Inject constructor(
 
             // Auto-download media for incoming messages (listener and push paths only).
             if (autoDownload && message.mediaUrl != null && existing?.localUri == null &&
-                message.type in AUTO_DOWNLOAD_TYPES
+                (message.type in AUTO_DOWNLOAD_TYPES || (message.type == MessageType.VOICE && message.isEncryptedMedia))
             ) {
                 tryAutoDownload(message)
+            }
+            if (autoDownload && message.thumbKey != null &&
+                message.mediaThumbnailUrl != null && existing?.localThumbUri == null
+            ) {
+                tryAutoDownloadThumbnail(message)
             }
 
             // Sync shared/unshared list to Room so ListsScreen updates immediately.
@@ -948,7 +954,7 @@ class MessageRepositoryImpl @Inject constructor(
         val tempId = UUID.randomUUID().toString()
         val timestamp = sendClock.next()
 
-        val optimisticMessage = message.copy(
+        var optimisticMessage = message.copy(
             id = tempId,
             chatId = targetChatId,
             senderId = senderId,
@@ -960,9 +966,66 @@ class MessageRepositoryImpl @Inject constructor(
             // Mentions name members of the source chat, not of this one.
             mentions = emptyList(),
         ).withLibrarySticker()
+
+        // Never share per-file AES-GCM keys across chats, and never forward an
+        // unencrypted Storage blob into an E2EE 1:1 chat: re-stage the local
+        // decrypted file and clear remote URLs & keys so OutboxSender uploads a
+        // fresh blob under the target chat's encryption mode.
+        val isReuploadableMedia = message.mediaUrl != null &&
+            !KlipyUrls.isMedia(message.mediaUrl) &&
+            message.type != MessageType.STICKER
+        val needsFreshMediaUpload = (message.mediaKey != null || message.thumbKey != null) ||
+            (isReuploadableMedia && messageWriter.willEncrypt(optimisticMessage, target))
+        if (needsFreshMediaUpload) {
+            val decryptedFile = resolveDecryptedLocalFile(message)
+                ?: throw IllegalStateException("Cannot forward encrypted media ${message.id}: local file unavailable")
+            val stageMime = message.mimeType ?: when (message.type) {
+                MessageType.IMAGE -> "image/jpeg"
+                MessageType.VIDEO -> "video/mp4"
+                MessageType.VOICE -> "audio/aac"
+                MessageType.GIF -> GIF_MIME_TYPE
+                else -> "application/octet-stream"
+            }
+            val stagedPath = outboxFiles.stage(tempId, Uri.fromFile(decryptedFile).toString(), stageMime)
+                ?: decryptedFile.absolutePath
+            optimisticMessage = optimisticMessage.copy(
+                localUri = stagedPath,
+                localThumbUri = null,
+                mediaUrl = null,
+                mediaThumbnailUrl = null,
+                mediaKey = null,
+                mediaIv = null,
+                mediaSha256 = null,
+                thumbKey = null,
+                thumbIv = null,
+                thumbSha256 = null,
+                // Clear dimensions on IMAGE/VIDEO so OutboxSender produces a fresh
+                // durable local file and fresh encrypted video thumbnail for tempId.
+                mediaWidth = if (message.type == MessageType.IMAGE || message.type == MessageType.VIDEO) null else message.mediaWidth,
+                mediaHeight = if (message.type == MessageType.IMAGE || message.type == MessageType.VIDEO) null else message.mediaHeight,
+            )
+        }
         val row = MessageEntity.outbox(optimisticMessage, target)
         messageDao.insertOutbox(row)
         enqueueSend(row, blockTarget = null)
+    }
+
+    private suspend fun resolveDecryptedLocalFile(message: Message): File? {
+        message.localUri?.takeIf { it.startsWith("/") }?.let(::File)?.takeIf { it.isFile && it.canRead() }
+            ?.let { return it }
+        val url = message.mediaUrl ?: return null
+        val downloaded = mediaFileManager.downloadFor(
+            chatId = message.chatId,
+            messageId = message.id,
+            type = message.type,
+            mediaUrl = url,
+            fileName = message.fileName,
+            mimeType = message.mimeType,
+            stickerId = message.stickerId,
+            encryption = message.mediaEncryption(),
+        ) ?: return null
+        messageDao.updateLocalUri(message.id, downloaded.absolutePath)
+        return downloaded
     }
 
     /**
@@ -1004,9 +1067,10 @@ class MessageRepositoryImpl @Inject constructor(
             status = MessageStatus.SENDING,
             timestamp = timestamp,
             localUri = uri,
-            duration = durationSeconds
+            duration = durationSeconds,
+            mimeType = "audio/aac",
         )
-        queueSend(optimisticMessage)
+        queueSend(optimisticMessage, mimeType = "audio/aac")
     }
 
     override suspend fun starMessage(messageId: String, starred: Boolean): Result<Unit> = resultOf {
@@ -1702,6 +1766,7 @@ class MessageRepositoryImpl @Inject constructor(
         val url = message.mediaUrl ?: throw IllegalStateException("Document ${message.id} is not uploaded yet")
         val file = mediaFileManager.downloadFor(
             message.chatId, message.id, message.type, url, message.fileName, message.mimeType, message.stickerId,
+            encryption = message.mediaEncryption(),
         ) ?: throw IllegalStateException("Message ${message.id} has no file this device can keep")
         messageDao.updateLocalUri(message.id, file.absolutePath)
         file.absolutePath
@@ -1749,11 +1814,26 @@ class MessageRepositoryImpl @Inject constructor(
                 // null: a sticker that was refused. It keeps rendering from its url.
                 val file = mediaFileManager.downloadFor(
                     chatId, entity.id, parseMessageType(entity.type), url, entity.fileName, entity.mimeType, entity.stickerId,
+                    encryption = entity.mediaEncryption(),
                 ) ?: continue
                 messageDao.updateLocalUri(entity.id, file.absolutePath)
             } catch (e: Exception) {
                 e.rethrowIfCancellation()
                 Log.w(TAG, "savePendingMediaForChat: download failed for msg=${entity.id} chat=$chatId", e)
+                failed = true
+            }
+        }
+        // Encrypted video thumbnails are tiny JPEGs needed to render video bubbles
+        // even when auto-download holds the full video back.
+        for (entity in messageDao.getMessagesWithoutLocalThumbForChat(chatId)) {
+            val thumbUrl = entity.mediaThumbnailUrl ?: continue
+            val thumbEnc = entity.thumbEncryption() ?: continue
+            try {
+                val thumbFile = mediaFileManager.downloadEncryptedThumbnail(entity.id, thumbUrl, thumbEnc)
+                messageDao.updateLocalThumbUri(entity.id, thumbFile.absolutePath)
+            } catch (e: Exception) {
+                e.rethrowIfCancellation()
+                Log.w(TAG, "savePendingMediaForChat: thumb download failed for msg=${entity.id} chat=$chatId", e)
                 failed = true
             }
         }
@@ -1777,6 +1857,7 @@ class MessageRepositoryImpl @Inject constructor(
                 val file = mediaFileManager.downloadFor(
                     message.chatId, message.id, message.type, message.mediaUrl!!, message.fileName, message.mimeType,
                     message.stickerId,
+                    encryption = message.mediaEncryption(),
                 ) ?: return@launch
                 messageDao.updateLocalUri(message.id, file.absolutePath)
             } catch (e: Exception) {
@@ -1788,6 +1869,33 @@ class MessageRepositoryImpl @Inject constructor(
             }
         }
     }
+
+    private fun tryAutoDownloadThumbnail(message: Message) {
+        val thumbUrl = message.mediaThumbnailUrl ?: return
+        val thumbEnc = runCatching { message.thumbEncryption() }.getOrNull() ?: return
+        downloadScope.launch {
+            try {
+                val file = mediaFileManager.downloadEncryptedThumbnail(message.id, thumbUrl, thumbEnc)
+                messageDao.updateLocalThumbUri(message.id, file.absolutePath)
+            } catch (e: Exception) {
+                e.rethrowIfCancellation()
+                Log.w(TAG, "tryAutoDownloadThumbnail: failed for msg=${message.id} chat=${message.chatId}", e)
+                retryDownloadsLater()
+            }
+        }
+    }
+
+    private fun Message.mediaEncryption(): MediaEncryptionParams? =
+        MediaEncryptionParams.resolve(mediaKey, mediaIv, mediaSha256)
+
+    private fun Message.thumbEncryption(): MediaEncryptionParams? =
+        MediaEncryptionParams.resolve(thumbKey, thumbIv, thumbSha256)
+
+    private fun MessageEntity.mediaEncryption(): MediaEncryptionParams? =
+        MediaEncryptionParams.resolve(mediaKey, mediaIv, mediaSha256)
+
+    private fun MessageEntity.thumbEncryption(): MediaEncryptionParams? =
+        MediaEncryptionParams.resolve(thumbKey, thumbIv, thumbSha256)
 
     /**
      * A download that failed — the network went away under it, typically — or

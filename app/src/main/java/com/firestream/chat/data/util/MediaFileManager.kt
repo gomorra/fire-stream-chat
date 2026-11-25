@@ -5,6 +5,8 @@ import android.content.Context
 import android.net.Uri
 import android.os.Environment
 import android.provider.MediaStore
+import com.firestream.chat.data.crypto.MediaCrypto
+import com.firestream.chat.data.crypto.MediaEncryptionParams
 import com.firestream.chat.data.sticker.StickerDownloads
 import com.firestream.chat.domain.model.MessageType
 import com.firestream.chat.domain.util.KlipyUrls
@@ -62,16 +64,68 @@ class MediaFileManager @Inject constructor(
             }
         }
 
+    private val thumbsDir: File
+        get() = File(context.filesDir, THUMBS_FOLDER).apply { mkdirs() }
+
+    fun getLocalThumbFile(messageId: String): File = File(thumbsDir, "$messageId.jpg")
+
+    /** Copies a freshly extracted plaintext video thumbnail to `filesDir/thumbs/{messageId}.jpg`. */
+    suspend fun saveLocalThumbnail(messageId: String, sourceFile: File): File =
+        withContext(Dispatchers.IO) {
+            val target = getLocalThumbFile(messageId)
+            val partial = File.createTempFile("${target.name}.", ".part", target.parentFile)
+            try {
+                sourceFile.inputStream().use { input ->
+                    partial.outputStream().use { output -> input.copyTo(output) }
+                }
+                if (!partial.renameTo(target)) throw IOException("Cannot save thumbnail for $messageId")
+            } finally {
+                partial.delete()
+            }
+            target
+        }
+
+    /**
+     * Downloads an AES-256-GCM encrypted video thumbnail `.enc` blob, verifies
+     * its SHA-256 digest and GCM tags, and writes the decrypted JPEG to
+     * `filesDir/thumbs/{messageId}.jpg`.
+     */
+    suspend fun downloadEncryptedThumbnail(
+        messageId: String,
+        thumbnailUrl: String,
+        encryption: MediaEncryptionParams,
+    ): File = withContext(Dispatchers.IO) {
+        val target = getLocalThumbFile(messageId)
+        if (target.exists()) return@withContext target
+        deduplicated("thumb:$messageId") {
+            if (target.exists()) return@deduplicated target
+            val encPart = File.createTempFile("thumb_enc_${messageId}_", ".enc.part", context.cacheDir)
+            try {
+                fetch(thumbnailUrl) { input -> encPart.outputStream().use { input.copyTo(it) } }
+                MediaCrypto.decryptFile(encPart, target, encryption.key, encryption.iv, encryption.sha256)
+                target
+            } finally {
+                encPart.delete()
+            }
+        }
+    }
+
     /**
      * Downloads a message's media to where its [type] keeps it. The one router,
      * so the auto-download, the chat-open scan and the backfill agree:
      *
-     * - A DOCUMENT and a GIF go into the app's documents directory
+     * - A DOCUMENT, GIF, or VOICE goes into the app's documents directory
      *   ([DocumentFiles]) with plain file IO. The MediaStore image collection
      *   refuses a non-image type, and a GIF must not reach the gallery.
      * - A STICKER goes into the sticker directory, checked against [stickerId]
      *   ([StickerDownloads]).
-     * - Anything else goes through [downloadAndSave].
+     * - IMAGE and VIDEO go through MediaStore (`downloadAndSave` or
+     *   `downloadAndDecryptToMediaStore` when [encryption] is non-null).
+     *
+     * When [encryption] is provided, the `.enc` blob is decrypted and verified
+     * (GCM tags + SHA-256) before being written to its final destination, and
+     * local extensions come from [fileName]/[mimeType]/[type] (never `.enc`).
+     * Passing `encryption == null` for a `.enc` URL is refused.
      *
      * Returns `null` for a sticker that is refused, and for a url on Klipy's
      * media hosts, whatever the type: Klipy's media is not copied. The message
@@ -86,12 +140,106 @@ class MediaFileManager @Inject constructor(
         fileName: String?,
         mimeType: String?,
         stickerId: String?,
+        encryption: MediaEncryptionParams? = null,
     ): File? = when {
         KlipyUrls.isMedia(mediaUrl) -> null
         type == MessageType.STICKER -> stickerDownloads.ensureLocal(stickerId, mediaUrl)
+        encryption != null -> downloadEncryptedFor(chatId, messageId, type, mediaUrl, fileName, mimeType, encryption)
+        isEncryptedBlobUrl(mediaUrl) ->
+            throw SecurityException("Refusing to download encrypted blob without decryption parameters: $messageId")
         type == MessageType.DOCUMENT || type == MessageType.GIF ->
             downloadToFile(messageId, mediaUrl, documentFiles.fileFor(messageId, fileName, mimeType, mediaUrl))
+        type == MessageType.VOICE ->
+            downloadToFile(messageId, mediaUrl, documentFiles.fileFor(messageId, fileName, mimeType ?: "audio/aac", mediaUrl))
         else -> downloadAndSave(chatId, messageId, mediaUrl)
+    }
+
+    private fun isEncryptedBlobUrl(mediaUrl: String): Boolean =
+        mediaUrl.substringBefore("?").substringBefore("#").lowercase().endsWith(".enc")
+
+    private suspend fun downloadEncryptedFor(
+        chatId: String,
+        messageId: String,
+        type: MessageType,
+        mediaUrl: String,
+        fileName: String?,
+        mimeType: String?,
+        encryption: MediaEncryptionParams,
+    ): File = when (type) {
+        MessageType.DOCUMENT, MessageType.GIF -> {
+            // Never pass `.enc` mediaUrl as extension hint for encrypted blobs.
+            val target = documentFiles.fileFor(messageId, fileName, mimeType, mediaUrl = null)
+            downloadEncryptedToFile(messageId, mediaUrl, target, encryption)
+        }
+        MessageType.VOICE -> {
+            val target = documentFiles.fileFor(messageId, fileName, mimeType ?: "audio/aac", mediaUrl = null)
+            downloadEncryptedToFile(messageId, mediaUrl, target, encryption)
+        }
+        else -> {
+            val ext = extensionForEncryptedMedia(type, mimeType)
+            downloadAndDecryptToMediaStore(chatId, messageId, mediaUrl, ext, encryption)
+        }
+    }
+
+    private fun extensionForEncryptedMedia(type: MessageType, mimeType: String?): String = when (type) {
+        MessageType.VIDEO -> "mp4"
+        MessageType.IMAGE -> when (mimeType?.lowercase()) {
+            "image/png" -> "png"
+            "image/webp" -> "webp"
+            else -> "jpg"
+        }
+        else -> DocumentFiles.extensionFor(fileName = null, mimeType = mimeType, mediaUrl = null)
+    }
+
+    private suspend fun downloadEncryptedToFile(
+        messageId: String,
+        mediaUrl: String,
+        target: File,
+        encryption: MediaEncryptionParams,
+    ): File = withContext(Dispatchers.IO) {
+        if (target.exists()) return@withContext target
+        deduplicated(messageId) {
+            if (target.exists()) return@deduplicated target
+            val encPart = File.createTempFile("media_enc_${messageId}_", ".enc.part", context.cacheDir)
+            try {
+                fetch(mediaUrl) { input -> encPart.outputStream().use { input.copyTo(it) } }
+                MediaCrypto.decryptFile(encPart, target, encryption.key, encryption.iv, encryption.sha256)
+                target
+            } finally {
+                encPart.delete()
+            }
+        }
+    }
+
+    private suspend fun downloadAndDecryptToMediaStore(
+        chatId: String,
+        messageId: String,
+        mediaUrl: String,
+        extension: String,
+        encryption: MediaEncryptionParams,
+    ): File = withContext(Dispatchers.IO) {
+        val localFile = getLocalFile(chatId, messageId, extension)
+        if (localFile.exists()) return@withContext localFile
+        deduplicated(messageId) {
+            if (localFile.exists()) return@deduplicated localFile
+            var encPart: File? = null
+            var decPart: File? = null
+            try {
+                encPart = File.createTempFile("media_enc_${messageId}_", ".enc.part", context.cacheDir)
+                fetch(mediaUrl) { input -> encPart.outputStream().use { input.copyTo(it) } }
+                decPart = File.createTempFile("media_dec_${messageId}_", ".$extension", context.cacheDir)
+                MediaCrypto.decryptFile(encPart, decPart, encryption.key, encryption.iv, encryption.sha256)
+                // Free the ciphertext copy before writing to MediaStore (2x peak disk instead of 3x).
+                encPart.delete()
+                decPart.inputStream().use { input ->
+                    writeViaMediaStore(localFile.name, mimeFromExtension(extension), input)
+                }
+                localFile
+            } finally {
+                encPart?.delete()
+                decPart?.delete()
+            }
+        }
     }
 
     /** Downloads [mediaUrl] into [target] through a `.part` sibling, so a cut-off download never looks finished. */
@@ -121,9 +269,9 @@ class MediaFileManager @Inject constructor(
         if (existing != null) return existing.await()
         return try {
             download().also(myDeferred::complete)
-        } catch (e: Exception) {
-            myDeferred.completeExceptionally(e)
-            throw e
+        } catch (t: Throwable) {
+            myDeferred.completeExceptionally(t)
+            throw t
         } finally {
             inFlightDownloads.remove(messageId, myDeferred)
         }
@@ -319,6 +467,7 @@ class MediaFileManager @Inject constructor(
 
     companion object {
         private const val MEDIA_FOLDER = "FireStream Images"
+        private const val THUMBS_FOLDER = "thumbs"
     }
 
     private fun mimeFromExtension(ext: String): String = when (normalizeExtension(ext)) {

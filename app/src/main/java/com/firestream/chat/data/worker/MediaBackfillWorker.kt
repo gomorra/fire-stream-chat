@@ -7,11 +7,13 @@ import androidx.hilt.work.HiltWorker
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
 import androidx.work.workDataOf
+import com.firestream.chat.data.crypto.MediaEncryptionParams
 import com.firestream.chat.data.local.AutoDownloadOption
 import com.firestream.chat.data.local.PreferencesDataStore
 import com.firestream.chat.data.local.dao.MessageDao
 import com.firestream.chat.data.util.MediaFileManager
 import com.firestream.chat.data.util.parseMessageType
+import com.firestream.chat.data.util.rethrowIfCancellation
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
 import kotlinx.coroutines.flow.first
@@ -62,17 +64,34 @@ class MediaBackfillWorker @AssistedInject constructor(
         }
 
         val messages = messageDao.getMessagesWithoutLocalMedia()
-        val total = messages.size
+        val missingThumbs = messageDao.getMessagesWithoutLocalThumb()
+        val total = messages.size + missingThumbs.size
         if (total == 0) return Result.success()
 
         var done = 0
         for (msg in messages) {
             try {
+                val encryption = MediaEncryptionParams.resolve(msg.mediaKey, msg.mediaIv, msg.mediaSha256)
                 // null: a sticker that was refused. It keeps rendering from its url.
                 mediaFileManager.downloadFor(
                     msg.chatId, msg.id, parseMessageType(msg.type), msg.mediaUrl!!, msg.fileName, msg.mimeType, msg.stickerId,
+                    encryption = encryption,
                 )?.let { messageDao.updateLocalUri(msg.id, it.absolutePath) }
-            } catch (_: Exception) { }
+            } catch (e: Exception) {
+                e.rethrowIfCancellation()
+            }
+            done++
+            setProgress(workDataOf("done" to done, "total" to total))
+        }
+        for (msg in missingThumbs) {
+            try {
+                val thumbUrl = msg.mediaThumbnailUrl ?: continue
+                val enc = MediaEncryptionParams.resolve(msg.thumbKey, msg.thumbIv, msg.thumbSha256) ?: continue
+                val thumbFile = mediaFileManager.downloadEncryptedThumbnail(msg.id, thumbUrl, enc)
+                messageDao.updateLocalThumbUri(msg.id, thumbFile.absolutePath)
+            } catch (e: Exception) {
+                e.rethrowIfCancellation()
+            }
             done++
             setProgress(workDataOf("done" to done, "total" to total))
         }

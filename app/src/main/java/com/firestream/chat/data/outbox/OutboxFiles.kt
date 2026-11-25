@@ -4,7 +4,8 @@
 //   so OutboxWorker can read it after the process, and with it the picker's
 //   grant, are gone. Also the rule for which localUri a SENT row may keep.
 // Owns: the outbox directory; the durable-or-not test for a row's localUri; the
-//   mime type a staged document uploads under (carried in its extension).
+//   mime type a staged document uploads under (carried in its extension); and
+//   temp `.enc` encryption in cacheDir via MediaCrypto (`encryptToTempFile`).
 // Collaborators: MessageRepositoryImpl (stages before every enqueue, deletes on
 //   a queued delete), OutboxSender (mime type of a staged document, the localUri
 //   kept at SENT, the delete after SENT), OutboxScheduler (sweeps files no
@@ -20,6 +21,8 @@ package com.firestream.chat.data.outbox
 import android.content.Context
 import android.net.Uri
 import android.webkit.MimeTypeMap
+import com.firestream.chat.data.crypto.MediaCipherInfo
+import com.firestream.chat.data.crypto.MediaCrypto
 import com.firestream.chat.data.util.MediaFileManager
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
@@ -95,6 +98,35 @@ class OutboxFiles @Inject constructor(
         val extension = asBareFile(localUri)?.extension?.lowercase()?.takeIf { it.isNotEmpty() } ?: return null
         return MimeTypeMap.getSingleton().getMimeTypeFromExtension(extension)
     }
+
+    /**
+     * Encrypts the bytes at [source] (`file://` or `content://`) into a temporary
+     * `.enc` file in `cacheDir` using [MediaCrypto.encryptStream]. The caller is
+     * responsible for deleting the returned file in a `finally` block.
+     */
+    suspend fun encryptToTempFile(prefix: String, source: Uri): Pair<File, MediaCipherInfo> =
+        withContext(Dispatchers.IO) {
+            val outFile = File.createTempFile("enc_${prefix}_", ".enc", context.cacheDir)
+            try {
+                val input = if (source.scheme == "file" || source.scheme == null) {
+                    val path = source.path
+                        ?: throw FileNotFoundException("Missing file path for encryption: $source")
+                    File(path).inputStream()
+                } else {
+                    context.contentResolver.openInputStream(source)
+                        ?: throw FileNotFoundException("Cannot open source URI for encryption: $source")
+                }
+                val info = input.use { i ->
+                    outFile.outputStream().use { o ->
+                        MediaCrypto.encryptStream(i, o)
+                    }
+                }
+                outFile to info
+            } catch (t: Throwable) {
+                outFile.delete()
+                throw t
+            }
+        }
 
     /** Removes the staged input of [messageId], if any: the send finished, or the message was deleted. */
     suspend fun delete(messageId: String) = withContext(Dispatchers.IO) {

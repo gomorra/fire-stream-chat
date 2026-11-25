@@ -2,6 +2,8 @@ package com.firestream.chat.data.outbox
 
 import android.net.Uri
 import com.firestream.chat.data.crypto.EncryptedMessage
+import com.firestream.chat.data.crypto.MediaCipherInfo
+import com.firestream.chat.data.crypto.MessageEnvelope
 import com.firestream.chat.data.crypto.SignalManager
 import com.firestream.chat.data.local.PreferencesDataStore
 import com.firestream.chat.data.local.VideoQualityOption
@@ -34,6 +36,7 @@ import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.mockkStatic
+import io.mockk.slot
 import io.mockk.unmockkStatic
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.runTest
@@ -124,22 +127,34 @@ class OutboxSenderTest {
                 false
             } else {
                 rows.remove(firstArg<String>())
-                val row = MessageEntity(sent, localUri = thirdArg())
+                val row = MessageEntity(sent, localUri = thirdArg(), localThumbUri = current.localThumbUri)
                 rows[row.id] = row
                 persisted += row
                 true
             }
         }
-        coEvery { messageDao.updateSendProgress(any(), any(), any(), any(), any(), any(), any()) } answers {
+        coEvery {
+            messageDao.updateSendProgress(
+                any(), any(), any(), any(), any(), any(), any(), any(),
+                any(), any(), any(), any(), any(), any(),
+            )
+        } answers {
             val current = rows.getValue(firstArg())
             val row = current.copy(
                 localUri = arg(1),
+                localThumbUri = arg(2),
                 record = current.record.copy(
-                    mediaWidth = arg(2),
-                    mediaHeight = arg(3),
-                    duration = arg(4),
-                    mediaThumbnailUrl = arg(5),
-                    mediaUrl = arg(6),
+                    mediaWidth = arg(3),
+                    mediaHeight = arg(4),
+                    duration = arg(5),
+                    mediaThumbnailUrl = arg(6),
+                    mediaUrl = arg(7),
+                    mediaKey = arg(8),
+                    mediaIv = arg(9),
+                    mediaSha256 = arg(10),
+                    thumbKey = arg(11),
+                    thumbIv = arg(12),
+                    thumbSha256 = arg(13),
                 ),
             )
             rows[row.id] = row
@@ -169,6 +184,24 @@ class OutboxSenderTest {
             val storageId = secondArg<String>()
             uploads += Upload(storageId, arg(3), reportsProgress = args[4] != null)
             "https://storage.example/$storageId"
+        }
+        coEvery { storageSource.uploadEncryptedMedia(any(), any(), any(), any()) } answers {
+            val storageId = secondArg<String>()
+            uploads += Upload(storageId, "application/octet-stream", reportsProgress = args[3] != null)
+            "https://storage.example/$storageId.enc"
+        }
+        coEvery { outboxFiles.encryptToTempFile(any(), any()) } answers {
+            val prefix = firstArg<String>()
+            val tmp = File.createTempFile("enc_${prefix}_", ".enc")
+            tmp to MediaCipherInfo(
+                keyB64 = "key-$prefix",
+                ivB64 = "iv-$prefix",
+                sha256B64 = "sha-$prefix",
+                ciphertextSize = 64L,
+            )
+        }
+        coEvery { mediaFileManager.saveLocalThumbnail(any(), any()) } answers {
+            File("/files/thumbs/${firstArg<String>()}.jpg")
         }
         recordPlainWrites()
         recordEncryptedWrites()
@@ -490,7 +523,7 @@ class OutboxSenderTest {
     @Test
     fun `media is encrypted after its upload, so a failed upload leaves nothing to reuse`() = runTest {
         coEvery { signalManager.encrypt(any(), any()) } returns EncryptedMessage("cipher-voice", signalType = 3)
-        coEvery { storageSource.uploadMedia(any(), any(), any(), any(), any()) } throws IOException("network down")
+        coEvery { storageSource.uploadEncryptedMedia(any(), any(), any(), any()) } throws IOException("network down")
         store(sending("voice1", MessageType.VOICE, localUri = "/cache/voice1.aac"), target = SendTarget.Peer("peer1"))
 
         assertTrue(runCatching { newSender(buildEncrypts = true).send("voice1") }.exceptionOrNull() is IOException)
@@ -498,6 +531,57 @@ class OutboxSenderTest {
         coVerify(exactly = 0) { signalManager.encrypt(any(), any()) }
         assertNull(rows.getValue("voice1").outboxCiphertext)
         assertEquals(1, rows.getValue("voice1").outboxAttempts)
+    }
+
+    @Test
+    fun `encrypted 1-to-1 video encrypts both thumbnail and video, persists keys, and reuses them on retry`() = runTest {
+        val transcoded = File.createTempFile("vid_", ".mp4")
+        val thumb = File.createTempFile("thumb_", ".jpg")
+        try {
+            val capturedEnvelope = slot<String>()
+            coEvery { signalManager.encrypt("peer1", capture(capturedEnvelope)) } returns
+                EncryptedMessage("cipher-vid", signalType = 3, peerIdentity = "id-1")
+            coEvery { videoTranscoder.ensureWithinLimits(any()) } returns
+                VideoMetadata(width = 1280, height = 720, durationMs = 10_000L, rotationDegrees = 0, sizeBytes = 1_000L)
+            coEvery { videoTranscoder.transcode(any(), any(), any()) } returns
+                VideoResult(transcoded, width = 1280, height = 720, durationSec = 10)
+            coEvery { mediaFileManager.copyToLocal("chat1", "vid1", any(), "mp4") } returns File("/media/vid1.mp4")
+            coEvery { videoTranscoder.extractThumbnail(any()) } returns thumb
+            // Fail the Firestore write on attempt 1 so attempt 2 exercises retry reuse.
+            coEvery { anyEncryptedWrite() } throws IOException("ack timed out")
+
+            store(sending("vid1", MessageType.VIDEO, localUri = "content://picker/v1"), target = SendTarget.Peer("peer1"))
+            val encrypting = newSender(buildEncrypts = true)
+
+            assertTrue(runCatching { encrypting.send("vid1") }.exceptionOrNull() is IOException)
+            val afterAttempt1 = rows.getValue("vid1")
+            assertEquals("https://storage.example/vid1.enc", afterAttempt1.mediaUrl)
+            assertEquals("key-vid1", afterAttempt1.mediaKey)
+            assertEquals("iv-vid1", afterAttempt1.mediaIv)
+            assertEquals("sha-vid1", afterAttempt1.mediaSha256)
+            assertEquals("https://storage.example/vid1_thumb.enc", afterAttempt1.mediaThumbnailUrl)
+            assertEquals("/files/thumbs/vid1.jpg", afterAttempt1.localThumbUri)
+            assertEquals("key-vid1_thumb", afterAttempt1.thumbKey)
+
+            val env = MessageEnvelope.decode(capturedEnvelope.captured)
+            assertEquals("https://storage.example/vid1.enc", env.media?.url)
+            assertEquals("key-vid1", env.media?.key)
+            assertEquals("https://storage.example/vid1_thumb.enc", env.thumb?.url)
+            assertEquals("key-vid1_thumb", env.thumb?.key)
+
+            // Retry must NOT re-encrypt or re-upload either blob.
+            recordEncryptedWrites()
+            encrypting.send("vid1")
+
+            coVerify(exactly = 2) { outboxFiles.encryptToTempFile(any(), any()) }
+            coVerify(exactly = 2) { storageSource.uploadEncryptedMedia(any(), any(), any(), any()) }
+            coVerify(exactly = 0) { storageSource.uploadMedia(any(), any(), any(), any(), any()) }
+            assertEquals(MessageStatus.SENT.name, rows.getValue("vid1").status)
+            assertEquals("/files/thumbs/vid1.jpg", rows.getValue("vid1").localThumbUri)
+        } finally {
+            transcoded.delete()
+            thumb.delete()
+        }
     }
 
     // ── images ──────────────────────────────────────────────────────────────

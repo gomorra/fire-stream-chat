@@ -15,6 +15,8 @@ import io.mockk.spyk
 import io.mockk.unmockkAll
 import io.mockk.verify
 import kotlinx.coroutines.test.runTest
+import com.firestream.chat.data.crypto.MediaCrypto
+import com.firestream.chat.data.crypto.MediaEncryptionParams
 import com.firestream.chat.data.sticker.StickerDownloads
 import com.firestream.chat.domain.model.MessageType
 import okhttp3.Call
@@ -299,5 +301,77 @@ class MediaFileManagerTest {
         assertEquals("msg.png", manager.getLocalFile("c", "msg", "png").name)
         assertEquals("msg.webp", manager.getLocalFile("c", "msg", "webp").name)
         assertEquals("msg.mp4", manager.getLocalFile("c", "msg", "mp4").name)
+    }
+
+    // ── encrypted downloads (Step 5) ──────────────────────────────────────
+
+    @Test
+    fun `encrypted document downloads, verifies SHA-256, decrypts, and uses mimeType extension rather than enc`() = runTest {
+        val plain = "secret pdf bytes".toByteArray()
+        val cipherOut = ByteArrayOutputStream()
+        val info = MediaCrypto.encryptStream(plain.inputStream(), cipherOut)
+        val cipherBytes = cipherOut.toByteArray()
+
+        val call = mockk<Call> {
+            every { execute() } returns Response.Builder()
+                .request(Request.Builder().url("https://storage.example/media/c1/docEnc1.enc").build())
+                .protocol(Protocol.HTTP_1_1).code(200).message("OK")
+                .body(cipherBytes.toResponseBody())
+                .build()
+        }
+        every { httpClient.newCall(any()) } returns call
+
+        val file = manager.downloadFor(
+            chatId = "c1",
+            messageId = "docEnc1",
+            type = MessageType.DOCUMENT,
+            mediaUrl = "https://storage.example/media/c1/docEnc1.enc",
+            fileName = "secret.pdf",
+            mimeType = "application/pdf",
+            stickerId = null,
+            encryption = MediaEncryptionParams(info.keyB64, info.ivB64, info.sha256B64),
+        )!!
+
+        assertEquals(File(realContext.filesDir, "documents/docEnc1.pdf"), file)
+        assertEquals("secret pdf bytes", file.readText())
+        file.delete()
+    }
+
+    @Test
+    fun `encrypted thumbnail downloads and decrypts into thumbs dir, and rejects SHA-256 mismatch`() = runTest {
+        val plain = byteArrayOf(0xFF.toByte(), 0xD8.toByte(), 0xFF.toByte(), 0xD9.toByte())
+        val cipherOut = ByteArrayOutputStream()
+        val info = MediaCrypto.encryptStream(plain.inputStream(), cipherOut)
+        val cipherBytes = cipherOut.toByteArray()
+
+        val call = mockk<Call> {
+            every { execute() } answers {
+                Response.Builder()
+                    .request(Request.Builder().url("https://storage.example/media/c1/v1_thumb.enc").build())
+                    .protocol(Protocol.HTTP_1_1).code(200).message("OK")
+                    .body(cipherBytes.toResponseBody())
+                    .build()
+            }
+        }
+        every { httpClient.newCall(any()) } returns call
+
+        val badResult = runCatching {
+            manager.downloadEncryptedThumbnail(
+                messageId = "vBad",
+                thumbnailUrl = "https://storage.example/media/c1/vBad_thumb.enc",
+                encryption = MediaEncryptionParams(info.keyB64, info.ivB64, "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="),
+            )
+        }
+        assertTrue(badResult.exceptionOrNull() is SecurityException)
+        assertTrue(!manager.getLocalThumbFile("vBad").exists())
+
+        val okFile = manager.downloadEncryptedThumbnail(
+            messageId = "v1",
+            thumbnailUrl = "https://storage.example/media/c1/v1_thumb.enc",
+            encryption = MediaEncryptionParams(info.keyB64, info.ivB64, info.sha256B64),
+        )
+        assertEquals(File(realContext.filesDir, "thumbs/v1.jpg"), okFile)
+        assertTrue(okFile.readBytes().contentEquals(plain))
+        okFile.delete()
     }
 }
