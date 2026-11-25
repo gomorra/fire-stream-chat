@@ -148,6 +148,8 @@ Move message metadata and media descriptors inside the Signal payload and add Ro
   - In `MessageRepositoryImpl.reconcileRawMessage`, merge decrypted `MessageEnvelope` fields into the reconstructed `Message` before persisting to Room.
 - **Tests:** Round-trip unit tests for `MessageEnvelope` (every message type + legacy plain-string fallback), `MessageWriterTest` verifying zero plaintext metadata reaches `MessageSource.sendMessage`, and `Migration(35, 36)` test.
 
+**Shipped** (`b2c4f785`): `MessageEnvelope` v1 JSON codec with backward-compatible plain-string fallback, `AppDatabase` v35→v36 (`MIGRATION_35_36`, `AppDatabase/36.json`, 6 media/thumb crypto columns on `MessageRecord` + local-only `localThumbUri` on `MessageEntity`), 1:1 `LOCATION` encryption, narrowed routing-only `MessageSource.sendMessage`, and envelope decoding in `reconcileRawMessage`.
+
 ### Step 5 — Streaming AES-256-GCM media encryption
 
 Encrypt all 1:1 media files and video thumbnails before uploading to Firebase Storage, and decrypt + verify on download.
@@ -169,6 +171,8 @@ Encrypt all 1:1 media files and video thumbnails before uploading to Firebase St
   - Add thumbnail download-and-decrypt (`downloadEncryptedThumbnail(message)` → `filesDir/thumbs/{messageId}.jpg`) triggered alongside auto-download and on chat open when `thumbKey != null && localThumbUri == null`.
 - **Tests:** `MediaCryptoTest` (empty file, single chunk, multi-chunk > 200 KiB, wrong key, flipped byte, truncated stream, swapped chunks), `OutboxSenderTest` (encrypted upload + retry reuses key/url without re-encrypting, video thumbnail encryption, forward re-encryption), and `MediaFileManagerTest` (encrypted download + hash mismatch failure).
 
+**Shipped** (`4516b700`): 64 KiB chunked AES-256-GCM `MediaCrypto` (with per-chunk nonce/AAD, streaming SHA-256, and atomic `.dec.part` rename), `StorageSource.uploadEncryptedMedia` (`media/{chatId}/{storageId}.enc`, `application/octet-stream`), `OutboxSender` encrypted media/video-thumbnail/voice upload with retry mode-matching and local thumbnail caching, `MediaFileManager` decrypt-before-write + `.enc` URL guard, and forward re-encryption across chats.
+
 ### Step 6 — Encrypted message edits and local-only UI playback
 
 Close the last plaintext leak (edits) and make sure no UI surface tries to decode raw encrypted Storage URLs.
@@ -183,6 +187,8 @@ Close the last plaintext leak (edits) and make sure no UI surface tries to decod
   - Introduce a helper on `Message` (e.g. `displayMediaSource: String?` and `displayThumbSource: String?`) that returns `localUri` (or `localThumbUri`) when `isEncryptedMedia`, and `localUri ?: mediaUrl` only for legacy unencrypted / Klipy media.
   - Update `MessageBubble.kt`, `SharedMediaTile.kt`, `ChatScreen.kt`, `ChatMediaGallery.kt`, `ProfileScreen.kt`, `FullscreenVideoPlayer.kt`, `VoiceMessagePlayer.kt`, `SearchResults.kt`, and `ChatViewModel.readableSentImage` to use the helper and trigger on-demand download-and-decrypt (with a loading spinner) if an encrypted media row's `localUri` is null (e.g., right after a backup restore).
 - **Tests:** `MessageRepositoryEditEncryptTest` (edit on existing row, edit arriving before original was synced, multiple sequential edits) and UI/ViewModel tests confirming encrypted media never hands raw `.enc` URLs to image/video loaders.
+
+**Shipped** (`8e66e974`): `editCiphertext`/`editSignalType` on `RawMessage` + `MessageSource.editEncryptedMessage` (clearing plaintext `content`/`emojiSizes` and tombstoning on delete), `MessageWriter.encodeEdit` + `reconcileRawMessage` encrypted-edit handling (preserving original decrypted content on edit decrypt failure), `Message` display helpers (`displayMediaSource`/`displayRemoteMediaUrl`/`displayThumbSource`/`displayRemoteThumbUrl`), `MediaFileManager.downloadForMessage` + `MessageRepository.downloadMedia` on-demand triggers, and full UI audit across bubbles, galleries, search, profile, voice player, and viewer save/edit.
 
 ### ‖ Checkpoint 2 — Hardware smoke test (Full 1:1 E2EE)
 
