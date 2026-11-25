@@ -190,6 +190,8 @@ internal data class MessageBubbleCallbacks(
     // Tapping a VIDEO bubble's thumbnail — opens the fullscreen player. The
     // String is localUri ?: mediaUrl, same convention as onImageClick.
     val onVideoClick: (String) -> Unit = {},
+    // On-demand download-and-decrypt for encrypted media whose local copy is missing.
+    val onDownloadMedia: (() -> Unit)? = null,
     // Tapping a STICKER. ChatScreen uses the captured `message`.
     val onStickerClick: () -> Unit = {},
     // Tapping a DOCUMENT's file card — Open with another app (downloading first
@@ -844,7 +846,7 @@ internal fun rememberMessageImageModel(message: Message): Any? {
     val localFile = remember(localUri) {
         localUri?.let { File(it) }?.takeIf { it.exists() && it.isFile && it.canRead() }
     }
-    return localFile ?: message.mediaUrl
+    return localFile ?: message.displayRemoteMediaUrl
 }
 
 /**
@@ -907,13 +909,18 @@ internal fun ReplyVideoThumbnail(
 @Composable
 internal fun rememberMessageVideoThumbModel(message: Message): Any? {
     val localUri = message.localUri
-    val context = LocalContext.current
+    val localThumbUri = message.localThumbUri
     val localFile = remember(localUri) {
         localUri?.let { File(it) }?.takeIf { it.exists() && it.isFile && it.canRead() }
     }
+    val localThumbFile = remember(localThumbUri) {
+        localThumbUri?.let { File(it) }?.takeIf { it.exists() && it.isFile && it.canRead() }
+    }
+    val remoteThumbUrl = message.displayRemoteThumbUrl
     return when {
         localFile != null -> rememberVideoFrameRequest(localFile)
-        message.mediaThumbnailUrl != null -> message.mediaThumbnailUrl
+        localThumbFile != null -> localThumbFile
+        remoteThumbUrl != null -> remoteThumbUrl
         else -> null
     }
 }
@@ -987,9 +994,15 @@ private fun MessageBubbleBody(
                         .clip(RoundedCornerShape(8.dp))
                         .combinedClickable(
                             onClick = {
+                                if (imageModel == null) {
+                                    if (message.isEncryptedMedia && message.mediaUrl != null) {
+                                        callbacks.onDownloadMedia?.invoke()
+                                    }
+                                    return@combinedClickable
+                                }
                                 // A GIF already plays in place, and the fullscreen
                                 // viewer would show it as a still.
-                                val clickUrl = (message.localUri ?: message.mediaUrl).takeUnless { isGif }
+                                val clickUrl = message.displayMediaSource.takeUnless { isGif }
                                 clickUrl?.let { callbacks.onImageClick(it) }
                             },
                             onLongClick = { onLongPress() }
@@ -1068,6 +1081,16 @@ private fun MessageBubbleBody(
                                 }
                             }
                         }
+                    } else if (message.isEncryptedMedia && message.mediaUrl != null) {
+                        Box(
+                            modifier = Modifier.fillMaxSize(),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(28.dp),
+                                strokeWidth = 2.5.dp,
+                            )
+                        }
                     } else {
                         Box(
                             modifier = Modifier.fillMaxSize(),
@@ -1101,10 +1124,14 @@ private fun MessageBubbleBody(
                 }
 
                 val videoThumbModel = rememberMessageVideoThumbModel(message)
+                val readableLocalVideo = remember(message.localUri) {
+                    message.localUri?.let { File(it) }?.takeIf { it.exists() && it.isFile && it.canRead() }
+                }
+                val needsEncryptedVideoDownload = message.isEncryptedMedia && message.mediaUrl != null && readableLocalVideo == null
                 val progress = state.uploadProgress
                 // Hide the play affordance while an upload is in flight — the
                 // progress ring is the only interactive overlay in that state.
-                val showPlayButton = progress == null || progress >= 1f
+                val showPlayButton = (progress == null || progress >= 1f) && !needsEncryptedVideoDownload
 
                 Box(
                     modifier = Modifier
@@ -1117,7 +1144,15 @@ private fun MessageBubbleBody(
                         .clip(RoundedCornerShape(8.dp))
                         .combinedClickable(
                             onClick = {
-                                val clickUrl = message.localUri ?: message.mediaUrl
+                                if (needsEncryptedVideoDownload) {
+                                    callbacks.onDownloadMedia?.invoke()
+                                    return@combinedClickable
+                                }
+                                val clickUrl = if (message.isEncryptedMedia) {
+                                    readableLocalVideo?.absolutePath
+                                } else {
+                                    message.displayMediaSource
+                                }
                                 clickUrl?.let { callbacks.onVideoClick(it) }
                             },
                             onLongClick = { onLongPress() }
@@ -1132,7 +1167,24 @@ private fun MessageBubbleBody(
                             error = rememberVectorPainter(Icons.Default.BrokenImage)
                         )
 
-                        if (showPlayButton) {
+                        if (needsEncryptedVideoDownload) {
+                            Box(
+                                modifier = Modifier
+                                    .align(Alignment.Center)
+                                    .size(48.dp)
+                                    .background(
+                                        color = Color.Black.copy(alpha = 0.45f),
+                                        shape = CircleShape
+                                    ),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(24.dp),
+                                    color = Color.White,
+                                    strokeWidth = 2.5.dp,
+                                )
+                            }
+                        } else if (showPlayButton) {
                             Box(
                                 modifier = Modifier
                                     .align(Alignment.Center)
@@ -1230,6 +1282,16 @@ private fun MessageBubbleBody(
                                 }
                             }
                         }
+                    } else if (message.isEncryptedMedia && message.mediaUrl != null) {
+                        Box(
+                            modifier = Modifier.fillMaxSize(),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(28.dp),
+                                strokeWidth = 2.5.dp,
+                            )
+                        }
                     } else {
                         Box(
                             modifier = Modifier.fillMaxSize(),
@@ -1256,8 +1318,14 @@ private fun MessageBubbleBody(
                 }
             }
             MessageType.VOICE -> {
+                val voiceSource = message.displayMediaSource
+                if (voiceSource == null && message.isEncryptedMedia && message.mediaUrl != null) {
+                    androidx.compose.runtime.LaunchedEffect(message.id) {
+                        callbacks.onDownloadMedia?.invoke()
+                    }
+                }
                 VoiceMessagePlayer(
-                    mediaUrl = message.mediaUrl,
+                    mediaUrl = voiceSource,
                     durationSeconds = message.duration ?: 0,
                     textColor = textColor
                 )

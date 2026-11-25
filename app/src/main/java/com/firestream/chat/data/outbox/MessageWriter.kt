@@ -77,6 +77,22 @@ class MessageWriter internal constructor(
     }
 
     /**
+     * Encrypts an edit (`MessageEnvelope(kind = EDIT)`) for [target]'s peer when
+     * 1:1 encryption is active; returns `null` when the edit should travel in plaintext.
+     */
+    suspend fun encodeEdit(
+        newContent: String,
+        emojiSizes: Map<Int, Float>,
+        target: SendTarget,
+    ): EncryptedMessage? {
+        val peer = target.peerId ?: return null
+        if (!buildEncrypts || !preferencesDataStore.e2eEncryptionEnabledFlow.first()) return null
+        signalManager.ensureInitialized()
+        val envelopeJson = MessageEnvelope.forEdit(newContent, emojiSizes).encode()
+        return signalManager.encrypt(peer, envelopeJson)
+    }
+
+    /**
      * Whether [stored], encrypted by an earlier attempt for [peerId], can still be
      * written as is: only while the peer publishes the identity it was encrypted
      * for. After a re-registration the session behind it is gone on their side,

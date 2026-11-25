@@ -641,7 +641,17 @@ class ChatViewModel @Inject constructor(
      */
     private suspend fun readableSentImage(localUri: String?, mediaUrl: String?, downloadId: String?): File {
         localUri?.let(::File)?.takeIf { it.isFile && it.canRead() }?.let { return it }
-        val url = mediaUrl ?: throw IllegalStateException("No image source available")
+        val message = _uiState.value.messages.messages.firstOrNull {
+            (downloadId != null && it.id == downloadId) || (mediaUrl != null && it.mediaUrl == mediaUrl)
+        }
+        if (message != null && message.isEncryptedMedia) {
+            val file = mediaFileManager.downloadForMessage(message)
+                ?: throw IllegalStateException("Failed to decrypt image ${message.id}")
+            if (file.canRead()) return file
+            return mediaFileManager.downloadForMessage(message, overrideId = freshDownloadId())
+                ?: throw IllegalStateException("Failed to decrypt image ${message.id}")
+        }
+        val url = message?.mediaUrl ?: mediaUrl ?: throw IllegalStateException("No image source available")
         val downloaded = mediaFileManager.downloadAndSave(chatId, downloadId ?: freshDownloadId(), url)
         if (downloaded.canRead()) return downloaded
         return mediaFileManager.downloadAndSave(chatId, freshDownloadId(), url)
@@ -671,10 +681,22 @@ class ChatViewModel @Inject constructor(
         }
     }
 
-    fun saveImageToDownloads(localUri: String?, mediaUrl: String?, mimeType: String = "image/jpeg") {
+    fun saveImageToDownloads(
+        localUri: String?,
+        mediaUrl: String?,
+        mimeType: String = "image/jpeg",
+        messageId: String? = null,
+    ) {
         saveToDownloads("Image") {
-            val file = readableSentImage(localUri, mediaUrl, downloadId = null)
+            val file = readableSentImage(localUri, mediaUrl, downloadId = messageId)
             mediaFileManager.saveToDownloads(file, mimeType)
+        }
+    }
+
+    /** On-demand download-and-decrypt for an encrypted media message whose local file is missing. */
+    fun downloadMedia(message: Message) {
+        viewModelScope.launch(Dispatchers.IO) {
+            messageRepository.downloadMedia(message)
         }
     }
 

@@ -532,11 +532,13 @@ class MessageRepositoryImpl @Inject constructor(
         }
 
         // Determine whether this message needs Signal decryption.
+        val hasEncryptedEdit = raw.editCiphertext != null && raw.editSignalType != null
         val needsDecryption = raw.ciphertext != null && raw.signalType != null
+                && !hasEncryptedEdit
                 && !(raw.editedAt != null && raw.content != null)
 
         // Guard: skip messages with no usable content (unless deleted).
-        if (raw.deletedAt == null && !needsDecryption && raw.content == null) {
+        if (raw.deletedAt == null && !needsDecryption && !hasEncryptedEdit && raw.content == null) {
             return@withLock existing?.toDomain()
         }
 
@@ -547,6 +549,57 @@ class MessageRepositoryImpl @Inject constructor(
         withContext(NonCancellable) {
             val message = when {
                 raw.deletedAt != null -> raw.toMessage("")
+                hasEncryptedEdit -> {
+                    var baseHasValidContent = false
+                    val base = when {
+                        existing != null -> {
+                            baseHasValidContent = existing.content != DECRYPT_ERROR_PLACEHOLDER && existing.deletedAt == null
+                            existing.toDomain().copy(
+                                status = parseMessageStatus(raw.status),
+                                reactions = raw.reactions,
+                                readBy = raw.readBy,
+                                deliveredTo = raw.deliveredTo,
+                                isPinned = raw.isPinned,
+                            )
+                        }
+                        raw.ciphertext != null && raw.signalType != null -> try {
+                            val origDecrypted = signalManager.decrypt(
+                                raw.senderId,
+                                EncryptedMessage(raw.ciphertext, raw.signalType)
+                            )
+                            val origEnv = MessageEnvelope.decode(origDecrypted)
+                            baseHasValidContent = true
+                            origEnv.applyTo(raw.toMessage(origEnv.body))
+                        } catch (t: Throwable) {
+                            Log.e(TAG, "reconcileRawMessage: original decrypt failed before edit for msg=${raw.id}", t)
+                            raw.toMessage(DECRYPT_ERROR_PLACEHOLDER)
+                        }
+                        else -> {
+                            baseHasValidContent = raw.content != null
+                            raw.toMessage(raw.content.orEmpty())
+                        }
+                    }
+                    try {
+                        val editDecrypted = signalManager.decrypt(
+                            raw.senderId,
+                            EncryptedMessage(raw.editCiphertext!!, raw.editSignalType!!)
+                        )
+                        val editEnv = MessageEnvelope.decode(editDecrypted)
+                        base.copy(
+                            content = editEnv.body,
+                            emojiSizes = editEnv.emojiSizes,
+                            editedAt = raw.editedAt,
+                        )
+                    } catch (t: Throwable) {
+                        Log.e(TAG, "reconcileRawMessage: edit decrypt failed for msg=${raw.id} sender=${raw.senderId} chat=$chatId", t)
+                        if (baseHasValidContent) {
+                            // Preserve decrypted original body and keep prior editedAt so a later sync can retry editCiphertext.
+                            base.copy(editedAt = existing?.editedAt)
+                        } else {
+                            base.copy(content = DECRYPT_ERROR_PLACEHOLDER, editedAt = raw.editedAt)
+                        }
+                    }
+                }
                 raw.editedAt != null && raw.content != null -> {
                     when {
                         // Plaintext doc (including LIST diff updates): reconstruct from raw so
@@ -721,8 +774,21 @@ class MessageRepositoryImpl @Inject constructor(
     }
 
     override suspend fun editMessage(chatId: String, messageId: String, newContent: String, emojiSizes: Map<Int, Float>): Result<Unit> = resultOf {
+        val senderId = authSource.currentUserId ?: throw Exception(ERR_NOT_AUTHENTICATED)
+        val target = sendTargetFor(chatId, senderId)
         val editedAt = System.currentTimeMillis()
-        messageSource.editMessage(chatId, messageId, newContent, editedAt, emojiSizes)
+        val encrypted = messageWriter.encodeEdit(newContent, emojiSizes, target)
+        if (encrypted != null) {
+            messageSource.editEncryptedMessage(
+                chatId = chatId,
+                messageId = messageId,
+                ciphertext = encrypted.ciphertext,
+                signalType = encrypted.signalType,
+                editedAt = editedAt,
+            )
+        } else {
+            messageSource.editMessage(chatId, messageId, newContent, editedAt, emojiSizes)
+        }
         messageDao.editMessage(messageId, newContent, editedAt, emojiSizes)
     }
 
@@ -1628,7 +1694,11 @@ class MessageRepositoryImpl @Inject constructor(
                 Log.d(TAG, "reconcileFromPush: filtered blocked sender=${raw.senderId} msg=$messageId chat=$chatId")
                 return PushReconcileResult.Suppressed
             }
-            if (raw.ciphertext != null && raw.signalType != null) signalManager.ensureInitialized()
+            if ((raw.ciphertext != null && raw.signalType != null) ||
+                (raw.editCiphertext != null && raw.editSignalType != null)
+            ) {
+                signalManager.ensureInitialized()
+            }
             val message = reconcileRawMessage(raw, currentUid, chatId)
             if (message != null) PushReconcileResult.Reconciled(message) else PushReconcileResult.Unavailable
         } catch (t: Throwable) {
@@ -1768,6 +1838,29 @@ class MessageRepositoryImpl @Inject constructor(
             message.chatId, message.id, message.type, url, message.fileName, message.mimeType, message.stickerId,
             encryption = message.mediaEncryption(),
         ) ?: throw IllegalStateException("Message ${message.id} has no file this device can keep")
+        messageDao.updateLocalUri(message.id, file.absolutePath)
+        file.absolutePath
+    }
+
+    override suspend fun downloadMedia(message: Message): Result<String> = resultOf {
+        val thumbEnc = runCatching { message.thumbEncryption() }.getOrNull()
+        if (thumbEnc != null && message.mediaThumbnailUrl != null && message.localThumbUri == null) {
+            runCatching {
+                val thumbFile = mediaFileManager.downloadEncryptedThumbnail(
+                    message.id,
+                    message.mediaThumbnailUrl,
+                    thumbEnc,
+                )
+                messageDao.updateLocalThumbUri(message.id, thumbFile.absolutePath)
+            }
+        }
+        val existingReadable = message.localUri
+            ?.takeIf { it.startsWith("/") }
+            ?.let(::File)
+            ?.takeIf { it.isFile && it.canRead() }
+        if (existingReadable != null) return@resultOf existingReadable.absolutePath
+        val file = mediaFileManager.downloadForMessage(message)
+            ?: throw IllegalStateException("Message ${message.id} has no downloadable media")
         messageDao.updateLocalUri(message.id, file.absolutePath)
         file.absolutePath
     }

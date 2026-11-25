@@ -374,4 +374,13 @@ class MediaFileManagerTest {
         assertTrue(okFile.readBytes().contentEquals(plain))
         okFile.delete()
     }
+
+    @Test
+    fun `downloadAndSave refuses raw enc URLs without decryption parameters`() = runTest {
+        val result = runCatching {
+            manager.downloadAndSave("c1", "m1", "https://storage.example/media/c1/m1.enc?alt=media")
+        }
+        assertTrue(result.exceptionOrNull() is SecurityException)
+        verify(exactly = 0) { httpClient.newCall(any()) }
+    }
 }

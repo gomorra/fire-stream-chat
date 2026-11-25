@@ -262,6 +262,8 @@ class FirestoreMessageSource @Inject constructor(
         "deletedAt" to deletedAt,
         "content" to "",
         "ciphertext" to null,
+        "editCiphertext" to null,
+        "editSignalType" to null,
         "mediaUrl" to null,
         "mediaThumbnailUrl" to null,
     )
@@ -356,8 +358,30 @@ class FirestoreMessageSource @Inject constructor(
             .update(mapOf(
                 "content" to newContent,
                 "editedAt" to editedAt,
-                "emojiSizes" to emojiSizes.mapKeys { it.key.toString() }
+                "emojiSizes" to emojiSizes.mapKeys { it.key.toString() },
+                "editCiphertext" to FieldValue.delete(),
+                "editSignalType" to FieldValue.delete(),
             ))
+            .await()
+    }
+
+    override suspend fun editEncryptedMessage(
+        chatId: String,
+        messageId: String,
+        ciphertext: String,
+        signalType: Int,
+        editedAt: Long,
+    ) {
+        messageRef(chatId, messageId)
+            .update(
+                mapOf(
+                    "editCiphertext" to ciphertext,
+                    "editSignalType" to signalType,
+                    "editedAt" to editedAt,
+                    "content" to FieldValue.delete(),
+                    "emojiSizes" to FieldValue.delete(),
+                )
+            )
             .await()
     }
 
@@ -689,6 +713,8 @@ class FirestoreMessageSource @Inject constructor(
             content = data["content"] as? String,
             ciphertext = data["ciphertext"] as? String,
             signalType = (data["signalType"] as? Long)?.toInt(),
+            editCiphertext = data["editCiphertext"] as? String,
+            editSignalType = (data["editSignalType"] as? Number)?.toInt(),
             type = data["type"] as? String ?: MessageType.TEXT.name,
             mediaUrl = data["mediaUrl"] as? String,
             mediaThumbnailUrl = data["mediaThumbnailUrl"] as? String,

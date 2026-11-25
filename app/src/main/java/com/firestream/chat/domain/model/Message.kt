@@ -86,4 +86,35 @@ data class Message(
     /** True when [mediaUrl] points to an AES-256-GCM encrypted `.enc` blob. */
     val isEncryptedMedia: Boolean
         get() = mediaKey != null
+
+    /**
+     * Media source safe to hand to Coil / ExoPlayer / MediaPlayer.
+     * Never returns an encrypted `.enc` remote URL; encrypted media renders
+     * exclusively from its decrypted [localUri].
+     */
+    val displayMediaSource: String?
+        get() = if (isEncryptedMedia) localUri else (localUri ?: mediaUrl)
+
+    /**
+     * Remote fallback URL safe for UI image viewers (`FullscreenMediaItem.imageUrl`,
+     * `SharedMediaTile.mediaUrl`). `null` for encrypted media so decoders never
+     * fetch raw `.enc` ciphertext directly.
+     */
+    val displayRemoteMediaUrl: String?
+        get() = if (isEncryptedMedia) null else mediaUrl
+
+    /**
+     * Remote thumbnail fallback URL safe for UI image viewers. `null` for
+     * encrypted thumbnails (`thumbKey != null`).
+     */
+    val displayRemoteThumbUrl: String?
+        get() = if (thumbKey != null) null else mediaThumbnailUrl
+
+    /**
+     * Thumbnail source safe to hand to Coil.
+     * Returns [localThumbUri] for encrypted thumbnails (`thumbKey != null`) and
+     * never falls back to an encrypted `.enc` [mediaThumbnailUrl].
+     */
+    val displayThumbSource: String?
+        get() = if (thumbKey != null) localThumbUri else (localThumbUri ?: mediaThumbnailUrl)
 }

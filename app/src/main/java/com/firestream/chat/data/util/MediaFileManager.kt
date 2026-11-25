@@ -8,6 +8,7 @@ import android.provider.MediaStore
 import com.firestream.chat.data.crypto.MediaCrypto
 import com.firestream.chat.data.crypto.MediaEncryptionParams
 import com.firestream.chat.data.sticker.StickerDownloads
+import com.firestream.chat.domain.model.Message
 import com.firestream.chat.domain.model.MessageType
 import com.firestream.chat.domain.util.KlipyUrls
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -55,6 +56,9 @@ class MediaFileManager @Inject constructor(
 
     suspend fun downloadAndSave(chatId: String, messageId: String, mediaUrl: String): File =
         withContext(Dispatchers.IO) {
+            if (isEncryptedBlobUrl(mediaUrl)) {
+                throw SecurityException("Refusing to download encrypted blob without decryption parameters: $messageId")
+            }
             val extension = extractExtension(mediaUrl)
             val localFile = getLocalFile(chatId, messageId, extension)
             if (localFile.exists()) return@withContext localFile
@@ -132,6 +136,26 @@ class MediaFileManager @Inject constructor(
      * keeps rendering from its url and gets no local file. A failed download
      * throws.
      */
+    /**
+     * Convenience wrapper over [downloadFor] that resolves [message]'s
+     * encryption metadata (`mediaKey`/`mediaIv`/`mediaSha256`) inside the data
+     * layer so UI ViewModels never import crypto types directly.
+     */
+    suspend fun downloadForMessage(message: Message, overrideId: String? = null): File? {
+        val url = message.mediaUrl ?: return null
+        val encryption = MediaEncryptionParams.resolve(message.mediaKey, message.mediaIv, message.mediaSha256)
+        return downloadFor(
+            chatId = message.chatId,
+            messageId = overrideId ?: message.id,
+            type = message.type,
+            mediaUrl = url,
+            fileName = message.fileName,
+            mimeType = message.mimeType,
+            stickerId = message.stickerId,
+            encryption = encryption,
+        )
+    }
+
     suspend fun downloadFor(
         chatId: String,
         messageId: String,

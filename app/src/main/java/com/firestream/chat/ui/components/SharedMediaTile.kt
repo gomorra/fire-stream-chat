@@ -48,8 +48,15 @@ fun SharedMediaTile(
         val localFile = localUri
             ?.let { File(it) }
             ?.takeIf { it.exists() && it.isFile && it.canRead() }
+        val thumbData: Any? = thumbnailUrl?.let { thumb ->
+            if (thumb.startsWith("/")) {
+                File(thumb).takeIf { it.exists() && it.isFile && it.canRead() }
+            } else {
+                thumb
+            }
+        }
         ImageRequest.Builder(context)
-            .data(localFile ?: thumbnailUrl ?: mediaUrl)
+            .data(localFile ?: thumbData ?: mediaUrl)
             .decoderFactory(ScaledImageDecoder.Factory())
             .crossfade(true)
             .build()

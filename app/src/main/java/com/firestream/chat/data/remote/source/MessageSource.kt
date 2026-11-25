@@ -97,6 +97,19 @@ interface MessageSource {
     ): String
 
     suspend fun editMessage(chatId: String, messageId: String, newContent: String, editedAt: Long, emojiSizes: Map<Int, Float> = emptyMap())
+
+    /**
+     * Writes an E2EE 1:1 edit payload (`MessageEnvelope(kind = EDIT)`) under
+     * `editCiphertext` / `editSignalType` and clears any stale plaintext
+     * `content` / `emojiSizes` fields on the backend document.
+     */
+    suspend fun editEncryptedMessage(
+        chatId: String,
+        messageId: String,
+        ciphertext: String,
+        signalType: Int,
+        editedAt: Long,
+    )
     suspend fun deleteMessage(chatId: String, messageId: String)
 
     /**

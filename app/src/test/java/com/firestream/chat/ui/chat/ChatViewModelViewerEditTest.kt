@@ -10,6 +10,8 @@ import com.firestream.chat.data.util.ImageEditRasterizer
 import com.firestream.chat.data.util.MediaFileManager
 import com.firestream.chat.domain.model.Chat
 import com.firestream.chat.domain.model.ChatType
+import com.firestream.chat.domain.model.Message
+import com.firestream.chat.domain.model.MessageType
 import com.firestream.chat.domain.reminder.DateTimeDetector
 import com.firestream.chat.domain.repository.AuthRepository
 import com.firestream.chat.domain.repository.ListRepository
@@ -104,7 +106,9 @@ class ChatViewModelViewerEditTest {
         unmockkAll()
     }
 
-    private fun buildViewModel(): ChatViewModel = ChatViewModel(
+    private fun buildViewModel(
+        messageRepository: FakeMessageRepository = FakeMessageRepository(),
+    ): ChatViewModel = ChatViewModel(
         savedStateHandle = SavedStateHandle(mapOf("chatId" to "chat1", "partnerIdHint" to "recipient1")),
         checkGroupPermissionUseCase = mockk<CheckGroupPermissionUseCase>(relaxed = true),
         searchMessagesUseCase = mockk<SearchMessagesUseCase>(relaxed = true),
@@ -112,7 +116,7 @@ class ChatViewModelViewerEditTest {
         authRepository = authRepository,
         chatRepository = chatRepository,
         listRepository = mockk<ListRepository>(relaxed = true),
-        messageRepository = FakeMessageRepository(),
+        messageRepository = messageRepository,
         reminderRepository = reminderRepository,
         dateTimeDetector = dateTimeDetector,
         pollRepository = mockk<PollRepository>(relaxed = true),
@@ -312,5 +316,36 @@ class ChatViewModelViewerEditTest {
         viewModel.consumeViewerEdit()
 
         assertNull(viewModel.viewerEdit())
+    }
+
+    @Test
+    fun `editing an encrypted photo without a readable local copy decrypts via downloadForMessage and never calls downloadAndSave`() = runTest {
+        val decrypted = tmp.newFile("enc-dec.jpg").apply { writeText("jpeg") }
+        val encMsg = Message(
+            id = "enc1",
+            chatId = "chat1",
+            senderId = "peer1",
+            type = MessageType.IMAGE,
+            mediaUrl = "https://storage.example/media/chat1/enc1.enc",
+            mediaKey = "k",
+            mediaIv = "iv",
+            mediaSha256 = "sha",
+            localUri = "/missing/enc1.jpg",
+        )
+        val fakeRepo = FakeMessageRepository().apply { emit("chat1", listOf(encMsg)) }
+        coEvery { mediaFileManager.downloadForMessage(encMsg, null) } returns decrypted
+        val viewModel = buildViewModel(messageRepository = fakeRepo)
+
+        viewModel.editFromViewer(
+            FullscreenMediaItem(
+                imageUrl = encMsg.displayRemoteMediaUrl, // null for encrypted media
+                localUri = encMsg.localUri,
+                messageId = encMsg.id,
+            )
+        )
+
+        coVerify(exactly = 1) { mediaFileManager.downloadForMessage(encMsg, null) }
+        coVerify(exactly = 0) { mediaFileManager.downloadAndSave(any(), any(), any()) }
+        coVerify(exactly = 1) { imageEditRasterizer.importSource(decrypted) }
     }
 }

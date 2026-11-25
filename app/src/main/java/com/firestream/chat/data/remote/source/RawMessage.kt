@@ -29,6 +29,8 @@ data class RawMessage(
     val content: String?,
     val ciphertext: String?,
     val signalType: Int?,
+    val editCiphertext: String? = null,
+    val editSignalType: Int? = null,
     val type: String,
     val mediaUrl: String?,
     val mediaThumbnailUrl: String?,

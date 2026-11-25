@@ -383,9 +383,9 @@ private fun SearchMediaTile(
 ) {
     if (message.type != MessageType.VIDEO) {
         SharedMediaTile(
-            mediaUrl = message.mediaUrl,
+            mediaUrl = message.displayRemoteMediaUrl,
             localUri = message.localUri,
-            thumbnailUrl = message.mediaThumbnailUrl,
+            thumbnailUrl = message.displayThumbSource,
             modifier = modifier,
             onClick = onClick,
         )
@@ -396,16 +396,24 @@ private fun SearchMediaTile(
     val localFile = remember(message.localUri) {
         message.localUri?.let { File(it) }?.takeIf { it.exists() && it.isFile && it.canRead() }
     }
+    val thumbSource = message.displayThumbSource
     val model: Any? = if (localFile != null) {
         rememberVideoFrameRequest(localFile)
     } else {
-        message.mediaThumbnailUrl?.let { url ->
-            remember(url) {
-                ImageRequest.Builder(context)
-                    .data(url)
-                    .decoderFactory(ScaledImageDecoder.Factory())
-                    .crossfade(true)
-                    .build()
+        thumbSource?.let { src ->
+            val data: Any? = if (src.startsWith("/")) {
+                File(src).takeIf { it.exists() && it.isFile && it.canRead() }
+            } else {
+                src
+            }
+            data?.let {
+                remember(it) {
+                    ImageRequest.Builder(context)
+                        .data(it)
+                        .decoderFactory(ScaledImageDecoder.Factory())
+                        .crossfade(true)
+                        .build()
+                }
             }
         }
     }

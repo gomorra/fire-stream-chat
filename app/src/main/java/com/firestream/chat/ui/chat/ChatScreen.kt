@@ -564,9 +564,9 @@ fun ChatScreen(
 
     val searchGalleryItems = remember(uiState.overlays.searchResults) {
         uiState.overlays.searchResults
-            .filter { it.type == MessageType.IMAGE && (it.mediaUrl != null || it.localUri != null) }
+            .filter { it.type == MessageType.IMAGE && it.displayMediaSource != null }
             .map {
-                FullscreenMediaItem(imageUrl = it.mediaUrl, localUri = it.localUri, messageId = it.id)
+                FullscreenMediaItem(imageUrl = it.displayRemoteMediaUrl, localUri = it.localUri, messageId = it.id)
             }
     }
 
@@ -577,8 +577,11 @@ fun ChatScreen(
     // broken-image placeholder), so a silent no-op here would be a tile that
     // does nothing — the same dead tap the text-row path already reports.
     fun openSearchMedia(message: Message) {
+        if (message.isEncryptedMedia && message.displayMediaSource == null && message.mediaUrl != null) {
+            viewModel.downloadMedia(message)
+        }
         if (message.type == MessageType.VIDEO) {
-            val source = message.localUri ?: message.mediaUrl
+            val source = message.displayMediaSource
             if (source == null) viewModel.onSearchResultOpened(reached = false)
             else viewModel.showFullscreenVideo(source)
             return
@@ -1518,7 +1521,7 @@ fun ChatScreen(
                                                 onImageClick = { _ ->
                                                     viewModel.showFullscreenImage(
                                                         FullscreenImage(
-                                                            imageUrl = message.mediaUrl,
+                                                            imageUrl = message.displayRemoteMediaUrl,
                                                             localUri = message.localUri,
                                                             canSaveToDownloads = true,
                                                             messageId = message.id,
@@ -1536,8 +1539,15 @@ fun ChatScreen(
                                                 onVideoClick = { source ->
                                                     viewModel.showFullscreenVideo(source)
                                                 },
+                                                onDownloadMedia = { viewModel.downloadMedia(message) },
                                                 onSaveImage = if (message.type == MessageType.IMAGE) {
-                                                    { viewModel.saveImageToDownloads(message.localUri, message.mediaUrl) }
+                                                    {
+                                                        viewModel.saveImageToDownloads(
+                                                            localUri = message.localUri,
+                                                            mediaUrl = message.displayRemoteMediaUrl,
+                                                            messageId = message.id,
+                                                        )
+                                                    }
                                                 } else null,
                                                 onSaveFile = if (hasLiveFile) {
                                                     { viewModel.saveFileToDownloads(message) }
@@ -2488,7 +2498,7 @@ fun ChatScreen(
                             fullscreenMediaMessageId = galleryItems.getOrNull(page)?.messageId
                         },
                         onSaveToDownloads = { item ->
-                            viewModel.saveImageToDownloads(item.localUri, item.imageUrl)
+                            viewModel.saveImageToDownloads(item.localUri, item.imageUrl, messageId = item.messageId)
                         },
                         onEdit = viewModel::editFromViewer,
                     )
@@ -2502,7 +2512,7 @@ fun ChatScreen(
                     localUri = req.localUri,
                     onDismiss = { closeFullscreenImage() },
                     onSaveToDownloads = if (req.canSaveToDownloads) {
-                        { viewModel.saveImageToDownloads(req.localUri, req.imageUrl) }
+                        { viewModel.saveImageToDownloads(req.localUri, req.imageUrl, messageId = req.messageId) }
                     } else null,
                     snackbarHostState = fullscreenSnackbarHostState,
                     // The same gate as save: a message's photo, never a
@@ -2537,7 +2547,7 @@ fun ChatScreen(
                 onDismiss = { searchGalleryIndex = null },
                 snackbarHostState = fullscreenSnackbarHostState,
                 onSaveToDownloads = { item ->
-                    viewModel.saveImageToDownloads(item.localUri, item.imageUrl)
+                    viewModel.saveImageToDownloads(item.localUri, item.imageUrl, messageId = item.messageId)
                 },
                 // Offered here too: a Photos browse is how an older photo is
                 // found at all, so without it Edit would reach only what is

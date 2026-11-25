@@ -122,6 +122,13 @@ interface MessageRepository {
      * — a document still being picked up by the outbox and not yet uploaded.
      */
     suspend fun ensureLocalFile(message: Message): Result<String>
+
+    /**
+     * Downloads (and decrypts, when encrypted) [message]'s media — and its
+     * encrypted video thumbnail if missing — persisting `localUri` (and
+     * `localThumbUri`) in Room so UI surfaces recompose with a readable file.
+     */
+    suspend fun downloadMedia(message: Message): Result<String>
     // Phase 5.5: broadcast
     suspend fun sendBroadcastMessage(broadcastChatId: String, content: String, recipientIds: List<String>): Result<Message>
     // Lists

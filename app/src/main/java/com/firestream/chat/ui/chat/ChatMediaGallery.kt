@@ -28,11 +28,11 @@ internal fun chatImageGallery(messages: List<Message>): List<FullscreenMediaItem
         .filter {
             it.type == MessageType.IMAGE &&
                 it.deletedAt == null &&
-                (it.mediaUrl != null || it.localUri != null)
+                it.displayMediaSource != null
         }
         .map {
             FullscreenMediaItem(
-                imageUrl = it.mediaUrl,
+                imageUrl = it.displayRemoteMediaUrl,
                 localUri = it.localUri,
                 messageId = it.id,
             )

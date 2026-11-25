@@ -445,7 +445,7 @@ fun ProfileScreen(
     AnimatedVisibility(visible = fullscreenMediaIndex != null, enter = fadeIn(), exit = fadeOut()) {
         fullscreenMediaIndex?.let { idx ->
             FullscreenImagePager(
-                items = uiState.sharedMedia.map { FullscreenMediaItem(it.mediaUrl, it.localUri) },
+                items = uiState.sharedMedia.map { FullscreenMediaItem(it.displayRemoteMediaUrl, it.localUri) },
                 initialIndex = idx,
                 onDismiss = { fullscreenMediaIndex = null },
             )
@@ -598,11 +598,11 @@ private fun SharedMediaGrid(
                 rowItems.forEachIndexed { colIndex, message ->
                     val index = rowIndex * 3 + colIndex
                     SharedMediaTile(
-                        mediaUrl = message.mediaUrl,
+                        mediaUrl = message.displayRemoteMediaUrl,
                         localUri = message.localUri,
-                        thumbnailUrl = message.mediaThumbnailUrl,
+                        thumbnailUrl = message.displayThumbSource,
                         contentDescription = "Shared media",
-                        enabled = message.mediaUrl != null || message.localUri != null,
+                        enabled = message.displayMediaSource != null,
                         modifier = Modifier
                             .weight(1f)
                             .aspectRatio(1f)

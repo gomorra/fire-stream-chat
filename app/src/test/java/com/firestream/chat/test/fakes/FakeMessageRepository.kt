@@ -108,6 +108,8 @@ internal class FakeMessageRepository : MessageRepository {
 
     override suspend fun ensureLocalFile(message: Message): Result<String> = ensureLocalFileResult(message)
 
+    override suspend fun downloadMedia(message: Message): Result<String> = ensureLocalFileResult(message)
+
     override fun getCallLog(): Flow<List<Message>> = emptyFlow()
 
     // ── Send / mutate ─────────────────────────────────────────────────────────
