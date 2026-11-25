@@ -111,17 +111,20 @@ class FirestoreMessageSourceTest {
     // The chat document is readable by the server like the message document; a
     // preview holding the text would put the plaintext beside the ciphertext.
     @Test
-    fun `an encrypted message's chat preview carries its type, never its text`() = runTest {
+    fun `an encrypted message's chat preview carries its type, never its text, and omits plaintext metadata`() = runTest {
         source.sendMessage(
             chatId = "chat1", senderId = "uid1", messageId = "msg1",
             ciphertext = "cipher-1", signalType = 3,
-            type = MessageType.TEXT, replyToId = null, timestamp = 1L,
+            type = MessageType.TEXT, timestamp = 1L,
         )
 
         assertEquals("Message", previewWrites(storedTimestamp = null).single()["lastMessageContent"])
         val written = slot<Map<String, Any?>>()
         verify { messageRef.set(capture(written)) }
-        assertFalse("content" in written.captured)
+        assertEquals(
+            setOf("senderId", "ciphertext", "signalType", "type", "status", "timestamp", "reactions", "isForwarded"),
+            written.captured.keys,
+        )
         assertEquals("cipher-1", written.captured["ciphertext"])
     }
 
@@ -130,8 +133,7 @@ class FirestoreMessageSourceTest {
         source.sendMessage(
             chatId = "chat1", senderId = "uid1", messageId = "msg1",
             ciphertext = "cipher-1", signalType = 3,
-            type = MessageType.IMAGE, replyToId = null, timestamp = 1L,
-            mediaUrl = "https://storage.example/msg1",
+            type = MessageType.IMAGE, timestamp = 1L,
         )
 
         assertEquals("📷 Photo", previewWrites(storedTimestamp = null).single()["lastMessageContent"])
@@ -518,7 +520,7 @@ class FirestoreMessageSourceTest {
         )
         source.sendMessage(
             chatId = "chat1", senderId = "uid1", messageId = "msg1", ciphertext = "c", signalType = 3,
-            type = MessageType.TEXT, replyToId = null, timestamp = 2L,
+            type = MessageType.TEXT, timestamp = 2L,
         )
 
         assertEquals("abc", written[0]["stickerId"])

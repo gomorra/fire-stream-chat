@@ -273,46 +273,20 @@ class FirestoreMessageSource @Inject constructor(
         ciphertext: String,
         signalType: Int,
         type: MessageType,
-        replyToId: String?,
         timestamp: Long,
-        mediaUrl: String?,
-        mediaThumbnailUrl: String?,
         isForwarded: Boolean,
-        duration: Int?,
-        mentions: List<String>,
-        emojiSizes: Map<Int, Float>,
-        mediaWidth: Int?,
-        mediaHeight: Int?,
-        latitude: Double?,
-        longitude: Double?,
-        isHd: Boolean,
-        file: FileMetadata?,
-        sticker: StickerRef?,
         ifAbsent: Boolean,
     ): String {
-        val data = hashMapOf(
+        val data = hashMapOf<String, Any?>(
             "senderId" to senderId,
             "ciphertext" to ciphertext,
             "signalType" to signalType,
             "type" to type.name,
             "status" to MessageStatus.SENT.name,
-            "replyToId" to replyToId,
             "timestamp" to timestamp,
-            "mediaUrl" to mediaUrl,
             "reactions" to emptyMap<String, String>(),
             "isForwarded" to isForwarded,
-            "duration" to duration,
-            "mentions" to mentions,
-            "emojiSizes" to emojiSizes.mapKeys { it.key.toString() }
         )
-        if (mediaThumbnailUrl != null) data["mediaThumbnailUrl"] = mediaThumbnailUrl
-        if (mediaWidth != null) data["mediaWidth"] = mediaWidth
-        if (mediaHeight != null) data["mediaHeight"] = mediaHeight
-        if (latitude != null) data["latitude"] = latitude
-        if (longitude != null) data["longitude"] = longitude
-        if (isHd) data["isHd"] = true
-        putFileMetadata(data, file)
-        putStickerRef(data, sticker)
         writeMessage(chatId, messageId, data, ifAbsent)
 
         // The chat document is readable by the server like any other, so an

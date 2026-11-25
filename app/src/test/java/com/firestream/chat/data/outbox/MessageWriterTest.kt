@@ -1,6 +1,7 @@
 package com.firestream.chat.data.outbox
 
 import com.firestream.chat.data.crypto.EncryptedMessage
+import com.firestream.chat.data.crypto.MessageEnvelope
 import com.firestream.chat.data.crypto.SignalManager
 import com.firestream.chat.data.local.PreferencesDataStore
 import com.firestream.chat.data.remote.source.MessageSource
@@ -12,6 +13,7 @@ import io.mockk.coVerify
 import io.mockk.coVerifyOrder
 import io.mockk.every
 import io.mockk.mockk
+import io.mockk.slot
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
@@ -45,21 +47,28 @@ class MessageWriterTest {
     @Before
     fun setUp() {
         every { preferencesDataStore.e2eEncryptionEnabledFlow } returns flowOf(true)
-        coEvery { signalManager.encrypt("peer1", "hello") } returns EncryptedMessage("cipher-1", signalType = 3)
+        coEvery { signalManager.encrypt("peer1", any()) } returns EncryptedMessage("cipher-1", signalType = 3)
     }
 
     private fun writer(buildEncrypts: Boolean = true) =
         MessageWriter(messageSource, signalManager, preferencesDataStore, buildEncrypts)
 
     @Test
-    fun `a 1-to-1 message in a build that encrypts is encrypted for its peer, after Signal is initialised`() = runTest {
+    fun `a 1-to-1 message in a build that encrypts encodes a v1 envelope for its peer, after Signal is initialised`() = runTest {
+        val capturedPayload = slot<String>()
+        coEvery { signalManager.encrypt("peer1", capture(capturedPayload)) } returns EncryptedMessage("cipher-1", signalType = 3)
+
         val body = writer().encode(text, SendTarget.Peer("peer1"))
 
         assertEquals(EncryptedMessage("cipher-1", signalType = 3), body)
         coVerifyOrder {
             signalManager.ensureInitialized()
-            signalManager.encrypt("peer1", "hello")
+            signalManager.encrypt("peer1", any())
         }
+        val decoded = MessageEnvelope.decode(capturedPayload.captured)
+        assertEquals(MessageEnvelope.CURRENT_VERSION, decoded.v)
+        assertEquals(MessageEnvelope.Kind.MSG, decoded.kind)
+        assertEquals("hello", decoded.body)
     }
 
     @Test
@@ -73,8 +82,23 @@ class MessageWriterTest {
     }
 
     @Test
-    fun `a location goes out in plaintext even to a 1-to-1 peer`() = runTest {
-        assertPlain(writer().encode(text.copy(type = MessageType.LOCATION), SendTarget.Peer("peer1")))
+    fun `a 1-to-1 location is encrypted inside the Signal envelope`() = runTest {
+        val capturedPayload = slot<String>()
+        coEvery { signalManager.encrypt("peer1", capture(capturedPayload)) } returns EncryptedMessage("cipher-loc", signalType = 3)
+        val loc = text.copy(
+            type = MessageType.LOCATION,
+            content = "Home",
+            latitude = 52.52,
+            longitude = 13.405,
+        )
+
+        val body = writer().encode(loc, SendTarget.Peer("peer1"))
+
+        assertEquals(EncryptedMessage("cipher-loc", signalType = 3), body)
+        val decoded = MessageEnvelope.decode(capturedPayload.captured)
+        assertEquals("Home", decoded.body)
+        assertEquals(52.52, decoded.location!!.latitude, 0.0001)
+        assertEquals(13.405, decoded.location!!.longitude, 0.0001)
     }
 
     @Test
@@ -85,29 +109,54 @@ class MessageWriterTest {
     }
 
     @Test
-    fun `send encrypts and writes the ciphertext under the message id`() = runTest {
+    fun `send encrypts full metadata inside ciphertext and writes only routing fields to MessageSource`() = runTest {
+        val capturedPayload = slot<String>()
+        coEvery { signalManager.encrypt("peer1", capture(capturedPayload)) } returns EncryptedMessage("cipher-1", signalType = 3)
         coEvery {
             messageSource.sendMessage(
                 chatId = any(), senderId = any(), messageId = any(), ciphertext = any(), signalType = any(),
-                type = any(), replyToId = any(), timestamp = any(), mediaUrl = any(), mediaThumbnailUrl = any(),
-                isForwarded = any(), duration = any(), mentions = any(), emojiSizes = any(),
-                mediaWidth = any(), mediaHeight = any(), latitude = any(), longitude = any(), isHd = any(),
-                file = any(), ifAbsent = any(),
+                type = any(), timestamp = any(), isForwarded = any(), ifAbsent = any(),
             )
         } returns "msg1"
 
-        val remoteId = writer().send(text, SendTarget.Peer("peer1"))
+        val richDoc = text.copy(
+            type = MessageType.DOCUMENT,
+            content = "secret caption",
+            replyToId = "prev-id",
+            mentions = listOf("peer1"),
+            emojiSizes = mapOf(0 to 2.0f),
+            mediaUrl = "https://storage.example/media/chat1/msg1.enc",
+            mediaKey = "keyB64",
+            mediaIv = "ivB64",
+            mediaSha256 = "shaB64",
+            fileName = "secret.pdf",
+            fileSize = 9001L,
+            mimeType = "application/pdf",
+            isForwarded = true,
+        )
+
+        val remoteId = writer().send(richDoc, SendTarget.Peer("peer1"))
 
         assertEquals("msg1", remoteId)
         coVerify(exactly = 1) {
             messageSource.sendMessage(
-                chatId = "chat1", senderId = "uid1", messageId = "msg1", ciphertext = "cipher-1", signalType = 3,
-                type = MessageType.TEXT, replyToId = null, timestamp = 1_000L, mediaUrl = null,
-                mediaThumbnailUrl = null, isForwarded = false, duration = null, mentions = emptyList(),
-                emojiSizes = emptyMap(), mediaWidth = null, mediaHeight = null,
-                latitude = null, longitude = null, isHd = false, file = null, ifAbsent = false,
+                chatId = "chat1",
+                senderId = "uid1",
+                messageId = "msg1",
+                ciphertext = "cipher-1",
+                signalType = 3,
+                type = MessageType.DOCUMENT,
+                timestamp = 1_000L,
+                isForwarded = true,
+                ifAbsent = false,
             )
         }
+        val envelope = MessageEnvelope.decode(capturedPayload.captured)
+        assertEquals("secret caption", envelope.body)
+        assertEquals("prev-id", envelope.replyToId)
+        assertEquals(listOf("peer1"), envelope.mentions)
+        assertEquals("secret.pdf", envelope.media?.fileName)
+        assertEquals("keyB64", envelope.media?.key)
     }
 
     @Test

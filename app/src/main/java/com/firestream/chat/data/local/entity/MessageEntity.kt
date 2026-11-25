@@ -38,6 +38,8 @@ data class MessageEntity(
     @Embedded val record: MessageRecord,
     /** A file on this device: the input of an own send until it is uploaded, or the downloaded copy of a received one. */
     val localUri: String? = null,
+    /** Decrypted local copy of an encrypted video thumbnail (`filesDir/thumbs/{id}.jpg`). */
+    val localThumbUri: String? = null,
     @ColumnInfo(defaultValue = "0")
     val isStarred: Boolean = false,
     // Offline outbox bookkeeping for an own row that has not reached SENT.
@@ -46,7 +48,7 @@ data class MessageEntity(
     // the acknowledged-echo heal.
     /** The 1:1 peer to encrypt for; "" for group and broadcast chats; null = not recorded. */
     val outboxRecipientId: String? = null,
-    /** Signal ciphertext of `content`, encrypted once and reused by every later attempt. */
+    /** Signal ciphertext of the encoded [MessageEnvelope], encrypted once and reused by every later attempt. */
     val outboxCiphertext: String? = null,
     val outboxSignalType: Int? = null,
     /** The peer identity `outboxCiphertext` was encrypted for; a retry reuses the bytes only while the peer still publishes it. */
@@ -56,7 +58,11 @@ data class MessageEntity(
     val outboxAttempts: Int = 0,
 ) : MessageColumns by record {
 
-    fun toDomain(): Message = record.toDomain(localUri = localUri, isStarred = isStarred)
+    fun toDomain(): Message = record.toDomain(
+        localUri = localUri,
+        localThumbUri = localThumbUri,
+        isStarred = isStarred,
+    )
 
     /** Who the outbox sends this row to; `null` when the row never recorded a target and must not be sent. */
     val sendTarget: SendTarget?
@@ -67,6 +73,7 @@ data class MessageEntity(
         fun fromDomain(message: Message) = MessageEntity(
             record = MessageRecord.fromDomain(message),
             localUri = message.localUri,
+            localThumbUri = message.localThumbUri,
             isStarred = message.isStarred,
         )
 
@@ -122,6 +129,12 @@ interface MessageColumns {
     val isVideoCall: Boolean
     val stickerId: String?
     val stickerPackId: String?
+    val mediaKey: String?
+    val mediaIv: String?
+    val mediaSha256: String?
+    val thumbKey: String?
+    val thumbIv: String?
+    val thumbSha256: String?
 }
 
 /**
@@ -176,10 +189,20 @@ data class MessageRecord(
     override val isVideoCall: Boolean = false,
     override val stickerId: String? = null,
     override val stickerPackId: String? = null,
+    override val mediaKey: String? = null,
+    override val mediaIv: String? = null,
+    override val mediaSha256: String? = null,
+    override val thumbKey: String? = null,
+    override val thumbIv: String? = null,
+    override val thumbSha256: String? = null,
 ) : MessageColumns {
 
     /** The domain message, with the local columns the caller holds beside this record. */
-    fun toDomain(localUri: String? = null, isStarred: Boolean = false) = Message(
+    fun toDomain(
+        localUri: String? = null,
+        localThumbUri: String? = null,
+        isStarred: Boolean = false,
+    ) = Message(
         id = id,
         chatId = chatId,
         senderId = senderId,
@@ -222,10 +245,17 @@ data class MessageRecord(
         isVideoCall = isVideoCall,
         stickerId = stickerId,
         stickerPackId = stickerPackId,
+        localThumbUri = localThumbUri,
+        mediaKey = mediaKey,
+        mediaIv = mediaIv,
+        mediaSha256 = mediaSha256,
+        thumbKey = thumbKey,
+        thumbIv = thumbIv,
+        thumbSha256 = thumbSha256,
     )
 
     companion object {
-        /** [message]'s backend columns; its `localUri` and `isStarred` are local and not carried. */
+        /** [message]'s backend columns; its `localUri`, `localThumbUri` and `isStarred` are local and not carried. */
         fun fromDomain(message: Message) = MessageRecord(
             id = message.id,
             chatId = message.chatId,
@@ -267,6 +297,12 @@ data class MessageRecord(
             isVideoCall = message.isVideoCall,
             stickerId = message.stickerId,
             stickerPackId = message.stickerPackId,
+            mediaKey = message.mediaKey,
+            mediaIv = message.mediaIv,
+            mediaSha256 = message.mediaSha256,
+            thumbKey = message.thumbKey,
+            thumbIv = message.thumbIv,
+            thumbSha256 = message.thumbSha256,
         )
 
         private fun pollToJson(poll: Poll): String {

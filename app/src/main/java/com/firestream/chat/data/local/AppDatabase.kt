@@ -21,6 +21,7 @@ import androidx.room.Database
 import androidx.room.RoomDatabase
 import androidx.room.TypeConverters
 import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
 import com.firestream.chat.data.local.dao.ChatDao
 import com.firestream.chat.data.local.dao.ContactDao
 import com.firestream.chat.data.local.dao.ListDao
@@ -68,16 +69,28 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun stickerDao(): StickerDao
 
     companion object {
-        const val CURRENT_VERSION = 35
+        const val CURRENT_VERSION = 36
 
         /** Pre-v35 versions allowed to upgrade destructively. Installs at v35 or newer keep their decrypted history. */
         val LEGACY_DESTRUCTIVE_VERSIONS: IntArray = (1..34).toList().toIntArray()
+
+        val MIGRATION_35_36 = object : Migration(35, 36) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE messages ADD COLUMN localThumbUri TEXT")
+                db.execSQL("ALTER TABLE messages ADD COLUMN mediaKey TEXT")
+                db.execSQL("ALTER TABLE messages ADD COLUMN mediaIv TEXT")
+                db.execSQL("ALTER TABLE messages ADD COLUMN mediaSha256 TEXT")
+                db.execSQL("ALTER TABLE messages ADD COLUMN thumbKey TEXT")
+                db.execSQL("ALTER TABLE messages ADD COLUMN thumbIv TEXT")
+                db.execSQL("ALTER TABLE messages ADD COLUMN thumbSha256 TEXT")
+            }
+        }
 
         /**
          * Explicit migrations from v35 onward. Legacy pre-v35 installs upgrade via
          * [LEGACY_DESTRUCTIVE_VERSIONS] (Room forbids overlapping migration
          * endpoints with fallbackToDestructiveMigrationFrom).
          */
-        val ALL_MIGRATIONS: Array<Migration> = emptyArray()
+        val ALL_MIGRATIONS: Array<Migration> = arrayOf(MIGRATION_35_36)
     }
 }

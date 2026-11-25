@@ -53,6 +53,7 @@ import android.net.NetworkCapabilities
 import android.net.Uri
 import android.util.Log
 import com.firestream.chat.data.crypto.EncryptedMessage
+import com.firestream.chat.data.crypto.MessageEnvelope
 import com.firestream.chat.data.crypto.SignalManager
 import com.firestream.chat.data.local.AutoDownloadOption
 import com.firestream.chat.data.local.PreferencesDataStore
@@ -543,31 +544,71 @@ class MessageRepositoryImpl @Inject constructor(
         // cannot interrupt between Signal decryption (which advances the ratchet)
         // and the Room insert (which records that decryption happened).
         withContext(NonCancellable) {
-            val content = when {
-                raw.deletedAt != null -> ""
-                else -> try {
+            val message = when {
+                raw.deletedAt != null -> raw.toMessage("")
+                raw.editedAt != null && raw.content != null -> {
                     when {
-                        raw.editedAt != null && raw.content != null -> raw.content
-                        needsDecryption ->
-                            signalManager.decrypt(
-                                raw.senderId,
-                                EncryptedMessage(raw.ciphertext!!, raw.signalType!!)
+                        // Plaintext doc (including LIST diff updates): reconstruct from raw so
+                        // listDiff, timestamp, and all backend fields stay up to date.
+                        raw.ciphertext == null -> raw.toMessage(raw.content)
+                        // Already-decrypted encrypted doc with a legacy plaintext edit:
+                        // preserve previously decrypted envelope metadata & media keys.
+                        existing != null -> existing.toDomain().copy(
+                            content = raw.content,
+                            editedAt = raw.editedAt,
+                            emojiSizes = raw.emojiSizes,
+                            status = parseMessageStatus(raw.status),
+                            reactions = raw.reactions,
+                            readBy = raw.readBy,
+                            deliveredTo = raw.deliveredTo,
+                            isPinned = raw.isPinned,
+                        )
+                        // Unseen encrypted doc that received a legacy plaintext edit before sync:
+                        // decrypt original envelope first to recover metadata, then apply edit.
+                        raw.signalType != null -> {
+                            val base = runCatching {
+                                val decrypted = signalManager.decrypt(
+                                    raw.senderId,
+                                    EncryptedMessage(raw.ciphertext, raw.signalType)
+                                )
+                                val envelope = MessageEnvelope.decode(decrypted)
+                                envelope.applyTo(raw.toMessage(envelope.body))
+                            }.getOrElse { raw.toMessage(raw.content) }
+                            base.copy(
+                                content = raw.content,
+                                editedAt = raw.editedAt,
+                                emojiSizes = raw.emojiSizes,
                             )
-                        else -> raw.content!!
+                        }
+                        else -> raw.toMessage(raw.content)
                     }
+                }
+                needsDecryption -> try {
+                    val decrypted = signalManager.decrypt(
+                        raw.senderId,
+                        EncryptedMessage(raw.ciphertext!!, raw.signalType!!)
+                    )
+                    val envelope = MessageEnvelope.decode(decrypted)
+                    envelope.applyTo(raw.toMessage(envelope.body))
                 } catch (t: Throwable) {
                     Log.e(TAG, "reconcileRawMessage: decrypt failed for msg=${raw.id} sender=${raw.senderId} chat=$chatId", t)
                     // Never overwrite a previously decrypted message with an error placeholder.
                     if (existing != null && existing.content != DECRYPT_ERROR_PLACEHOLDER && existing.deletedAt == null) {
-                        existing.content
+                        existing.toDomain().copy(
+                            status = parseMessageStatus(raw.status),
+                            reactions = raw.reactions,
+                            readBy = raw.readBy,
+                            deliveredTo = raw.deliveredTo,
+                            isPinned = raw.isPinned,
+                        )
                     } else {
-                        DECRYPT_ERROR_PLACEHOLDER
+                        raw.toMessage(DECRYPT_ERROR_PLACEHOLDER)
                     }
                 }
+                else -> raw.toMessage(raw.content!!)
             }
 
-            val message = raw.toMessage(content)
-            // A record write: the row's localUri, star and outbox columns are
+            // A record write: the row's localUri, localThumbUri, star and outbox columns are
             // not the backend's to overwrite, and the partial entity cannot.
             writeRecord(MessageRecord.fromDomain(message), existing)
 

@@ -248,10 +248,10 @@ class OutboxSenderTest {
             writes += Write(
                 messageId = id,
                 type = arg(5),
-                mediaUrl = arg(8),
-                mediaThumbnailUrl = arg(9),
-                duration = arg(11),
-                ifAbsent = arg(21),
+                mediaUrl = null,
+                mediaThumbnailUrl = null,
+                duration = null,
+                ifAbsent = arg(8),
                 ciphertext = arg(3),
                 ciphertextOnRow = rows[id]?.outboxCiphertext,
             )
@@ -267,8 +267,7 @@ class OutboxSenderTest {
 
     /** Any encrypted write, positional in `MessageSource.sendMessage` order. */
     private suspend fun MockKMatcherScope.anyEncryptedWrite() = messageSource.sendMessage(
-        any(), any(), any(), any(), any(), any(), any(), any(), any(), any(),
-        any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(),
+        any(), any(), any(), any(), any(), any(), any(), any(), any(),
     )
 
     /** Inserts [message] as the repository does, recording its target — and, for a re-attempt, earlier runs. */
@@ -418,7 +417,7 @@ class OutboxSenderTest {
 
     @Test
     fun `an encrypted first attempt keeps the ciphertext on the row before writing it`() = runTest {
-        coEvery { signalManager.encrypt("peer1", "hello") } returns EncryptedMessage("cipher-1", signalType = 3, peerIdentity = "id-1")
+        coEvery { signalManager.encrypt("peer1", match { it.contains("\"hello\"") }) } returns EncryptedMessage("cipher-1", signalType = 3, peerIdentity = "id-1")
         store(sending("msg1", MessageType.TEXT).copy(content = "hello"), target = SendTarget.Peer("peer1"))
 
         newSender(buildEncrypts = true).send("msg1")
@@ -436,7 +435,7 @@ class OutboxSenderTest {
 
     @Test
     fun `a second attempt reuses the stored ciphertext and never encrypts again`() = runTest {
-        coEvery { signalManager.encrypt("peer1", "hello") } returns EncryptedMessage("cipher-1", signalType = 3, peerIdentity = "id-1")
+        coEvery { signalManager.encrypt("peer1", match { it.contains("\"hello\"") }) } returns EncryptedMessage("cipher-1", signalType = 3, peerIdentity = "id-1")
         coEvery { anyEncryptedWrite() } throws IOException("ack timed out")
         store(sending("msg1", MessageType.TEXT).copy(content = "hello"), target = SendTarget.Peer("peer1"))
         val encrypting = newSender(buildEncrypts = true)
@@ -462,14 +461,14 @@ class OutboxSenderTest {
     // this side shows it SENT.
     @Test
     fun `a stored ciphertext is encrypted again once the peer has re-registered`() = runTest {
-        coEvery { signalManager.encrypt("peer1", "hello") } returns EncryptedMessage("cipher-2", signalType = 3, peerIdentity = "id-2")
+        coEvery { signalManager.encrypt("peer1", match { it.contains("\"hello\"") }) } returns EncryptedMessage("cipher-2", signalType = 3, peerIdentity = "id-2")
         coEvery { signalManager.isCurrentIdentity("peer1", "id-1") } returns false
         rows["msg1"] = MessageEntity.outbox(sending("msg1", MessageType.TEXT).copy(content = "hello"), SendTarget.Peer("peer1"))
             .copy(outboxCiphertext = "cipher-1", outboxSignalType = 3, outboxPeerIdentity = "id-1", outboxAttempts = 1)
 
         newSender(buildEncrypts = true).send("msg1")
 
-        coVerify(exactly = 1) { signalManager.encrypt("peer1", "hello") }
+        coVerify(exactly = 1) { signalManager.encrypt("peer1", match { it.contains("\"hello\"") }) }
         assertEquals(
             listOf(Write("msg1", MessageType.TEXT, null, null, null, ifAbsent = true, "cipher-2", ciphertextOnRow = "cipher-2")),
             writes,
@@ -478,7 +477,7 @@ class OutboxSenderTest {
 
     @Test
     fun `a stored ciphertext without a recorded peer identity is not reused`() = runTest {
-        coEvery { signalManager.encrypt("peer1", "hello") } returns EncryptedMessage("cipher-2", signalType = 3, peerIdentity = "id-2")
+        coEvery { signalManager.encrypt("peer1", match { it.contains("\"hello\"") }) } returns EncryptedMessage("cipher-2", signalType = 3, peerIdentity = "id-2")
         rows["msg1"] = MessageEntity.outbox(sending("msg1", MessageType.TEXT).copy(content = "hello"), SendTarget.Peer("peer1"))
             .copy(outboxCiphertext = "cipher-1", outboxSignalType = 3, outboxAttempts = 1)
 

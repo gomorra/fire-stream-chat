@@ -72,4 +72,18 @@ data class Message(
     // on receive. The pack id is null when the sender did not share a pack.
     val stickerId: String? = null,
     val stickerPackId: String? = null,
-)
+    // Local decrypted copy of an encrypted video thumbnail (device-only).
+    val localThumbUri: String? = null,
+    // Chunked AES-256-GCM descriptors (Base64 key, base IV, ciphertext SHA-256)
+    // for E2EE 1:1 media blobs (.enc) and encrypted video thumbnails.
+    val mediaKey: String? = null,
+    val mediaIv: String? = null,
+    val mediaSha256: String? = null,
+    val thumbKey: String? = null,
+    val thumbIv: String? = null,
+    val thumbSha256: String? = null,
+) {
+    /** True when [mediaUrl] points to an AES-256-GCM encrypted `.enc` blob. */
+    val isEncryptedMedia: Boolean
+        get() = mediaKey != null
+}

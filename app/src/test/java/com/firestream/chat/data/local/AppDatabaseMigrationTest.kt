@@ -8,8 +8,10 @@ import androidx.sqlite.db.framework.FrameworkSQLiteOpenHelperFactory
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.platform.app.InstrumentationRegistry
 import com.firestream.chat.di.DatabaseModule
+import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -46,9 +48,26 @@ class AppDatabaseMigrationTest {
     )
 
     @Test
-    fun `AppDatabase baseline v35 migrates cleanly to current version`() {
+    fun `AppDatabase baseline v35 migrates cleanly to current version and preserves rows`() {
         val dbName = "app-migration-v35-test.db"
-        appHelper.createDatabase(dbName, 35).close()
+        appHelper.createDatabase(dbName, 35).apply {
+            execSQL(
+                """
+                INSERT INTO messages (
+                    id, chatId, senderId, content, type, status, timestamp,
+                    reactions, isForwarded, readBy, deliveredTo, mentions, emojiSizes,
+                    isPinned, isHd, timerAlarmStyle, timerAlarmSound, isVideoCall,
+                    localUri, isStarred, outboxAttempts
+                ) VALUES (
+                    'm1', 'c1', 'u1', 'decrypted hello', 'TEXT', 'SENT', 12345,
+                    '{}', 0, '{}', '{}', '[]', '{}',
+                    0, 0, 'DEFAULT', 'DEFAULT', 0,
+                    '/data/local/file.jpg', 1, 0
+                )
+                """.trimIndent()
+            )
+            close()
+        }
 
         val context = ApplicationProvider.getApplicationContext<Context>()
         val db = Room.databaseBuilder(context, AppDatabase::class.java, dbName)
@@ -58,6 +77,18 @@ class AppDatabaseMigrationTest {
         try {
             db.openHelper.writableDatabase
             assertEquals(AppDatabase.CURRENT_VERSION, db.openHelper.readableDatabase.version)
+
+            val row = runBlocking { db.messageDao().getMessageById("m1") }!!
+            assertEquals("decrypted hello", row.content)
+            assertEquals("/data/local/file.jpg", row.localUri)
+            assertTrue(row.isStarred)
+            assertNull(row.localThumbUri)
+            assertNull(row.mediaKey)
+            assertNull(row.mediaIv)
+            assertNull(row.mediaSha256)
+            assertNull(row.thumbKey)
+            assertNull(row.thumbIv)
+            assertNull(row.thumbSha256)
         } finally {
             db.close()
         }

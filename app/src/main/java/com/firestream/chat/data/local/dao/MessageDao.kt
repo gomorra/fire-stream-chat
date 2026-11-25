@@ -85,8 +85,8 @@ interface MessageDao {
     // bookkeeping included (insertOutbox). Everything the backend says about a
     // message — a snapshot, a sync, an edit echo, a poll vote — is a
     // MessageRecord upsert, which cannot reach the local columns: localUri,
-    // isStarred and the outbox columns change only through the column updates
-    // below and the SENT transaction.
+    // localThumbUri, isStarred and the outbox columns change only through the
+    // column updates below and the SENT transaction.
 
     /** A row this device composed, with the outbox bookkeeping its send needs. New ids only. */
     @Insert
@@ -322,6 +322,9 @@ interface MessageDao {
     // Local media
     @Query("UPDATE messages SET localUri = :localUri WHERE id = :messageId")
     suspend fun updateLocalUri(messageId: String, localUri: String?)
+
+    @Query("UPDATE messages SET localThumbUri = :localThumbUri WHERE id = :messageId")
+    suspend fun updateLocalThumbUri(messageId: String, localThumbUri: String?)
 
     @Query("SELECT * FROM messages WHERE $OWED_LOCAL_MEDIA")
     suspend fun getMessagesWithoutLocalMedia(): List<MessageEntity>

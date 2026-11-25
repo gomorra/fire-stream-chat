@@ -55,6 +55,11 @@ interface MessageSource {
      */
     suspend fun fetchMessage(chatId: String, messageId: String): RawMessage?
 
+    /**
+     * Writes an encrypted 1:1 message whose body and metadata live inside
+     * [ciphertext] (a v=1 `MessageEnvelope`). Only routing and delivery fields
+     * are accepted so plaintext metadata can never leak to the backend.
+     */
     suspend fun sendMessage(
         chatId: String,
         senderId: String,
@@ -62,21 +67,8 @@ interface MessageSource {
         ciphertext: String,
         signalType: Int,
         type: MessageType,
-        replyToId: String?,
         timestamp: Long,
-        mediaUrl: String? = null,
-        mediaThumbnailUrl: String? = null,
         isForwarded: Boolean = false,
-        duration: Int? = null,
-        mentions: List<String> = emptyList(),
-        emojiSizes: Map<Int, Float> = emptyMap(),
-        mediaWidth: Int? = null,
-        mediaHeight: Int? = null,
-        latitude: Double? = null,
-        longitude: Double? = null,
-        isHd: Boolean = false,
-        file: FileMetadata? = null,
-        sticker: StickerRef? = null,
         ifAbsent: Boolean = false,
     ): String
 

@@ -1,5 +1,6 @@
 package com.firestream.chat.data.repository
 
+import com.firestream.chat.data.crypto.MessageEnvelope
 import com.firestream.chat.data.crypto.SignalManager
 import com.firestream.chat.data.local.dao.MessageDao
 import com.firestream.chat.data.local.entity.MessageEntity
@@ -197,5 +198,81 @@ class MessageRepositorySyncDecryptTest {
         assertEquals(1, updated.size)
         assertEquals("original decrypted text", updated.single().content)
         coVerify(exactly = 1) { signalManager.decrypt("peer1", any()) }
+    }
+
+    @Test
+    fun `reconcileRawMessage decodes v1 MessageEnvelope metadata and media keys into Room`() = runTest {
+        every { authSource.currentUserId } returns "uid1"
+        val envelopeJson = MessageEnvelope.fromMessage(
+            Message(
+                id = "vid1",
+                chatId = "chat1",
+                senderId = "peer1",
+                content = "clip caption",
+                type = MessageType.VIDEO,
+                replyToId = "reply-0",
+                mentions = listOf("uid1"),
+                emojiSizes = mapOf(0 to 1.5f),
+                mediaUrl = "https://storage.example/media/chat1/vid1.enc",
+                mediaKey = "mKey",
+                mediaIv = "mIv",
+                mediaSha256 = "mSha",
+                mediaWidth = 1280,
+                mediaHeight = 720,
+                duration = 15,
+                mediaThumbnailUrl = "https://storage.example/media/chat1/vid1_thumb.enc",
+                thumbKey = "tKey",
+                thumbIv = "tIv",
+                thumbSha256 = "tSha",
+                fileName = "clip.mp4",
+                fileSize = 4096L,
+                mimeType = "video/mp4",
+            )
+        ).encode()
+
+        val rawFromFirestore = incoming.copy(
+            id = "vid1",
+            type = "VIDEO",
+            // All plaintext metadata fields omitted on Firestore
+            mediaUrl = null,
+            mediaThumbnailUrl = null,
+            replyToId = null,
+            mentions = emptyList(),
+            emojiSizes = emptyMap(),
+        )
+        coEvery { messageSource.fetchMessages("chat1") } returns listOf(rawFromFirestore)
+        coEvery { messageDao.getMessageById("vid1") } returns null
+        val inserted = mutableListOf<MessageRecord>()
+        coEvery { messageDao.upsertRecord(any()) } answers { inserted += firstArg<MessageRecord>() }
+        coEvery { signalManager.decrypt("peer1", any()) } returns envelopeJson
+
+        val repository = messageRepository(
+            messageDao = messageDao,
+            messageSource = messageSource,
+            authSource = authSource,
+            signalManager = signalManager,
+        )
+
+        repository.syncAllChatMessages(listOf("chat1"))
+
+        val record = inserted.single()
+        assertEquals("clip caption", record.content)
+        assertEquals("reply-0", record.replyToId)
+        assertEquals(listOf("uid1"), record.mentions)
+        assertEquals(1.5f, record.emojiSizes.getValue(0), 0.001f)
+        assertEquals("https://storage.example/media/chat1/vid1.enc", record.mediaUrl)
+        assertEquals("mKey", record.mediaKey)
+        assertEquals("mIv", record.mediaIv)
+        assertEquals("mSha", record.mediaSha256)
+        assertEquals("https://storage.example/media/chat1/vid1_thumb.enc", record.mediaThumbnailUrl)
+        assertEquals("tKey", record.thumbKey)
+        assertEquals("tIv", record.thumbIv)
+        assertEquals("tSha", record.thumbSha256)
+        assertEquals(1280, record.mediaWidth)
+        assertEquals(720, record.mediaHeight)
+        assertEquals(15, record.duration)
+        assertEquals("clip.mp4", record.fileName)
+        assertEquals(4096L, record.fileSize)
+        assertEquals("video/mp4", record.mimeType)
     }
 }
