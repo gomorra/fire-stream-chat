@@ -227,6 +227,8 @@ Build the core backup and restore engine, completely decoupled from UI so it can
     5. Integrate legacy-backup media fallback into `MediaFileManager`: if a row has `localUri == null && mediaKey == null` and a local `backupKey` exists (or after legacy Storage is scrubbed), download & decrypt from `backups/{uid}/legacy-media/{messageId}.enc`.
 - **Tests:** `BackupCryptoTest` (KDF, wrong passphrase rejection, subkey isolation), `BackupManagerTest` (full backup → wipe DB → restore round-trip preserving messages, `mediaKey`s, stars, chats, `message_sync_state`, and legacy media; interrupted upload leaves prior manifest intact).
 
+**Shipped** (`c66b3868`): Hardened `storage.rules` wired into `firebase.json` (strict owner-only `backups/{uid}/` split by object class, Firestore participant checks on `media/` and `avatars/groups/`, `get`-only `stickers/`), `BackupCrypto` (PBKDF2-HMAC-SHA256 600k iters + HKDF-SHA256 subkeys + GCM AAD-bound `manifest.json` + key-generation namespacing), Keystore-wrapped `BackupKeyStore` with staged atomic passphrase rotation, `FirebaseBackupSource` / `PocketBaseBackupSource`, `BackupManager` (`VACUUM INTO` snapshot + gzip + chunked AES-256-GCM + atomic commit + `PRAGMA integrity_check`/schema verify + unreadable-path scrubbing), `LegacyMediaBackupFetcher` fallback in `MediaFileManager`, and fenced sign-out cleanup.
+
 ### Step 8 — Backup & restore UI and scheduled backups
 
 Wire the backup engine into Settings, WorkManager, and post-login onboarding.
@@ -240,6 +242,8 @@ Wire the backup engine into Settings, WorkManager, and post-login onboarding.
   - Right after sign-in, when Room `messages` is empty, check `backupSource.fetchManifest(uid)`.
   - If a backup exists, present `RestoreBackupScreen`: shows backup date & size, passphrase input, "Restore" (with progress + clean restart into `MainScreen`), and "Skip" (with confirmation dialog warning that skipping starts empty).
 - **Tests:** `BackupViewModelTest` (validation, progress states, wrong passphrase error handling) and Robolectric UI test for `BackupScreen` and `RestoreBackupScreen`.
+
+**Shipped** (`80edcc6f`): `BackupWorker` (`@HiltWorker`) + `BackupScheduler` (Wi-Fi + charging constraints, 1h initial delay, startup `KEEP` reconciliation in `FireStreamApp`), `BackupScreen` + `BackupViewModel` (`Settings → Chat Backup` with passphrase setup/change dialog, determinate stage progress, `All legacy media backed up ✓` badge, and Off/Daily/Weekly selector), post-sign-in + cold-start resilient `RestoreBackupScreen` + `RestoreBackupViewModel` with `BackHandler` and isolated `:restart` `RestartActivity` for reliable Android 12–15 process restarts, plus ViewModel, Worker, Scheduler, Auth routing, and Robolectric Compose UI tests.
 
 ### ‖ Checkpoint 3 — Hardware backup & restore drill
 
