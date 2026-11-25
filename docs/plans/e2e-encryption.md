@@ -277,6 +277,8 @@ Safely erase all legacy plaintext from Firestore and Firebase Storage once both 
 - **Docs update:** Update `CLAUDE.md`, `docs/ARCHITECTURE.md`, `docs/SCHEMA-FIRESTORE.md`, `docs/SCHEMA-ROOM.md`, and `docs/BACKLOG.md` to reflect the shipped state.
 - **Tests:** Unit tests for the scrub script's safety gate and filtering logic (`scripts/scrub-plaintext.test.mjs`, pure logic extracted so it runs via `node --test` without live Firebase credentials).
 
+**Shipped** (`6d8a76a9`): Host-side Admin SDK plaintext scrub script (`scripts/scrub-plaintext.mjs`, dry-run default, backup safety gate validating versioned `db_<ts>_<hex>.enc` size + freshness + `legacy-media/{keyGen}/{messageId}.enc` coverage including Phase-1 hybrids + uncovered participants, 1:1-only scrubbing preserving group chats/media and structured `POLL`/`LIST`/`CALL`/`TIMER` docs) + `scripts/scrub-plaintext.test.mjs` (`20/20` tests); removed `e2eEncryptionEnabledFlow` opt-out gate so 1:1 E2EE is always on in `firebase` release builds; replaced Settings toggle with read-only `EndToEndEncryptionRow` ("Always on for 1:1 chats" + active badge) and `EndToEndEncryptionInfoDialog` (+ `EndToEndEncryptionRowUiTest`); updated `CLAUDE.md`, `ARCHITECTURE.md`, `FEATURE-MAP.md`, `SCHEMA-FIRESTORE.md`, `SCHEMA-ROOM.md`, `CLOUD-FUNCTIONS.md`, and `BACKLOG.md`.
+
 ---
 
 ## Risks & Rollback Notes
