@@ -2,6 +2,23 @@
 
 All notable changes to FireStream Chat. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); each section is headed by the SemVer `versionName` shipped on that merge day (e.g. `## [1.2.3] — 2026-04-24`). Bump rule: `feat:` → minor, `fix:` → patch, `feat!:` / `BREAKING CHANGE:` → major. `versionCode` is derived from `git rev-list --count HEAD`.
 
+## [UNRELEASED] [1.45.0] — 2026-11-26
+
+### Added
+
+- **Full 1:1 end-to-end encryption for media, metadata, and edits.** 1:1 messages in release builds now pack text, mentions, reply targets, emoji sizes, locations, hidden sticker references, and per-file media keys into a versioned Signal envelope (`v=1`), leaving only routing and delivery metadata in Firestore. Photos, videos, video thumbnails, voice notes, documents, and GIFs are encrypted in 64 KiB AES-256-GCM chunks before upload as `.enc` blobs, decrypted locally before display, and re-encrypted with fresh keys when forwarded across chats; 1:1 message edits are encrypted as well. (`b2c4f785`, `4516b700`, `8e66e974`)
+- **Passphrase-protected encrypted cloud backup and restore.** Settings → Chats → *Chat Backup* lets you back up your local chat database and pre-E2EE legacy media to Firebase Storage (`backups/{uid}/`) encrypted with a user passphrase (PBKDF2-HMAC-SHA256 + HKDF-SHA256 + AES-256-GCM), with optional daily or weekly automatic backups on Wi-Fi while charging. Signing in on a fresh install detects an existing backup and prompts for the passphrase to restore chat history and lazily decrypt legacy media on demand; Signal keys stay device-only. (`c66b3868`, `80edcc6f`)
+- **Rotating one-time pre-key pool and host-side plaintext scrub script.** Clients now maintain a 50-key rotating one-time pre-key pool claimed atomically via the `claimPreKeyBundle` Cloud Function (falling back to signed + Kyber pre-keys when empty), and `scripts/scrub-plaintext.mjs` provides a dry-run-by-default Admin SDK tool to erase legacy 1:1 plaintext from Firestore and Storage once every active user has a verified backup. (`1c9eb76d`, `6d8a76a9`)
+
+### Changed
+
+- **Always-on 1:1 end-to-end encryption in release builds.** Removed the Settings opt-out toggle so 1:1 E2EE is always active in `firebase` release builds; Settings → Privacy now displays a read-only *End-to-End Encryption · Always on for 1:1 chats* status row that opens an info dialog explaining 1:1 vs group chats. (`6d8a76a9`)
+- **Explicit Room migrations with schema export.** Disabled unbounded destructive fallback on `AppDatabase` (v35+) and `SignalDatabase` so future schema upgrades never wipe decrypted E2EE history or Signal keys. (`90997900`)
+
+### Fixed
+
+- **Serialized message decryption and decrypted push previews.** Unified the open-chat listener, chat-list sync, and FCM push reconcile behind a per-message lock so concurrent receives never double-advance the Signal ratchet or overwrite decrypted rows with error placeholders, and awaited bounded push reconciliation so notifications for encrypted messages display decrypted text. (`d06b046d`)
+
 ## [1.44.1] — 2026-10-14
 
 ### Fixed

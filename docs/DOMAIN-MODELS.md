@@ -44,6 +44,13 @@ data class Message(
     val mediaUrl: String?,
     val mediaThumbnailUrl: String?,
     val localUri: String?,                   // local file path for media (offline-first)
+    val localThumbUri: String?,              // local decrypted copy of an encrypted video thumbnail (device-only)
+    val mediaKey: String?,                   // Base64 AES-256 key for 1:1 E2EE .enc media blob (null for legacy/group)
+    val mediaIv: String?,                    // Base64 12-byte base IV for chunked AES-256-GCM media
+    val mediaSha256: String?,                // Base64 SHA-256 digest of encrypted media ciphertext
+    val thumbKey: String?,                   // Base64 AES-256 key for encrypted video thumbnail
+    val thumbIv: String?,                    // Base64 12-byte base IV for encrypted video thumbnail
+    val thumbSha256: String?,                // Base64 SHA-256 digest of encrypted thumbnail ciphertext
     val mediaWidth: Int?,                    // original image width for aspect ratio
     val mediaHeight: Int?,                   // original image height for aspect ratio
     val fileName: String?,                   // DOCUMENT: display name as picked (null for other types)
@@ -73,6 +80,8 @@ data class Message(
     val isVideoCall: Boolean              // CALL: the call was started as video
 )
 ```
+
+`Message` exposes safe UI media getters (`isEncryptedMedia`, `displayMediaSource`, `displayRemoteMediaUrl`, `displayThumbSource`, `displayRemoteThumbUrl`) that return `localUri`/`localThumbUri` (and `null` for remote URLs) whenever `mediaKey != null` or `thumbKey != null`, ensuring Coil and ExoPlayer never fetch raw `.enc` ciphertext directly.
 
 ### GroupRole / GroupPermissions
 
@@ -326,6 +335,32 @@ data class IceServerData(
 ```
 
 `toString()` leaves the login out, so an entry in a log line gives nothing away.
+
+### Backup Models
+
+Defined in `domain/model/BackupModels.kt` (used by `BackupRepository`, `BackupViewModel`, `RestoreBackupViewModel`, and `SettingsViewModel`):
+
+```kotlin
+const val MIN_BACKUP_PASSPHRASE_LENGTH = 12
+
+enum class BackupFrequency { OFF, DAILY, WEEKLY }
+enum class BackupStage { IDLE, SYNCING_CHATS, DOWNLOADING_LEGACY_MEDIA, SNAPSHOTTING_DB, ENCRYPTING_DB, UPLOADING_DB, UPLOADING_LEGACY_MEDIA, FINALIZING, COMPLETED, FAILED }
+enum class RestoreStage { IDLE, FETCHING_MANIFEST, VERIFYING_PASSPHRASE, DOWNLOADING_DB, DECRYPTING_DB, VERIFYING_DB, REPLACING_DB, COMPLETED, FAILED }
+
+data class BackupProgress(val stage: BackupStage = BackupStage.IDLE, val completedItems: Int = 0, val totalItems: Int = 0, val fraction: Float = 0f, val errorMessage: String? = null)
+data class RestoreProgress(val stage: RestoreStage = RestoreStage.IDLE, val fraction: Float = 0f, val errorMessage: String? = null)
+data class RemoteBackupSummary(val createdAt: Long, val dbCipherSizeBytes: Long, val legacyMediaComplete: Boolean)
+data class LocalBackupStatus(
+    val isSupported: Boolean = false,
+    val isPassphraseConfigured: Boolean = false,
+    val lastBackupAt: Long? = null,
+    val lastBackupLegacyMediaComplete: Boolean = false,
+    val lastBackupSizeBytes: Long? = null,
+    val frequency: BackupFrequency = BackupFrequency.OFF,
+)
+```
+
+`WrongPassphraseException` signals GCM authentication failure on the manifest inner payload, and `UnsupportedBackupVersionException` signals a backup created by a newer manifest schema version.
 
 ---
 

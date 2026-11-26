@@ -29,7 +29,7 @@ Tests are the primary feedback loop during implementation, not a step appended a
 
 ### 3. Integration tests
 
-> **Status: only the calls rules are covered.** The rules for `calls/{callId}` and its ICE candidate lists run against the Firestore emulator (see *Firestore rules tests* below). The rules of every other collection, the message flow and the offline cases have no integration tests yet. The sync-path coverage gap is recorded in [`TECH_DEBT.md`](../TECH_DEBT.md).
+> **Status: Firestore security rules for `calls`, `stickerNames`, and `keyBundles` (including `oneTimePreKeys`) are covered.** Those suites run against the Firestore emulator (see *Firestore rules tests* below). Rules for other collections, live message flow, and offline cases do not have emulator integration tests yet. The sync-path coverage gap is recorded in [`TECH_DEBT.md`](../TECH_DEBT.md).
 
 - Firestore security rules tested for each new collection/document pattern
 - End-to-end message flow: send → encrypt → store → receive → decrypt → display
@@ -43,8 +43,13 @@ Tests are the primary feedback loop during implementation, not a step appended a
 - `npm test` starts the Firestore emulator for the project `demo-firestream` and runs `node --test` against it. A `demo-` project needs no Firebase login.
 - The tests load `firestore.rules` from the repo root. They check the file on disk, not the rules that are deployed.
 - `.github/workflows/firestore-rules.yml` runs them on Java 21 and Node 22. It runs for each push to main or pull request that changes `firestore.rules`, `firebase.json` or the package.
-- `calls.test.js` has two groups. "the app" holds every write `FirestoreCallSource` makes, in each state the call can be in, including the orders older app versions used. These must pass. "the rules refuse" holds the abuses, which must fail.
+- `calls.test.js`, `stickerNames.test.js`, and `keyBundles.test.js` each test allowed app operations and rejected abuse cases.
 - The calls rules list every field a call document may hold. A new field, or a write in a new state, needs the rule changed and a test here. Deploy the rules (`firebase deploy --only firestore:rules`) before the app version that writes it ships, or its writes are refused.
+
+#### Cloud Functions & host script tests
+
+- **Cloud Functions**: `cd functions && npm test` runs `functions/test/` via Node's built-in test runner (call push logic and `claimPreKeyBundle` transaction/blocked-caller behavior). `.github/workflows/functions.yml` runs it when `functions/` changes.
+- **Plaintext scrub script**: `node --test scripts/scrub-plaintext.test.mjs` tests the safety gate, manifest validation, 1:1 filtering, and idempotency of `scripts/scrub-plaintext.mjs` with no live Firebase credentials.
 
 #### Sticker naming service tests
 
