@@ -470,6 +470,8 @@ developer machine, and (c) likely to recur. Named, structural conventions belong
   `canUseFullScreenIntent()`.** Put a mocked `NotificationManager` behind a `ContextWrapper`
   that overrides `getSystemService(String)`. Do not name the method in a MockK `verify` under
   an SDK below 34, where it does not exist: recording the call throws `NoSuchMethodError`.
+- **Every `@Inject` field on `FireStreamApp` must be `dagger.Lazy<T>` because `:restart` has no `FirebaseInitProvider`.**
+  `RestartActivity` runs in `android:process=":restart"` to restart the main process after a backup DB swap. Android still instantiates `FireStreamApp` in `:restart`, and `Hilt_FireStreamApp.onCreate()` runs `hiltInternalInject()` *before* `FireStreamApp.onCreate()` can return early on `getProcessName().endsWith(":restart")`. Because `FirebaseInitProvider` only runs in the main process, any eager `@Inject` field that transitively touches Firebase crashes `:restart` with `Default FirebaseApp is not initialized in this process com.firestream.chat:restart` and leaves `RestoreBackupScreen` stuck on *"Restarting…"*. Enforced by `FireStreamAppRestartProcessTest` (2026-11-26).
 
 ## WebRTC / calls
 

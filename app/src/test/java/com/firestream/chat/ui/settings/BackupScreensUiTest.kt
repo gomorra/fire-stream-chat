@@ -150,4 +150,34 @@ class BackupScreensUiTest {
         composeRule.onNodeWithTag("restore_skip_confirm_button").performClick()
         assertTrue(skipped)
     }
+
+    @Test
+    fun `RestoreBackupScreen keeps progress bar visible while restarting after restore succeeds`() {
+        val state = RestoreBackupUiState(
+            isLoadingSummary = false,
+            summary = RemoteBackupSummary(
+                createdAt = 1_750_000_000_000L,
+                dbCipherSizeBytes = 4_194_304L,
+                legacyMediaComplete = true,
+            ),
+            progress = RestoreProgress(stage = RestoreStage.COMPLETED, fraction = 1f),
+            restoreSucceeded = true,
+        )
+
+        composeRule.setContent {
+            FireStreamTheme {
+                RestoreBackupScreenContent(
+                    uiState = state,
+                    onRestore = {},
+                    onSkipConfirmed = {},
+                    onRetrySummary = {},
+                )
+            }
+        }
+
+        composeRule.onNodeWithText("Restarting FireStream…").performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithTag("restore_progress_bar").performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithTag("restore_button").performScrollTo().assertIsDisplayed().assertIsNotEnabled()
+        composeRule.onNodeWithText("Restarting…").assertIsDisplayed()
+    }
 }

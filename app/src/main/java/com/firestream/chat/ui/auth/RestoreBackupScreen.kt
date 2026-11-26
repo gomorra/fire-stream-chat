@@ -202,18 +202,24 @@ fun RestoreBackupScreenContent(
                 )
             }
 
-            if (uiState.isRestoring) {
+            if (uiState.isRestoring || uiState.restoreSucceeded) {
                 Spacer(Modifier.height(16.dp))
                 Text(
-                    text = restoreStageLabel(uiState.progress),
+                    text = if (uiState.restoreSucceeded) "Restarting FireStream…" else restoreStageLabel(uiState.progress),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Spacer(Modifier.height(6.dp))
-                LinearProgressIndicator(
-                    progress = { uiState.progress.fraction.coerceIn(0f, 1f) },
-                    modifier = Modifier.fillMaxWidth().testTag("restore_progress_bar"),
-                )
+                if (uiState.restoreSucceeded) {
+                    LinearProgressIndicator(
+                        modifier = Modifier.fillMaxWidth().testTag("restore_progress_bar"),
+                    )
+                } else {
+                    LinearProgressIndicator(
+                        progress = { uiState.progress.fraction.coerceIn(0f, 1f) },
+                        modifier = Modifier.fillMaxWidth().testTag("restore_progress_bar"),
+                    )
+                }
             }
 
             Spacer(Modifier.height(24.dp))

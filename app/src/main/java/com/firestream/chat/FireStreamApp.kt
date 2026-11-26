@@ -41,50 +41,54 @@ import javax.inject.Inject
 @HiltAndroidApp
 class FireStreamApp : Application(), Configuration.Provider, ImageLoaderFactory {
 
+    // Every @Inject field on FireStreamApp MUST stay dagger.Lazy<T>.
+    // RestartActivity runs in an isolated `:restart` process where
+    // FirebaseInitProvider does not run; Hilt_FireStreamApp.onCreate() injects
+    // these fields before FireStreamApp.onCreate() can return early, so any
+    // eager Firebase/Room/WorkManager field crashes `:restart` on startup.
     @Inject
-    lateinit var appLifecycleObserver: AppLifecycleObserver
+    lateinit var appLifecycleObserver: dagger.Lazy<AppLifecycleObserver>
 
     @Inject
-    lateinit var okHttpClient: OkHttpClient
+    lateinit var okHttpClient: dagger.Lazy<OkHttpClient>
 
     @Inject
-    lateinit var workerFactory: HiltWorkerFactory
+    lateinit var workerFactory: dagger.Lazy<HiltWorkerFactory>
 
     @Inject
-    lateinit var currentActivityHolder: CurrentActivityHolder
+    lateinit var currentActivityHolder: dagger.Lazy<CurrentActivityHolder>
 
     @Inject
-    lateinit var flavorBootstraps: @JvmSuppressWildcards Set<FlavorBootstrap>
+    lateinit var flavorBootstraps: dagger.Lazy<@JvmSuppressWildcards Set<FlavorBootstrap>>
 
     @Inject
-    lateinit var outboxScheduler: OutboxScheduler
+    lateinit var outboxScheduler: dagger.Lazy<OutboxScheduler>
 
     @Inject
-    lateinit var stickerSyncScheduler: StickerSyncScheduler
+    lateinit var stickerSyncScheduler: dagger.Lazy<StickerSyncScheduler>
 
     @Inject
-    lateinit var imageEditRasterizer: ImageEditRasterizer
+    lateinit var imageEditRasterizer: dagger.Lazy<ImageEditRasterizer>
 
-    // Lazy: only the launched announcement needs it, so nothing is built on the main thread.
     @Inject
     lateinit var authRepository: dagger.Lazy<AuthRepository>
 
     @Inject
-    lateinit var profileImageManager: ProfileImageManager
+    lateinit var profileImageManager: dagger.Lazy<ProfileImageManager>
 
     @Inject
-    lateinit var backupScheduler: BackupScheduler
+    lateinit var backupScheduler: dagger.Lazy<BackupScheduler>
 
     @Inject
-    lateinit var preferencesDataStore: PreferencesDataStore
+    lateinit var preferencesDataStore: dagger.Lazy<PreferencesDataStore>
 
     @Inject
     @ApplicationScope
-    lateinit var appScope: CoroutineScope
+    lateinit var appScope: dagger.Lazy<CoroutineScope>
 
     override val workManagerConfiguration: Configuration
         get() = Configuration.Builder()
-            .setWorkerFactory(workerFactory)
+            .setWorkerFactory(workerFactory.get())
             .build()
 
     // Coil's app-wide ImageLoader. Without this, avatars run on Coil's defaults
@@ -98,7 +102,7 @@ class FireStreamApp : Application(), Configuration.Provider, ImageLoaderFactory 
     // Called lazily on first Coil use (after onCreate), so okHttpClient is ready.
     override fun newImageLoader(): ImageLoader =
         ImageLoader.Builder(this)
-            .okHttpClient(okHttpClient)
+            .okHttpClient(okHttpClient.get())
             .memoryCache {
                 MemoryCache.Builder(this)
                     .maxSizePercent(0.25)
@@ -122,11 +126,11 @@ class FireStreamApp : Application(), Configuration.Provider, ImageLoaderFactory 
         if (getProcessName().endsWith(":restart")) return
         // Register process-level lifecycle observer for online/offline presence.
         // Must happen after super.onCreate() so Hilt completes injection.
-        ProcessLifecycleOwner.get().lifecycle.addObserver(appLifecycleObserver)
+        ProcessLifecycleOwner.get().lifecycle.addObserver(appLifecycleObserver.get())
         // Run any flavor-specific eager init (pocketbase contributes the SSE
         // realtime lifecycle hook; firebase contributes nothing in v0).
-        flavorBootstraps.forEach { it.start() }
-        currentActivityHolder.register(this)
+        flavorBootstraps.get().forEach { it.start() }
+        currentActivityHolder.get().register(this)
         TimerNotificationChannel.ensureCreated(this)
         ReminderNotificationChannel.ensureCreated(this)
         Executors.newSingleThreadExecutor().execute {
@@ -135,8 +139,8 @@ class FireStreamApp : Application(), Configuration.Provider, ImageLoaderFactory 
             // file it steps off (redo has to be able to walk forward again), so
             // an unswept edit cache grows per edit *step* and never shrinks;
             // sweepStale keeps only what a recent send might still retry.
-            imageEditRasterizer.sweepStale()
-            profileImageManager.deleteLegacyExternalCache()
+            imageEditRasterizer.get().sweepStale()
+            profileImageManager.get().deleteLegacyExternalCache()
         }
         requeueQueuedSends()
         announceCallVideoLine()
@@ -147,10 +151,10 @@ class FireStreamApp : Application(), Configuration.Provider, ImageLoaderFactory 
     }
 
     private fun reconcileScheduledBackup() {
-        appScope.launch {
+        appScope.get().launch {
             runCatching {
-                val freq = preferencesDataStore.backupFrequencyFlow.first()
-                backupScheduler.reconcile(freq)
+                val freq = preferencesDataStore.get().backupFrequencyFlow.first()
+                backupScheduler.get().reconcile(freq)
             }.onFailure { Log.w("FireStreamApp", "reconcileScheduledBackup failed", it) }
         }
     }
@@ -160,7 +164,7 @@ class FireStreamApp : Application(), Configuration.Provider, ImageLoaderFactory 
     // updated app is offered video from its first start on, a start by a push included. The
     // repository logs a failure; the next start is the retry.
     private fun announceCallVideoLine() {
-        appScope.launch { authRepository.get().announceCallVideoLine() }
+        appScope.get().launch { authRepository.get().announceCallVideoLine() }
     }
 
     // An own row still SENDING belongs to the outbox: WorkManager already holds
@@ -169,8 +173,8 @@ class FireStreamApp : Application(), Configuration.Provider, ImageLoaderFactory 
     // fails the SENDING rows of types the outbox cannot send — a timer whose
     // await died with the process — so their retry affordance returns.
     private fun requeueQueuedSends() {
-        appScope.launch {
-            runCatching { outboxScheduler.requeueAll() }
+        appScope.get().launch {
+            runCatching { outboxScheduler.get().requeueAll() }
                 .onFailure { Log.w("FireStreamApp", "requeueAll failed", it) }
         }
     }
@@ -178,7 +182,7 @@ class FireStreamApp : Application(), Configuration.Provider, ImageLoaderFactory 
     // A sticker pack changed while offline, or in the moment a sync run ended,
     // is still marked pending. This queues the run that backs it up.
     private fun syncPendingStickerPacks() {
-        appScope.launch { stickerSyncScheduler.syncIfPending() }
+        appScope.get().launch { stickerSyncScheduler.get().syncIfPending() }
     }
 
     private fun scheduleUpdateCheck() {
