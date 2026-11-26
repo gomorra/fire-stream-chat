@@ -2,6 +2,12 @@
 
 All notable changes to FireStream Chat. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); each section is headed by the SemVer `versionName` shipped on that merge day (e.g. `## [1.2.3] — 2026-04-24`). Bump rule: `feat:` → minor, `fix:` → patch, `feat!:` / `BREAKING CHANGE:` → major. `versionCode` is derived from `git rev-list --count HEAD`.
 
+## [UNRELEASED] [2.0.1] — 2026-11-26
+
+### Fixed
+
+- **Backup restore restart hang on Android.** `RestartActivity` runs in an isolated `:restart` process where Firebase does not auto-initialize, and eager `@Inject` fields on `FireStreamApp` triggered `FirebaseFirestore.getInstance()` inside `Hilt_FireStreamApp.onCreate()` before the `:restart` early return—crashing `:restart` and leaving the restore screen stuck on *"Restarting…"*. Wrapping all `FireStreamApp` `@Inject` fields in `dagger.Lazy` avoids eager initialization in `:restart`, and `RestoreBackupScreen` now keeps the progress bar visible during the restart handoff. (`59de3d6f`)
+
 ## [2.0.0] — 2026-11-26
 
 ### Added
