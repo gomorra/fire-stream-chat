@@ -154,7 +154,8 @@ class FireStreamApp : Application(), Configuration.Provider, ImageLoaderFactory 
         appScope.get().launch {
             runCatching {
                 val freq = preferencesDataStore.get().backupFrequencyFlow.first()
-                backupScheduler.get().reconcile(freq)
+                val allowMobileData = preferencesDataStore.get().backupOverMobileDataFlow.first()
+                backupScheduler.get().reconcile(freq, allowMobileData)
             }.onFailure { Log.w("FireStreamApp", "reconcileScheduledBackup failed", it) }
         }
     }

@@ -21,6 +21,15 @@ It is not a feature gap and not tech debt — it is an unfinished check, and it 
 here because a cloud agent has no other way to learn that the work is not fully done.
 Delete an item once it has been verified (or once a fix for what the check found ships).
 
+### Reliable background backups, Wi-Fi enforcement, and resumability (2026-11-27)
+
+`docs/plans/done/backup-reliability.md`. JVM and Robolectric tests cover the resumable `keyGen` ledger, bounded 3× parallelism, live constraint replacement, foreground `BackupWorker` promotion/fallback, `BackupViewModel`, and `BackupScreen` UI states. Verify on hardware:
+
+1. Start *Back up now* on Wi-Fi, lock the screen / switch apps, and confirm the *Backing up chats* progress notification stays live and the backup completes in the background.
+2. Start *Back up now* on Wi-Fi (with *Back up over mobile data* off), turn Wi-Fi off mid-run, and confirm uploads pause immediately (no mobile data usage), the screen shows *Waiting for Wi-Fi…*, and reconnecting to Wi-Fi resumes from already-uploaded legacy media without starting from 0.
+3. While *Waiting for Wi-Fi…* is shown, flip *Back up over mobile data* on and confirm the backup starts immediately over cellular; flip it off mid-run and confirm it pauses again.
+4. Tap **Cancel** in *Chat Backup* and from the manual backup notification; confirm the run stops cleanly while leaving any Daily/Weekly automatic backup schedule intact.
+
 ### Full 1:1 E2EE, encrypted backups, and plaintext scrub (2026-11-25)
 
 `docs/plans/e2e-encryption.md` Phases 1–4 (Steps 1–9). JVM, Robolectric, Cloud Functions, Firestore rules, and `scripts/scrub-plaintext.test.mjs` tests cover the migrations, pre-key pool, locked receive path, v1 envelope, chunked AES-256-GCM media, encrypted edits, passphrase backup/restore, Settings status row, and scrub safety gate. Before running Step 9's plaintext scrub on production data:

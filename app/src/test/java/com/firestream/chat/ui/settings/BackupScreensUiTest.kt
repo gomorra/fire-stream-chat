@@ -17,6 +17,7 @@ import com.firestream.chat.domain.model.BackupFrequency
 import com.firestream.chat.domain.model.BackupProgress
 import com.firestream.chat.domain.model.BackupStage
 import com.firestream.chat.domain.model.LocalBackupStatus
+import com.firestream.chat.domain.model.ManualBackupWorkState
 import com.firestream.chat.domain.model.RemoteBackupSummary
 import com.firestream.chat.domain.model.RestoreProgress
 import com.firestream.chat.domain.model.RestoreStage
@@ -120,8 +121,9 @@ class BackupScreensUiTest {
     }
 
     @Test
-    fun `BackupScreen shows progress percentage, disables action button, and keeps schedule editable while running`() {
+    fun `BackupScreen shows progress percentage, cancel button, and keeps schedule editable while running`() {
         var selectedFrequency: BackupFrequency? = null
+        var canceled = false
         val state = BackupUiState(
             status = LocalBackupStatus(
                 isSupported = true,
@@ -145,6 +147,7 @@ class BackupScreensUiTest {
                     callbacks = BackupScreenCallbacks(
                         onBackClick = {},
                         onBackupNow = {},
+                        onCancelBackup = { canceled = true },
                         onOpenPassphraseDialog = {},
                         onDismissPassphraseDialog = {},
                         onSavePassphrase = { _, _, _ -> },
@@ -160,6 +163,8 @@ class BackupScreensUiTest {
         composeRule.onNodeWithText("76%").assertIsDisplayed()
         composeRule.onNodeWithTag("backup_progress_bar").assertIsDisplayed()
         composeRule.onNodeWithTag("backup_now_button").assertIsNotEnabled()
+        composeRule.onNodeWithTag("backup_cancel_button").assertIsDisplayed().performClick()
+        assertTrue(canceled)
 
         // Verify schedule controls stay enabled and interactive while a backup is running.
         composeRule.onNodeWithTag("backup_freq_daily").performScrollTo().assertIsEnabled().performClick()
@@ -170,6 +175,81 @@ class BackupScreensUiTest {
             .assertIsEnabled()
             .performSemanticsAction(SemanticsActions.OnClick)
         assertEquals(BackupFrequency.WEEKLY, selectedFrequency)
+    }
+
+    @Test
+    fun `BackupScreen shows Waiting for Wi-Fi card with cancel button and allows toggling mobile data`() {
+        var canceled = false
+        var toggledMobileData: Boolean? = null
+        val state = BackupUiState(
+            status = LocalBackupStatus(
+                isSupported = true,
+                isPassphraseConfigured = true,
+                frequency = BackupFrequency.WEEKLY,
+                allowMobileData = false,
+            ),
+            manualWorkState = ManualBackupWorkState.WAITING_FOR_NETWORK,
+        )
+
+        composeRule.setContent {
+            FireStreamTheme {
+                BackupScreenContent(
+                    uiState = state,
+                    callbacks = BackupScreenCallbacks(
+                        onBackClick = {},
+                        onBackupNow = {},
+                        onCancelBackup = { canceled = true },
+                        onOpenPassphraseDialog = {},
+                        onDismissPassphraseDialog = {},
+                        onSavePassphrase = { _, _, _ -> },
+                        onSelectFrequency = {},
+                        onToggleMobileData = { toggledMobileData = it },
+                        onConsumeSnackbar = {},
+                    ),
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag("backup_waiting_card").assertIsDisplayed()
+        composeRule.onNodeWithText("Waiting for Wi-Fi…").assertIsDisplayed()
+        composeRule.onNodeWithTag("backup_now_button").assertIsNotEnabled()
+        composeRule.onNodeWithTag("backup_cancel_button").assertIsDisplayed().performClick()
+        assertTrue(canceled)
+
+        composeRule.onNodeWithTag("backup_mobile_data_switch").performScrollTo().assertIsEnabled().performClick()
+        assertEquals(true, toggledMobileData)
+    }
+
+    @Test
+    fun `BackupScreen reflects mobile data opt-in in schedule summary`() {
+        val state = BackupUiState(
+            status = LocalBackupStatus(
+                isSupported = true,
+                isPassphraseConfigured = true,
+                frequency = BackupFrequency.DAILY,
+                allowMobileData = true,
+            ),
+        )
+
+        composeRule.setContent {
+            FireStreamTheme {
+                BackupScreenContent(
+                    uiState = state,
+                    callbacks = BackupScreenCallbacks(
+                        onBackClick = {},
+                        onBackupNow = {},
+                        onOpenPassphraseDialog = {},
+                        onDismissPassphraseDialog = {},
+                        onSavePassphrase = { _, _, _ -> },
+                        onSelectFrequency = {},
+                        onConsumeSnackbar = {},
+                    ),
+                )
+            }
+        }
+
+        composeRule.onNodeWithText("Auto-backup: Daily · Wi-Fi or mobile data & charging").assertIsDisplayed()
+        composeRule.onNodeWithText("Runs automatically on Wi-Fi or mobile data while charging.").assertIsDisplayed()
     }
 
     @Test

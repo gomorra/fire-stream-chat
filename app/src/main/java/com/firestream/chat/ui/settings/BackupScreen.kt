@@ -20,9 +20,11 @@ import androidx.compose.material.icons.filled.CloudDone
 import androidx.compose.material.icons.filled.CloudOff
 import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.Key
+import androidx.compose.material.icons.filled.SignalCellularAlt
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material.icons.filled.WifiOff
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -41,12 +43,12 @@ import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -56,7 +58,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -77,10 +78,12 @@ import java.util.Locale
 data class BackupScreenCallbacks(
     val onBackClick: () -> Unit,
     val onBackupNow: () -> Unit,
+    val onCancelBackup: () -> Unit = {},
     val onOpenPassphraseDialog: () -> Unit,
     val onDismissPassphraseDialog: () -> Unit,
     val onSavePassphrase: (passphrase: String, confirmation: String, initialFrequency: BackupFrequency?) -> Unit,
     val onSelectFrequency: (BackupFrequency) -> Unit,
+    val onToggleMobileData: (Boolean) -> Unit = {},
     val onConsumeSnackbar: () -> Unit,
 )
 
@@ -94,10 +97,12 @@ fun BackupScreen(
         BackupScreenCallbacks(
             onBackClick = onBackClick,
             onBackupNow = viewModel::backupNow,
+            onCancelBackup = viewModel::cancelBackup,
             onOpenPassphraseDialog = viewModel::openPassphraseDialog,
             onDismissPassphraseDialog = viewModel::dismissPassphraseDialog,
             onSavePassphrase = viewModel::savePassphrase,
             onSelectFrequency = viewModel::setFrequency,
+            onToggleMobileData = viewModel::setAllowMobileData,
             onConsumeSnackbar = viewModel::consumeSnackbar,
         )
     }
@@ -115,17 +120,6 @@ fun BackupScreenContent(
         val msg = uiState.snackbarMessage ?: return@LaunchedEffect
         snackbarHostState.showSnackbar(msg)
         callbacks.onConsumeSnackbar()
-    }
-
-    val view = LocalView.current
-    DisposableEffect(view, uiState.isBackupRunning) {
-        val previousKeepScreenOn = view.keepScreenOn
-        if (uiState.isBackupRunning) {
-            view.keepScreenOn = true
-        }
-        onDispose {
-            view.keepScreenOn = previousKeepScreenOn
-        }
     }
 
     Scaffold(
@@ -157,7 +151,16 @@ fun BackupScreenContent(
             BackupStatusCard(uiState = uiState)
 
             if (uiState.isBackupRunning) {
-                BackupProgressCard(progress = uiState.progress)
+                BackupProgressCard(
+                    progress = uiState.progress,
+                    allowMobileData = uiState.status.allowMobileData,
+                    onCancel = callbacks.onCancelBackup,
+                )
+            } else if (uiState.isWaitingForNetwork) {
+                BackupWaitingCard(
+                    allowMobileData = uiState.status.allowMobileData,
+                    onCancel = callbacks.onCancelBackup,
+                )
             } else if (uiState.progress.stage == BackupStage.FAILED && uiState.progress.errorMessage != null) {
                 Card(
                     modifier = Modifier.fillMaxWidth().testTag("backup_error_card"),
@@ -174,7 +177,7 @@ fun BackupScreenContent(
 
             Button(
                 onClick = callbacks.onBackupNow,
-                enabled = uiState.status.isSupported && !uiState.isBackupRunning,
+                enabled = uiState.status.isSupported && !uiState.isBackupActive,
                 modifier = Modifier
                     .fillMaxWidth()
                     .testTag("backup_now_button"),
@@ -190,7 +193,7 @@ fun BackupScreenContent(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clickable(
-                        enabled = uiState.status.isSupported && !uiState.isBackupRunning,
+                        enabled = uiState.status.isSupported && !uiState.isBackupActive,
                         onClick = callbacks.onOpenPassphraseDialog,
                     )
                     .padding(vertical = 12.dp)
@@ -232,7 +235,11 @@ fun BackupScreenContent(
                     fontWeight = FontWeight.SemiBold,
                 )
                 Text(
-                    text = "Runs automatically on Wi-Fi while charging.",
+                    text = if (uiState.status.allowMobileData) {
+                        "Runs automatically on Wi-Fi or mobile data while charging."
+                    } else {
+                        "Runs automatically on Wi-Fi while charging."
+                    },
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -241,6 +248,46 @@ fun BackupScreenContent(
                     enabled = uiState.status.isPassphraseConfigured,
                     tagPrefix = "backup_freq",
                     onSelect = callbacks.onSelectFrequency,
+                )
+            }
+
+            HorizontalDivider()
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable(enabled = uiState.status.isSupported) {
+                        callbacks.onToggleMobileData(!uiState.status.allowMobileData)
+                    }
+                    .padding(vertical = 8.dp)
+                    .testTag("backup_mobile_data_row"),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(
+                    imageVector = Icons.Default.SignalCellularAlt,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(24.dp),
+                )
+                Spacer(Modifier.width(16.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "Back up over mobile data",
+                        style = MaterialTheme.typography.bodyLarge,
+                        fontWeight = FontWeight.Medium,
+                    )
+                    Text(
+                        text = "When off, backups pause if you leave Wi-Fi and resume automatically when you reconnect.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Spacer(Modifier.width(12.dp))
+                Switch(
+                    checked = uiState.status.allowMobileData,
+                    onCheckedChange = callbacks.onToggleMobileData,
+                    enabled = uiState.status.isSupported,
+                    modifier = Modifier.testTag("backup_mobile_data_switch"),
                 )
             }
         }
@@ -261,7 +308,7 @@ fun BackupScreenContent(
 private fun BackupStatusCard(uiState: BackupUiState) {
     val status = uiState.status
     val icon = when {
-        uiState.isBackupRunning -> Icons.Default.CloudUpload
+        uiState.isBackupActive -> Icons.Default.CloudUpload
         status.lastBackupAt != null -> Icons.Default.CloudDone
         else -> Icons.Default.CloudOff
     }
@@ -299,7 +346,7 @@ private fun BackupStatusCard(uiState: BackupUiState) {
                 }
                 if (status.isPassphraseConfigured) {
                     Text(
-                        text = formatBackupScheduleSummary(status.frequency),
+                        text = formatBackupScheduleSummary(status.frequency, status.allowMobileData),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -326,7 +373,11 @@ private fun BackupStatusCard(uiState: BackupUiState) {
 }
 
 @Composable
-private fun BackupProgressCard(progress: BackupProgress) {
+private fun BackupProgressCard(
+    progress: BackupProgress,
+    allowMobileData: Boolean,
+    onCancel: () -> Unit,
+) {
     val clamped = progress.fraction.coerceIn(0f, 1f)
     val percent = (clamped * 100).toInt()
     Card(
@@ -361,10 +412,81 @@ private fun BackupProgressCard(progress: BackupProgress) {
                 modifier = Modifier.fillMaxWidth().testTag("backup_progress_bar"),
             )
             Text(
-                text = "Keep FireStream open on Wi-Fi until complete. You can adjust your automatic backup schedule below.",
+                text = if (allowMobileData) {
+                    "Backup continues in the background. Progress is saved if interrupted."
+                } else {
+                    "Backup continues in the background on Wi-Fi. If you leave Wi-Fi, it pauses automatically and resumes when you reconnect."
+                },
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End,
+            ) {
+                TextButton(
+                    onClick = onCancel,
+                    modifier = Modifier.testTag("backup_cancel_button"),
+                ) {
+                    Text("Cancel")
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun BackupWaitingCard(
+    allowMobileData: Boolean,
+    onCancel: () -> Unit,
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth().testTag("backup_waiting_card"),
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(
+                    imageVector = Icons.Default.WifiOff,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(20.dp),
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    text = if (allowMobileData) "Waiting for internet connection…" else "Waiting for Wi-Fi…",
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.Medium,
+                )
+            }
+            LinearProgressIndicator(
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Text(
+                text = if (allowMobileData) {
+                    "Your backup will resume automatically once you're back online."
+                } else {
+                    "Your backup will resume automatically on Wi-Fi, or enable mobile data below to continue now."
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End,
+            ) {
+                TextButton(
+                    onClick = onCancel,
+                    modifier = Modifier.testTag("backup_cancel_button"),
+                ) {
+                    Text("Cancel")
+                }
+            }
         }
     }
 }
@@ -552,10 +674,16 @@ internal fun formatBackupTimestamp(timestampMs: Long): String =
     DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT, Locale.getDefault())
         .format(Date(timestampMs))
 
-internal fun formatBackupScheduleSummary(frequency: BackupFrequency): String = when (frequency) {
-    BackupFrequency.OFF -> "Auto-backup: Off"
-    BackupFrequency.DAILY -> "Auto-backup: Daily · Wi-Fi & charging"
-    BackupFrequency.WEEKLY -> "Auto-backup: Weekly · Wi-Fi & charging"
+internal fun formatBackupScheduleSummary(
+    frequency: BackupFrequency,
+    allowMobileData: Boolean = false,
+): String {
+    val networkLabel = if (allowMobileData) "Wi-Fi or mobile data" else "Wi-Fi"
+    return when (frequency) {
+        BackupFrequency.OFF -> "Auto-backup: Off"
+        BackupFrequency.DAILY -> "Auto-backup: Daily · $networkLabel & charging"
+        BackupFrequency.WEEKLY -> "Auto-backup: Weekly · $networkLabel & charging"
+    }
 }
 
 internal fun formatBackupSize(bytes: Long): String = when {

@@ -5,6 +5,7 @@ import com.firestream.chat.domain.model.BackupFrequency
 import com.firestream.chat.domain.model.BackupProgress
 import com.firestream.chat.domain.model.BackupStage
 import com.firestream.chat.domain.model.LocalBackupStatus
+import com.firestream.chat.domain.model.ManualBackupWorkState
 import com.firestream.chat.domain.model.RemoteBackupSummary
 import com.firestream.chat.domain.model.RestoreProgress
 import com.firestream.chat.domain.model.RestoreStage
@@ -40,6 +41,7 @@ class BackupViewModelTest {
     private val localStatusFlow = MutableStateFlow(LocalBackupStatus(isSupported = true))
     private val backupProgressFlow = MutableStateFlow(BackupProgress())
     private val restoreProgressFlow = MutableStateFlow(RestoreProgress())
+    private val manualWorkStateFlow = MutableStateFlow(ManualBackupWorkState.IDLE)
     private lateinit var backupRepository: BackupRepository
 
     @Before
@@ -50,6 +52,7 @@ class BackupViewModelTest {
         every { backupRepository.localStatus } returns localStatusFlow
         every { backupRepository.backupProgress } returns backupProgressFlow
         every { backupRepository.restoreProgress } returns restoreProgressFlow
+        every { backupRepository.manualBackupWorkState } returns manualWorkStateFlow
     }
 
     @After
@@ -74,11 +77,8 @@ class BackupViewModelTest {
     }
 
     @Test
-    fun `savePassphrase configures key on first setup and auto-runs backup on passphrase rotation`() = runTest {
+    fun `savePassphrase configures key on first setup and enqueues backup on passphrase rotation`() = runTest {
         coEvery { backupRepository.configurePassphrase(any()) } returns Result.success(Unit)
-        coEvery { backupRepository.runBackup() } returns Result.success(
-            RemoteBackupSummary(createdAt = 2_000L, dbCipherSizeBytes = 4096L, legacyMediaComplete = true)
-        )
 
         val vm = BackupViewModel(backupRepository, this)
         advanceUntilIdle()
@@ -90,9 +90,9 @@ class BackupViewModelTest {
         assertFalse(vm.uiState.value.showPassphraseDialog)
         coVerify(exactly = 1) { backupRepository.configurePassphrase("first-strong-passphrase") }
         coVerify(exactly = 1) { backupRepository.setBackupFrequency(BackupFrequency.WEEKLY) }
-        coVerify(exactly = 0) { backupRepository.runBackup() }
+        coVerify(exactly = 0) { backupRepository.enqueueManualBackup() }
 
-        // Passphrase change when already backed up -> auto-runs backup to commit rotation without changing schedule
+        // Passphrase change when already backed up -> enqueues manual backup to commit rotation without changing schedule
         localStatusFlow.value = LocalBackupStatus(
             isSupported = true,
             isPassphraseConfigured = true,
@@ -106,28 +106,34 @@ class BackupViewModelTest {
         advanceUntilIdle()
         coVerify(exactly = 1) { backupRepository.configurePassphrase("second-strong-passphrase") }
         coVerify(exactly = 0) { backupRepository.setBackupFrequency(BackupFrequency.DAILY) }
-        coVerify(exactly = 1) { backupRepository.runBackup() }
+        coVerify(exactly = 1) { backupRepository.enqueueManualBackup() }
     }
 
     @Test
-    fun `backupNow when unconfigured opens passphrase dialog and starts backup immediately on save`() = runTest {
+    fun `backupNow when unconfigured opens passphrase dialog, enqueues backup on save, and surfaces completion snackbar`() = runTest {
         coEvery { backupRepository.configurePassphrase(any()) } returns Result.success(Unit)
-        coEvery { backupRepository.runBackup() } returns Result.success(
-            RemoteBackupSummary(createdAt = 5_000L, dbCipherSizeBytes = 1024L, legacyMediaComplete = false)
-        )
 
         val vm = BackupViewModel(backupRepository, this)
         advanceUntilIdle()
 
         vm.backupNow()
         assertTrue(vm.uiState.value.showPassphraseDialog)
-        coVerify(exactly = 0) { backupRepository.runBackup() }
+        coVerify(exactly = 0) { backupRepository.enqueueManualBackup() }
 
         vm.savePassphrase("setup-and-backup-now-123", "setup-and-backup-now-123", BackupFrequency.DAILY)
         advanceUntilIdle()
         coVerify(exactly = 1) { backupRepository.configurePassphrase("setup-and-backup-now-123") }
         coVerify(exactly = 1) { backupRepository.setBackupFrequency(BackupFrequency.DAILY) }
-        coVerify(exactly = 1) { backupRepository.runBackup() }
+        coVerify(exactly = 1) { backupRepository.enqueueManualBackup() }
+
+        backupProgressFlow.value = BackupProgress(stage = BackupStage.UPLOADING_DB, fraction = 0.85f)
+        advanceUntilIdle()
+        backupProgressFlow.value = BackupProgress(
+            stage = BackupStage.COMPLETED,
+            fraction = 1f,
+            legacyMediaComplete = false,
+        )
+        advanceUntilIdle()
         assertEquals(
             "Backup saved, but some legacy media could not be backed up. Tap Back up now to retry.",
             vm.uiState.value.snackbarMessage,
@@ -150,18 +156,32 @@ class BackupViewModelTest {
     }
 
     @Test
-    fun `progress state updates and setFrequency delegates to repository`() = runTest {
+    fun `waiting for Wi-Fi state, cancelBackup, setFrequency, and setAllowMobileData delegate to repository`() = runTest {
         val vm = BackupViewModel(backupRepository, this)
         advanceUntilIdle()
+
+        manualWorkStateFlow.value = ManualBackupWorkState.WAITING_FOR_NETWORK
+        advanceUntilIdle()
+        assertTrue(vm.uiState.value.isWaitingForNetwork)
+        assertTrue(vm.uiState.value.isBackupActive)
+        assertFalse(vm.uiState.value.isBackupRunning)
 
         backupProgressFlow.value = BackupProgress(stage = BackupStage.UPLOADING_DB, fraction = 0.6f)
         advanceUntilIdle()
         assertTrue(vm.uiState.value.isBackupRunning)
+        assertFalse(vm.uiState.value.isWaitingForNetwork)
         assertEquals(0.6f, vm.uiState.value.progress.fraction)
 
+        vm.cancelBackup()
+        advanceUntilIdle()
+        coVerify(exactly = 1) { backupRepository.cancelBackup() }
+        assertEquals("Backup canceled.", vm.uiState.value.snackbarMessage)
+
         vm.setFrequency(BackupFrequency.DAILY)
+        vm.setAllowMobileData(true)
         advanceUntilIdle()
         coVerify(exactly = 1) { backupRepository.setBackupFrequency(BackupFrequency.DAILY) }
+        coVerify(exactly = 1) { backupRepository.setBackupOverMobileData(true) }
     }
 
     @Test

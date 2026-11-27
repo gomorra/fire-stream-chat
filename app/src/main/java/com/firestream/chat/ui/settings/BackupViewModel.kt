@@ -9,10 +9,10 @@ import com.firestream.chat.domain.model.BackupProgress
 import com.firestream.chat.domain.model.BackupStage
 import com.firestream.chat.domain.model.LocalBackupStatus
 import com.firestream.chat.domain.model.MIN_BACKUP_PASSPHRASE_LENGTH
+import com.firestream.chat.domain.model.ManualBackupWorkState
 import com.firestream.chat.domain.repository.BackupRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -23,6 +23,7 @@ import javax.inject.Inject
 data class BackupUiState(
     val status: LocalBackupStatus = LocalBackupStatus(),
     val progress: BackupProgress = BackupProgress(),
+    val manualWorkState: ManualBackupWorkState = ManualBackupWorkState.IDLE,
     val showPassphraseDialog: Boolean = false,
     val passphraseError: AppError? = null,
     val isSavingPassphrase: Boolean = false,
@@ -30,6 +31,12 @@ data class BackupUiState(
 ) {
     val isBackupRunning: Boolean
         get() = progress.stage in ACTIVE_BACKUP_STAGES
+
+    val isWaitingForNetwork: Boolean
+        get() = !isBackupRunning && manualWorkState == ManualBackupWorkState.WAITING_FOR_NETWORK
+
+    val isBackupActive: Boolean
+        get() = isBackupRunning || manualWorkState != ManualBackupWorkState.IDLE
 
     companion object {
         private val ACTIVE_BACKUP_STAGES = setOf(
@@ -55,8 +62,8 @@ class BackupViewModel @Inject constructor(
     )
     val uiState: StateFlow<BackupUiState> = _uiState.asStateFlow()
 
-    private var backupJob: Job? = null
     private var pendingBackupAfterPassphrase: Boolean = false
+    private var observedActiveBackup: Boolean = false
 
     init {
         viewModelScope.launch {
@@ -65,8 +72,48 @@ class BackupViewModel @Inject constructor(
             }
         }
         viewModelScope.launch {
+            backupRepository.manualBackupWorkState.collect { workState ->
+                if (workState != ManualBackupWorkState.IDLE) {
+                    observedActiveBackup = true
+                }
+                _uiState.update { it.copy(manualWorkState = workState) }
+            }
+        }
+        viewModelScope.launch {
             backupRepository.backupProgress.collect { progress ->
-                _uiState.update { it.copy(progress = progress) }
+                val active = progress.stage in setOf(
+                    BackupStage.SYNCING_CHATS,
+                    BackupStage.DOWNLOADING_LEGACY_MEDIA,
+                    BackupStage.SNAPSHOTTING_DB,
+                    BackupStage.ENCRYPTING_DB,
+                    BackupStage.UPLOADING_DB,
+                    BackupStage.UPLOADING_LEGACY_MEDIA,
+                    BackupStage.FINALIZING,
+                )
+                if (active) {
+                    observedActiveBackup = true
+                }
+                val completionSnackbar = if (progress.stage == BackupStage.COMPLETED && observedActiveBackup) {
+                    observedActiveBackup = false
+                    val complete = progress.legacyMediaComplete
+                        ?: _uiState.value.status.lastBackupLegacyMediaComplete
+                    if (complete) {
+                        "Encrypted backup complete."
+                    } else {
+                        "Backup saved, but some legacy media could not be backed up. Tap Back up now to retry."
+                    }
+                } else {
+                    if (progress.stage == BackupStage.FAILED) {
+                        observedActiveBackup = false
+                    }
+                    null
+                }
+                _uiState.update { current ->
+                    current.copy(
+                        progress = progress,
+                        snackbarMessage = completionSnackbar ?: current.snackbarMessage,
+                    )
+                }
             }
         }
     }
@@ -144,7 +191,7 @@ class BackupViewModel @Inject constructor(
 
     fun backupNow() {
         val state = _uiState.value
-        if (state.isBackupRunning || backupJob?.isActive == true) return
+        if (state.isBackupActive) return
         if (!state.status.isPassphraseConfigured) {
             pendingBackupAfterPassphrase = true
             _uiState.update { it.copy(showPassphraseDialog = true, passphraseError = null) }
@@ -154,25 +201,29 @@ class BackupViewModel @Inject constructor(
     }
 
     private fun launchBackup() {
-        if (backupJob?.isActive == true) return
-        backupJob = appScope.launch {
-            backupRepository.runBackup()
-                .onSuccess { summary ->
-                    val message = if (summary.legacyMediaComplete) {
-                        "Encrypted backup complete."
-                    } else {
-                        "Backup saved, but some legacy media could not be backed up. Tap Back up now to retry."
-                    }
-                    _uiState.update { it.copy(snackbarMessage = message) }
-                }
-            // Failures are surfaced via BackupProgress(stage = FAILED) error card,
-            // avoiding duplicate error banners + snackbars.
+        observedActiveBackup = true
+        appScope.launch {
+            backupRepository.enqueueManualBackup()
         }
+    }
+
+    fun cancelBackup() {
+        observedActiveBackup = false
+        appScope.launch {
+            backupRepository.cancelBackup()
+        }
+        _uiState.update { it.copy(snackbarMessage = "Backup canceled.") }
     }
 
     fun setFrequency(frequency: BackupFrequency) {
         appScope.launch {
             backupRepository.setBackupFrequency(frequency)
+        }
+    }
+
+    fun setAllowMobileData(allowed: Boolean) {
+        appScope.launch {
+            backupRepository.setBackupOverMobileData(allowed)
         }
     }
 

@@ -4,6 +4,12 @@ const val MIN_BACKUP_PASSPHRASE_LENGTH = 12
 
 enum class BackupFrequency { OFF, DAILY, WEEKLY }
 
+enum class ManualBackupWorkState {
+    IDLE,
+    WAITING_FOR_NETWORK,
+    RUNNING,
+}
+
 enum class BackupStage {
     IDLE,
     SYNCING_CHATS,
@@ -35,6 +41,7 @@ data class BackupProgress(
     val totalItems: Int = 0,
     val fraction: Float = 0f,
     val errorMessage: String? = null,
+    val legacyMediaComplete: Boolean? = null,
 )
 
 data class RestoreProgress(
@@ -56,6 +63,7 @@ data class LocalBackupStatus(
     val lastBackupLegacyMediaComplete: Boolean = false,
     val lastBackupSizeBytes: Long? = null,
     val frequency: BackupFrequency = BackupFrequency.OFF,
+    val allowMobileData: Boolean = false,
 )
 
 class WrongPassphraseException(

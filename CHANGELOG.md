@@ -2,6 +2,16 @@
 
 All notable changes to FireStream Chat. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); each section is headed by the SemVer `versionName` shipped on that merge day (e.g. `## [1.2.3] — 2026-04-24`). Bump rule: `feat:` → minor, `fix:` → patch, `feat!:` / `BREAKING CHANGE:` → major. `versionCode` is derived from `git rev-list --count HEAD`.
 
+## [UNRELEASED] [2.2.0] — 2026-11-27
+
+### Added
+
+- **Background foreground-service backups with Wi-Fi enforcement, resumability, and mobile-data toggle.** Manual *Back up now* runs now execute through WorkManager as a `dataSync` foreground service with a live progress notification (and Cancel action), so you can leave FireStream or lock the screen without interrupting the backup. Scheduled backups also promote to a progress notification when permitted by the OS. Both manual and automatic backups require Wi-Fi (`UNMETERED`) by default—pausing automatically and showing *Waiting for Wi-Fi…* if you leave Wi-Fi—with a new **Back up over mobile data** toggle in *Settings → Chat Backup* that immediately updates active or waiting runs.
+
+### Changed
+
+- **Resumable, faster legacy media backups.** Legacy media downloads and encrypted uploads now run with bounded 3× parallelism *before* DB snapshotting and track completed blobs in a local `keyGen`-scoped ledger, so Wi-Fi interruptions or background time slices resume where they left off without re-uploading completed media or leaving orphaned DB blobs. Firebase Storage backup transfers now cancel the underlying `StorageTask` immediately on coroutine cancellation, and stale backup temp files are swept at run start.
+
 ## [2.1.0] — 2026-11-27
 
 ### Added

@@ -25,6 +25,9 @@ import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
 import org.junit.After
@@ -609,11 +612,143 @@ class BackupManagerTest {
         assertTrue((after.lastBackupSizeBytes ?: 0L) > 0L)
 
         manager.setBackupFrequency(BackupFrequency.DAILY)
-        io.mockk.verify(exactly = 1) { backupScheduler.schedule(BackupFrequency.DAILY) }
+        io.mockk.verify(exactly = 1) { backupScheduler.schedule(BackupFrequency.DAILY, false) }
+
+        manager.setBackupOverMobileData(true)
+        assertTrue(manager.localStatus.first().allowMobileData)
+        io.mockk.verify(exactly = 1) { backupScheduler.schedule(BackupFrequency.DAILY, true) }
+        io.mockk.coVerify(exactly = 1) { backupScheduler.updateManualConstraintIfActive(true) }
 
         manager.clearForSignOut()
         io.mockk.verify(exactly = 1) { backupScheduler.cancel() }
         assertEquals(BackupStage.IDLE, manager.backupProgress.value.stage)
+    }
+
+    @Test
+    fun `interrupted legacy media upload resumes via local ledger without re-uploading completed blobs`() = runTest {
+        val manager = newManager()
+        manager.configurePassphrase("resumable-backup-passphrase-123")
+
+        val files = (1..3).map { i ->
+            File(context.cacheDir, "resume_${i}_${UUID.randomUUID()}.jpg").apply {
+                writeBytes(byteArrayOf(i.toByte(), 2, 3, 4))
+                tempFiles += this
+            }.also { file ->
+                appDatabase.messageDao().insertOutbox(
+                    MessageEntity.fromDomain(
+                        Message(
+                            id = "m-resume-$i",
+                            chatId = "chat-1",
+                            senderId = "uid-alice",
+                            type = MessageType.IMAGE,
+                            mediaUrl = "https://storage.example/media/chat-1/m-resume-$i.jpg",
+                            localUri = file.absolutePath,
+                            status = MessageStatus.SENT,
+                            timestamp = 1_000L * i,
+                        )
+                    )
+                )
+            }
+        }
+        assertEquals(3, files.size)
+
+        // Cancel on the 2nd legacy media upload (simulating Wi-Fi drop).
+        backupSource.cancelOnLegacyUploadMessageId = "m-resume-2"
+        var cancelled = false
+        try {
+            manager.runBackup()
+        } catch (_: CancellationException) {
+            cancelled = true
+        }
+        assertTrue("Expected runBackup to propagate CancellationException", cancelled)
+        assertEquals(BackupStage.IDLE, manager.backupProgress.value.stage)
+        // Because legacy media runs BEFORE DB snapshot/upload, zero orphan DB blobs were uploaded.
+        assertTrue(backupSource.dbBlobs["uid-alice"].orEmpty().isEmpty())
+        assertNull(backupSource.manifests["uid-alice"])
+
+        val keyGen = backupKeyStore.load()!!.keyGeneration
+        val persistedBeforeResume = preferencesDataStore.getPendingUploadedLegacyIds(keyGen)
+        val alreadyUploadedBeforeResume = backupSource.uploadedMessageIds.toList()
+        assertEquals(persistedBeforeResume, alreadyUploadedBeforeResume.toSet())
+        assertFalse("m-resume-2" in persistedBeforeResume)
+
+        // Resume: previously uploaded IDs must NOT be uploaded again, and ledger clears after commit.
+        backupSource.cancelOnLegacyUploadMessageId = null
+        backupSource.uploadedMessageIds.clear()
+        val resumed = manager.runBackup()
+        assertTrue("Expected resumed backup success, got ${resumed.exceptionOrNull()}", resumed.isSuccess)
+        assertTrue(resumed.getOrThrow().legacyMediaComplete)
+        assertTrue(backupSource.uploadedMessageIds.none { it in persistedBeforeResume })
+        assertTrue("m-resume-2" in backupSource.uploadedMessageIds)
+        assertEquals(
+            setOf("$keyGen/m-resume-1", "$keyGen/m-resume-2", "$keyGen/m-resume-3"),
+            backupSource.legacyBlobs["uid-alice"]?.keys,
+        )
+        assertTrue(preferencesDataStore.getPendingUploadedLegacyIds(keyGen).isEmpty())
+    }
+
+    @Test
+    fun `cancelBackup stops an in-flight run with UserCancelledBackupException and clears progress`() = runTest {
+        val manager = newManager()
+        manager.configurePassphrase("cancel-active-passphrase-123")
+
+        val legacyFile = File(context.cacheDir, "cancel_${UUID.randomUUID()}.jpg").apply {
+            writeBytes(byteArrayOf(5, 6, 7, 8))
+            tempFiles += this
+        }
+        appDatabase.messageDao().insertOutbox(
+            MessageEntity.fromDomain(
+                Message(
+                    id = "m-cancel-1",
+                    chatId = "chat-1",
+                    senderId = "uid-alice",
+                    type = MessageType.IMAGE,
+                    mediaUrl = "https://storage.example/media/chat-1/m-cancel-1.jpg",
+                    localUri = legacyFile.absolutePath,
+                    status = MessageStatus.SENT,
+                    timestamp = 1_000L,
+                )
+            )
+        )
+
+        val uploadStarted = CompletableDeferred<Unit>()
+        val neverCompletes = CompletableDeferred<Unit>()
+        backupSource.onLegacyUpload = {
+            uploadStarted.complete(Unit)
+            neverCompletes.await()
+        }
+
+        val runDeferred = async { manager.runBackup() }
+        uploadStarted.await()
+        manager.cancelBackup()
+
+        var caught: Throwable? = null
+        try {
+            runDeferred.await()
+        } catch (t: Throwable) {
+            caught = t
+        }
+        assertTrue("Expected UserCancelledBackupException, got $caught", caught is UserCancelledBackupException)
+        assertEquals(BackupStage.IDLE, manager.backupProgress.value.stage)
+        io.mockk.verify(exactly = 1) { backupScheduler.cancelManual() }
+    }
+
+    @Test
+    fun `runBackup sweeps stale temp files left by a prior killed process`() = runTest {
+        val manager = newManager()
+        manager.configurePassphrase("sweep-stale-passphrase-123")
+
+        val staleSnapshot = File(context.cacheDir, "backup_snapshot_stale.db").apply { writeText("old") }
+        val staleLegacy = File(context.cacheDir, "legacy_enc_stale.enc").apply { writeText("old") }
+        val unrelated = File(context.cacheDir, "keep_me_${UUID.randomUUID()}.txt").apply {
+            writeText("keep")
+            tempFiles += this
+        }
+
+        assertTrue(manager.runBackup().isSuccess)
+        assertFalse(staleSnapshot.exists())
+        assertFalse(staleLegacy.exists())
+        assertTrue(unrelated.exists())
     }
 
     private class InMemoryKeyWrapper : BackupKeyWrapper {
@@ -644,6 +779,9 @@ class BackupManagerTest {
         var failNextDbUpload = false
         var failNextManifestUpload = false
         var failLegacyUploadsRemaining = 0
+        var cancelOnLegacyUploadMessageId: String? = null
+        var onLegacyUpload: (suspend (String) -> Unit)? = null
+        val uploadedMessageIds = java.util.Collections.synchronizedList(mutableListOf<String>())
 
         override suspend fun fetchManifest(uid: String): String? = manifests[uid]
 
@@ -687,12 +825,19 @@ class BackupManagerTest {
         }
 
         override suspend fun uploadLegacyMediaBlob(uid: String, keyGen: String, messageId: String, file: File) {
-            legacyUploadCount++
-            if (failLegacyUploadsRemaining > 0) {
-                failLegacyUploadsRemaining--
-                throw IOException("The server has terminated the upload session")
+            onLegacyUpload?.invoke(messageId)
+            if (cancelOnLegacyUploadMessageId == messageId) {
+                throw CancellationException("Simulated Wi-Fi loss during upload")
             }
-            legacyBlobs.getOrPut(uid) { mutableMapOf() }["$keyGen/$messageId"] = file.readBytes()
+            synchronized(this) {
+                legacyUploadCount++
+                if (failLegacyUploadsRemaining > 0) {
+                    failLegacyUploadsRemaining--
+                    throw IOException("The server has terminated the upload session")
+                }
+                legacyBlobs.getOrPut(uid) { mutableMapOf() }["$keyGen/$messageId"] = file.readBytes()
+            }
+            uploadedMessageIds.add(messageId)
         }
 
         override suspend fun downloadLegacyMediaBlob(

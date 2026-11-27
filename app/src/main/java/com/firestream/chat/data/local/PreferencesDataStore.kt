@@ -119,6 +119,9 @@ class PreferencesDataStore @Inject constructor(
     private val lastBackupSizeBytesKey = longPreferencesKey("last_backup_size_bytes")
     private val lastBackupLegacyMediaCompleteKey = booleanPreferencesKey("last_backup_legacy_media_complete")
     private val backupFrequencyKey = stringPreferencesKey("backup_frequency")
+    private val backupOverMobileDataKey = booleanPreferencesKey("backup_over_mobile_data")
+    private val backupPendingLegacyKeyGenKey = stringPreferencesKey("backup_pending_legacy_key_gen")
+    private val backupPendingLegacyIdsKey = stringSetPreferencesKey("backup_pending_legacy_ids")
     private val restorePromptResolvedKey = booleanPreferencesKey("restore_prompt_resolved")
 
     // --- Theme ---
@@ -552,6 +555,47 @@ class PreferencesDataStore @Inject constructor(
         context.dataStore.edit { prefs -> prefs[backupFrequencyKey] = frequency.name }
     }
 
+    val backupOverMobileDataFlow: Flow<Boolean> = context.dataStore.data
+        .map { it[backupOverMobileDataKey] ?: false }
+        .distinctUntilChanged()
+
+    suspend fun isBackupOverMobileData(): Boolean =
+        context.dataStore.data.first()[backupOverMobileDataKey] ?: false
+
+    suspend fun setBackupOverMobileData(allowed: Boolean) {
+        context.dataStore.edit { prefs -> prefs[backupOverMobileDataKey] = allowed }
+    }
+
+    /**
+     * Local resumability ledger of legacy-media message IDs already uploaded under
+     * [keyGen] during an in-progress or interrupted backup run. Cleared once
+     * `manifest.json` commits or on sign-out; automatically ignored when [keyGen]
+     * changes on passphrase rotation.
+     */
+    suspend fun getPendingUploadedLegacyIds(keyGen: String): Set<String> {
+        val prefs = context.dataStore.data.first()
+        if (prefs[backupPendingLegacyKeyGenKey] != keyGen) return emptySet()
+        return prefs[backupPendingLegacyIdsKey].orEmpty()
+    }
+
+    suspend fun recordPendingUploadedLegacyId(keyGen: String, messageId: String) {
+        context.dataStore.edit { prefs ->
+            if (prefs[backupPendingLegacyKeyGenKey] != keyGen) {
+                prefs[backupPendingLegacyKeyGenKey] = keyGen
+                prefs[backupPendingLegacyIdsKey] = setOf(messageId)
+            } else {
+                prefs[backupPendingLegacyIdsKey] = prefs[backupPendingLegacyIdsKey].orEmpty() + messageId
+            }
+        }
+    }
+
+    suspend fun clearPendingUploadedLegacyIds() {
+        context.dataStore.edit { prefs ->
+            prefs.remove(backupPendingLegacyKeyGenKey)
+            prefs.remove(backupPendingLegacyIdsKey)
+        }
+    }
+
     suspend fun recordBackupSuccess(
         timestampMs: Long,
         sizeBytes: Long,
@@ -578,6 +622,9 @@ class PreferencesDataStore @Inject constructor(
             prefs.remove(lastBackupSizeBytesKey)
             prefs.remove(lastBackupLegacyMediaCompleteKey)
             prefs.remove(backupFrequencyKey)
+            prefs.remove(backupOverMobileDataKey)
+            prefs.remove(backupPendingLegacyKeyGenKey)
+            prefs.remove(backupPendingLegacyIdsKey)
             prefs.remove(restorePromptResolvedKey)
         }
     }

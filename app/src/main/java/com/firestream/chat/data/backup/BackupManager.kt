@@ -35,6 +35,7 @@ import com.firestream.chat.domain.model.BackupFrequency
 import com.firestream.chat.domain.model.BackupProgress
 import com.firestream.chat.domain.model.BackupStage
 import com.firestream.chat.domain.model.LocalBackupStatus
+import com.firestream.chat.domain.model.ManualBackupWorkState
 import com.firestream.chat.domain.model.RemoteBackupSummary
 import com.firestream.chat.domain.model.RestoreProgress
 import com.firestream.chat.domain.model.RestoreStage
@@ -46,23 +47,45 @@ import com.firestream.chat.domain.util.KlipyUrls
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.IOException
 import java.util.Base64
+import java.util.Collections
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
 import java.util.zip.GZIPInputStream
 import java.util.zip.GZIPOutputStream
 import javax.inject.Inject
 import javax.inject.Singleton
+
+/**
+ * Thrown inside [BackupManager.runBackup] when the user cancels an active run
+ * in-app so [com.firestream.chat.data.worker.BackupWorker] can distinguish a
+ * deliberate cancel (return `Result.success()` to preserve any periodic
+ * schedule) from a WorkManager constraint stop (rethrow `CancellationException`
+ * so WorkManager re-queues until constraints return).
+ */
+internal class UserCancelledBackupException : CancellationException("Backup canceled by user")
 
 @Singleton
 class BackupManager internal constructor(
@@ -116,6 +139,8 @@ class BackupManager internal constructor(
     )
 
     private val operationMutex = Mutex()
+    private val activeRunLock = Any()
+    private var activeRunJob: Job? = null
 
     private val _backupProgress = MutableStateFlow(BackupProgress())
     override val backupProgress: StateFlow<BackupProgress> = _backupProgress.asStateFlow()
@@ -125,21 +150,29 @@ class BackupManager internal constructor(
 
     override val isSupported: Boolean get() = backupSource.isSupported
 
+    override val manualBackupWorkState: Flow<ManualBackupWorkState>
+        get() = backupScheduler.observeManualBackupState()
+
     override val localStatus: Flow<LocalBackupStatus> = combine(
-        backupKeyStore.isConfiguredFlow,
-        preferencesDataStore.lastBackupAtFlow,
-        preferencesDataStore.lastBackupLegacyMediaCompleteFlow,
-        preferencesDataStore.lastBackupSizeBytesFlow,
-        preferencesDataStore.backupFrequencyFlow,
-    ) { configured, lastAt, legacyComplete, sizeBytes, frequency ->
-        LocalBackupStatus(
-            isSupported = backupSource.isSupported,
-            isPassphraseConfigured = configured,
-            lastBackupAt = lastAt,
-            lastBackupLegacyMediaComplete = legacyComplete,
-            lastBackupSizeBytes = sizeBytes,
-            frequency = frequency,
-        )
+        combine(
+            backupKeyStore.isConfiguredFlow,
+            preferencesDataStore.lastBackupAtFlow,
+            preferencesDataStore.lastBackupLegacyMediaCompleteFlow,
+            preferencesDataStore.lastBackupSizeBytesFlow,
+            preferencesDataStore.backupFrequencyFlow,
+        ) { configured, lastAt, legacyComplete, sizeBytes, frequency ->
+            LocalBackupStatus(
+                isSupported = backupSource.isSupported,
+                isPassphraseConfigured = configured,
+                lastBackupAt = lastAt,
+                lastBackupLegacyMediaComplete = legacyComplete,
+                lastBackupSizeBytes = sizeBytes,
+                frequency = frequency,
+            )
+        },
+        preferencesDataStore.backupOverMobileDataFlow,
+    ) { base, allowMobileData ->
+        base.copy(allowMobileData = allowMobileData)
     }
 
     override suspend fun configurePassphrase(passphrase: String): Result<Unit> = operationMutex.withLock {
@@ -186,8 +219,36 @@ class BackupManager internal constructor(
     override suspend fun setBackupFrequency(frequency: BackupFrequency) {
         withContext(NonCancellable) {
             preferencesDataStore.setBackupFrequency(frequency)
-            backupScheduler.schedule(frequency)
+            val allowMobileData = preferencesDataStore.isBackupOverMobileData()
+            backupScheduler.schedule(frequency, allowMobileData)
         }
+    }
+
+    override suspend fun setBackupOverMobileData(allowed: Boolean) {
+        withContext(NonCancellable) {
+            preferencesDataStore.setBackupOverMobileData(allowed)
+            val frequency = preferencesDataStore.backupFrequencyFlow.first()
+            if (frequency != BackupFrequency.OFF) {
+                backupScheduler.schedule(frequency, allowed)
+            }
+            backupScheduler.updateManualConstraintIfActive(allowed)
+        }
+    }
+
+    override suspend fun enqueueManualBackup() {
+        withContext(NonCancellable) {
+            val currentStage = _backupProgress.value.stage
+            if (currentStage == BackupStage.FAILED || currentStage == BackupStage.COMPLETED) {
+                _backupProgress.value = BackupProgress()
+            }
+            val allowMobileData = preferencesDataStore.isBackupOverMobileData()
+            backupScheduler.enqueueManual(allowMobileData = allowMobileData, replaceExisting = false)
+        }
+    }
+
+    override suspend fun cancelBackup() {
+        backupScheduler.cancelManual()
+        synchronized(activeRunLock) { activeRunJob }?.cancel(UserCancelledBackupException())
     }
 
     override fun resetProgress() {
@@ -223,6 +284,23 @@ class BackupManager internal constructor(
     }.onFailure { it.rethrowIfCancellation() }
 
     override suspend fun runBackup(): Result<RemoteBackupSummary> = operationMutex.withLock {
+        coroutineScope {
+            val child = async { runBackupLocked() }
+            synchronized(activeRunLock) { activeRunJob = child }
+            try {
+                child.await()
+            } finally {
+                synchronized(activeRunLock) {
+                    if (activeRunJob === child) activeRunJob = null
+                }
+            }
+        }
+    }
+
+    private suspend fun runBackupLocked(): Result<RemoteBackupSummary> {
+        withContext(Dispatchers.IO) {
+            sweepStaleTempFiles()
+        }
         val runTag = "${clock()}_${BackupCrypto.randomHexSuffix()}"
         val snapshotFile = File(context.cacheDir, "backup_snapshot_$runTag.db")
         val gzipFile = File(context.cacheDir, "backup_snapshot_$runTag.db.gz")
@@ -230,7 +308,7 @@ class BackupManager internal constructor(
         var uid: String? = null
         var uploadedDbObjectName: String? = null
         var manifestCommitted = false
-        try {
+        return try {
             check(backupSource.isSupported) { "Encrypted backups are not supported on this backend" }
             uid = authSource.currentUserId ?: error("Not signed in")
             val activeKey = backupKeyStore.load()
@@ -238,9 +316,10 @@ class BackupManager internal constructor(
             val targetKey = pendingKey ?: activeKey
                 ?: error("Backup passphrase is not configured")
             val isRotating = pendingKey != null && activeKey != null && pendingKey.saltB64 != activeKey.saltB64
+            val targetKeyGen = targetKey.keyGeneration
 
             // Stage 1: Sync all chats so the DB snapshot is up to date.
-            _backupProgress.value = BackupProgress(stage = BackupStage.SYNCING_CHATS, fraction = 0.05f)
+            _backupProgress.value = BackupProgress(stage = BackupStage.SYNCING_CHATS, fraction = 0.04f)
             val chatIds = withContext(Dispatchers.IO) { chatDao.getAllChatIds() }
             if (chatIds.isNotEmpty()) {
                 messageRepository.syncAllChatMessages(chatIds)
@@ -262,53 +341,171 @@ class BackupManager internal constructor(
                 null
             }
             val alreadyBackedUpLegacyIds = previousInnerForTarget?.legacyMediaIds?.toSet().orEmpty()
+            val pendingLedgerIds = preferencesDataStore.getPendingUploadedLegacyIds(targetKeyGen)
+            val knownUploadedLegacyIds = alreadyBackedUpLegacyIds + pendingLedgerIds
             val prevGenLegacyIds = previousInnerForActive?.legacyMediaIds?.toSet().orEmpty()
 
-            // Stage 2: Download any missing/unreadable legacy plaintext media locally so we can back it up.
+            // Stage 2: Download any missing/unreadable legacy plaintext media locally (bounded parallelism).
             val legacyMessages = withContext(Dispatchers.IO) {
                 messageDao.getLegacyMediaMessages()
                     .filter { msg -> msg.mediaUrl != null && !KlipyUrls.isMedia(msg.mediaUrl) }
             }
             val needDownload = legacyMessages.filter { msg ->
-                msg.id !in alreadyBackedUpLegacyIds && !isReadableFile(msg.localUri)
+                msg.id !in knownUploadedLegacyIds && !isReadableFile(msg.localUri)
             }
-            _backupProgress.value = BackupProgress(
-                stage = BackupStage.DOWNLOADING_LEGACY_MEDIA,
-                completedItems = 0,
-                totalItems = needDownload.size,
-                fraction = 0.10f,
-            )
-            needDownload.forEachIndexed { idx, msg ->
-                try {
-                    val downloaded = mediaFileManager.downloadFor(
-                        chatId = msg.chatId,
-                        messageId = msg.id,
-                        type = parseMessageType(msg.type),
-                        mediaUrl = msg.mediaUrl!!,
-                        fileName = msg.fileName,
-                        mimeType = msg.mimeType,
-                        stickerId = msg.stickerId,
-                        encryption = null,
-                    )
-                    if (downloaded != null) {
-                        messageDao.updateLocalUri(msg.id, downloaded.absolutePath)
-                    }
-                } catch (e: Exception) {
-                    e.rethrowIfCancellation()
-                    Log.w(TAG, "Legacy media download failed for msg=${msg.id}", e)
-                }
-                val done = idx + 1
-                val sub = if (needDownload.isEmpty()) 1f else done.toFloat() / needDownload.size
+            if (needDownload.isNotEmpty()) {
                 _backupProgress.value = BackupProgress(
                     stage = BackupStage.DOWNLOADING_LEGACY_MEDIA,
-                    completedItems = done,
+                    completedItems = 0,
                     totalItems = needDownload.size,
-                    fraction = 0.10f + 0.20f * sub,
+                    fraction = 0.10f,
                 )
+                val downloadSemaphore = Semaphore(LEGACY_MEDIA_CONCURRENCY)
+                val completedDownloads = AtomicInteger(0)
+                coroutineScope {
+                    needDownload.map { msg ->
+                        async(Dispatchers.IO) {
+                            downloadSemaphore.withPermit {
+                                currentCoroutineContext().ensureActive()
+                                try {
+                                    val downloaded = mediaFileManager.downloadFor(
+                                        chatId = msg.chatId,
+                                        messageId = msg.id,
+                                        type = parseMessageType(msg.type),
+                                        mediaUrl = msg.mediaUrl!!,
+                                        fileName = msg.fileName,
+                                        mimeType = msg.mimeType,
+                                        stickerId = msg.stickerId,
+                                        encryption = null,
+                                    )
+                                    if (downloaded != null) {
+                                        messageDao.updateLocalUri(msg.id, downloaded.absolutePath)
+                                    }
+                                } catch (e: Exception) {
+                                    e.rethrowIfCancellation()
+                                    Log.w(TAG, "Legacy media download failed for msg=${msg.id}", e)
+                                }
+                                val done = completedDownloads.incrementAndGet()
+                                val sub = done.toFloat() / needDownload.size
+                                _backupProgress.update { prev ->
+                                    if (prev.stage == BackupStage.DOWNLOADING_LEGACY_MEDIA && prev.completedItems > done) {
+                                        prev
+                                    } else {
+                                        BackupProgress(
+                                            stage = BackupStage.DOWNLOADING_LEGACY_MEDIA,
+                                            completedItems = done,
+                                            totalItems = needDownload.size,
+                                            fraction = 0.10f + 0.20f * sub,
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }.awaitAll()
+                }
             }
 
-            // Stage 3: Clean SQLite snapshot via WAL checkpoint + VACUUM INTO (never copies live WAL; never touches signal.db).
-            _backupProgress.value = BackupProgress(stage = BackupStage.SNAPSHOTTING_DB, fraction = 0.32f)
+            // Stage 3: Incrementally encrypt & upload legacy media blobs BEFORE DB snapshot/upload
+            // so pausing on Wi-Fi loss or hitting a background slice never leaves an orphan db_*.enc
+            // and already-uploaded items are skipped on resume via the local keyGen ledger.
+            val refreshedLegacy = withContext(Dispatchers.IO) {
+                messageDao.getLegacyMediaMessages()
+                    .filter { msg -> msg.mediaUrl != null && !KlipyUrls.isMedia(msg.mediaUrl) }
+            }
+            val uploadedLegacyIds = Collections.synchronizedSet(knownUploadedLegacyIds.toMutableSet())
+            val toUpload = refreshedLegacy.filter { it.id !in uploadedLegacyIds }
+            val allLegacyComplete = AtomicBoolean(true)
+            if (toUpload.isNotEmpty()) {
+                _backupProgress.value = BackupProgress(
+                    stage = BackupStage.UPLOADING_LEGACY_MEDIA,
+                    completedItems = 0,
+                    totalItems = toUpload.size,
+                    fraction = 0.30f,
+                )
+                val uploadSemaphore = Semaphore(LEGACY_MEDIA_CONCURRENCY)
+                val completedUploads = AtomicInteger(0)
+                val currentUid = uid
+                coroutineScope {
+                    toUpload.map { msg ->
+                        async(Dispatchers.IO) {
+                            uploadSemaphore.withPermit {
+                                currentCoroutineContext().ensureActive()
+                                val readableLocal = msg.localUri?.takeIf { isReadableFile(it) }?.let(::File)
+                                var rekeyPlainTemp: File? = null
+                                val sourceFile = when {
+                                    readableLocal != null -> readableLocal
+                                    isRotating && msg.id in prevGenLegacyIds -> {
+                                        val oldKey = activeKey!!
+                                        val oldEnc = File.createTempFile("rekey_old_${msg.id}_", ".enc", context.cacheDir)
+                                        val oldPlain = File.createTempFile("rekey_plain_${msg.id}_", ".bin", context.cacheDir)
+                                        try {
+                                            val fetched = backupSource.downloadLegacyMediaBlob(currentUid, oldKey.keyGeneration, msg.id, oldEnc)
+                                            if (fetched) {
+                                                BackupCrypto.decryptLegacyMediaFile(oldEnc, oldPlain, oldKey.masterKey, msg.id)
+                                                rekeyPlainTemp = oldPlain
+                                                oldPlain
+                                            } else {
+                                                oldPlain.delete()
+                                                null
+                                            }
+                                        } catch (e: Exception) {
+                                            e.rethrowIfCancellation()
+                                            Log.w(TAG, "Failed to re-key legacy media msg=${msg.id} from prior generation", e)
+                                            oldPlain.delete()
+                                            null
+                                        } finally {
+                                            oldEnc.delete()
+                                        }
+                                    }
+                                    else -> null
+                                }
+
+                                if (sourceFile == null) {
+                                    allLegacyComplete.set(false)
+                                } else {
+                                    val tempEnc = File.createTempFile("legacy_enc_${msg.id}_", ".enc", context.cacheDir)
+                                    try {
+                                        BackupCrypto.encryptLegacyMediaFile(sourceFile, tempEnc, targetKey.masterKey, msg.id)
+                                        uploadLegacyBlobWithRetry(currentUid, targetKeyGen, msg.id, tempEnc)
+                                        uploadedLegacyIds.add(msg.id)
+                                        withContext(NonCancellable) {
+                                            preferencesDataStore.recordPendingUploadedLegacyId(targetKeyGen, msg.id)
+                                        }
+                                    } catch (e: Exception) {
+                                        e.rethrowIfCancellation()
+                                        Log.w(TAG, "Legacy media upload failed for msg=${msg.id}", e)
+                                        allLegacyComplete.set(false)
+                                    } finally {
+                                        tempEnc.delete()
+                                        rekeyPlainTemp?.delete()
+                                    }
+                                }
+                                val done = completedUploads.incrementAndGet()
+                                val sub = done.toFloat() / toUpload.size
+                                _backupProgress.update { prev ->
+                                    if (prev.stage == BackupStage.UPLOADING_LEGACY_MEDIA && prev.completedItems > done) {
+                                        prev
+                                    } else {
+                                        BackupProgress(
+                                            stage = BackupStage.UPLOADING_LEGACY_MEDIA,
+                                            completedItems = done,
+                                            totalItems = toUpload.size,
+                                            fraction = 0.30f + 0.38f * sub,
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }.awaitAll()
+                }
+            }
+            val finalUploadedLegacyIds = synchronized(uploadedLegacyIds) { uploadedLegacyIds.toSet() }
+            if (refreshedLegacy.any { it.id !in finalUploadedLegacyIds }) {
+                allLegacyComplete.set(false)
+            }
+
+            // Stage 4: Clean SQLite snapshot via WAL checkpoint + VACUUM INTO (never copies live WAL; never touches signal.db).
+            _backupProgress.value = BackupProgress(stage = BackupStage.SNAPSHOTTING_DB, fraction = 0.70f)
             val messageCount = withContext(Dispatchers.IO) {
                 snapshotFile.delete()
                 val db = appDatabase.openHelper.writableDatabase
@@ -318,8 +515,8 @@ class BackupManager internal constructor(
                 messageDao.getMessageCount()
             }
 
-            // Stage 4: Gzip-compress and encrypt snapshot with dbKey via MediaCrypto.
-            _backupProgress.value = BackupProgress(stage = BackupStage.ENCRYPTING_DB, fraction = 0.40f)
+            // Stage 5: Gzip-compress and encrypt snapshot with dbKey via MediaCrypto.
+            _backupProgress.value = BackupProgress(stage = BackupStage.ENCRYPTING_DB, fraction = 0.76f)
             val dbCipherInfo = withContext(Dispatchers.IO) {
                 gzipFile(snapshotFile, gzipFile)
                 snapshotFile.delete()
@@ -334,108 +531,28 @@ class BackupManager internal constructor(
                 info
             }
 
-            // Stage 5: Upload collision-free versioned db_<timestamp>_<hex>.enc.
+            // Stage 6: Upload collision-free versioned db_<timestamp>_<hex>.enc.
             val nowMs = clock()
             val dbObjectName = "db_${nowMs}_${BackupCrypto.randomHexSuffix()}.enc"
-            _backupProgress.value = BackupProgress(stage = BackupStage.UPLOADING_DB, fraction = 0.48f)
+            _backupProgress.value = BackupProgress(stage = BackupStage.UPLOADING_DB, fraction = 0.80f)
             backupSource.uploadDbBlob(uid, dbObjectName, encDbFile) { p ->
                 _backupProgress.value = BackupProgress(
                     stage = BackupStage.UPLOADING_DB,
-                    fraction = 0.48f + 0.22f * p.coerceIn(0f, 1f),
+                    fraction = 0.80f + 0.15f * p.coerceIn(0f, 1f),
                 )
             }
             uploadedDbObjectName = dbObjectName
             encDbFile.delete()
 
-            // Stage 6: Incrementally encrypt & upload legacy media blobs to key-generation namespace.
-            val refreshedLegacy = withContext(Dispatchers.IO) {
-                messageDao.getLegacyMediaMessages()
-                    .filter { msg -> msg.mediaUrl != null && !KlipyUrls.isMedia(msg.mediaUrl) }
-            }
-            val uploadedLegacyIds = alreadyBackedUpLegacyIds.toMutableSet()
-            val toUpload = refreshedLegacy.filter { it.id !in uploadedLegacyIds }
-            val targetKeyGen = targetKey.keyGeneration
-            var allLegacyComplete = true
-            _backupProgress.value = BackupProgress(
-                stage = BackupStage.UPLOADING_LEGACY_MEDIA,
-                completedItems = 0,
-                totalItems = toUpload.size,
-                fraction = 0.70f,
-            )
-            toUpload.forEachIndexed { idx, msg ->
-                val readableLocal = msg.localUri?.takeIf { isReadableFile(it) }?.let(::File)
-                var rekeyPlainTemp: File? = null
-                val sourceFile = when {
-                    readableLocal != null -> readableLocal
-                    isRotating && msg.id in prevGenLegacyIds -> {
-                        val oldKey = activeKey!!
-                        // Post-Step-9 rotation: fetch from prior key generation and decrypt locally.
-                        val oldEnc = File.createTempFile("rekey_old_${msg.id}_", ".enc", context.cacheDir)
-                        val oldPlain = File.createTempFile("rekey_plain_${msg.id}_", ".bin", context.cacheDir)
-                        try {
-                            val fetched = backupSource.downloadLegacyMediaBlob(uid, oldKey.keyGeneration, msg.id, oldEnc)
-                            if (fetched) {
-                                withContext(Dispatchers.IO) {
-                                    BackupCrypto.decryptLegacyMediaFile(oldEnc, oldPlain, oldKey.masterKey, msg.id)
-                                }
-                                rekeyPlainTemp = oldPlain
-                                oldPlain
-                            } else {
-                                oldPlain.delete()
-                                null
-                            }
-                        } catch (e: Exception) {
-                            e.rethrowIfCancellation()
-                            Log.w(TAG, "Failed to re-key legacy media msg=${msg.id} from prior generation", e)
-                            oldPlain.delete()
-                            null
-                        } finally {
-                            oldEnc.delete()
-                        }
-                    }
-                    else -> null
-                }
-
-                if (sourceFile == null) {
-                    allLegacyComplete = false
-                } else {
-                    val tempEnc = File.createTempFile("legacy_enc_${msg.id}_", ".enc", context.cacheDir)
-                    try {
-                        withContext(Dispatchers.IO) {
-                            BackupCrypto.encryptLegacyMediaFile(sourceFile, tempEnc, targetKey.masterKey, msg.id)
-                        }
-                        uploadLegacyBlobWithRetry(uid, targetKeyGen, msg.id, tempEnc)
-                        uploadedLegacyIds += msg.id
-                    } catch (e: Exception) {
-                        e.rethrowIfCancellation()
-                        Log.w(TAG, "Legacy media upload failed for msg=${msg.id}", e)
-                        allLegacyComplete = false
-                    } finally {
-                        tempEnc.delete()
-                        rekeyPlainTemp?.delete()
-                    }
-                }
-                val done = idx + 1
-                val sub = if (toUpload.isEmpty()) 1f else done.toFloat() / toUpload.size
-                _backupProgress.value = BackupProgress(
-                    stage = BackupStage.UPLOADING_LEGACY_MEDIA,
-                    completedItems = done,
-                    totalItems = toUpload.size,
-                    fraction = 0.70f + 0.22f * sub,
-                )
-            }
-            if (refreshedLegacy.any { it.id !in uploadedLegacyIds }) {
-                allLegacyComplete = false
-            }
-
-            // Stage 7: Commit manifest.json LAST, promote rotated key, then delete superseded blobs.
-            _backupProgress.value = BackupProgress(stage = BackupStage.FINALIZING, fraction = 0.94f)
+            // Stage 7: Commit manifest.json LAST, promote rotated key, clear pending ledger, then delete superseded blobs.
+            val legacyComplete = allLegacyComplete.get()
+            _backupProgress.value = BackupProgress(stage = BackupStage.FINALIZING, fraction = 0.97f)
             val inner = BackupManifestInner(
                 dbIvB64 = dbCipherInfo.ivB64,
                 dbSha256B64 = dbCipherInfo.sha256B64,
                 schemaVersion = AppDatabase.CURRENT_VERSION,
                 messageCount = messageCount,
-                legacyMediaIds = uploadedLegacyIds.sorted(),
+                legacyMediaIds = finalUploadedLegacyIds.sorted(),
             )
             val manifest = BackupCrypto.createManifest(
                 masterKey = targetKey.masterKey,
@@ -444,7 +561,7 @@ class BackupManager internal constructor(
                 createdAt = nowMs,
                 dbObjectName = dbObjectName,
                 dbCipherSizeBytes = dbCipherInfo.ciphertextSize,
-                legacyMediaComplete = allLegacyComplete,
+                legacyMediaComplete = legacyComplete,
                 inner = inner,
             )
             backupSource.uploadManifest(uid, BackupCrypto.serializeManifest(manifest))
@@ -479,16 +596,21 @@ class BackupManager internal constructor(
                 preferencesDataStore.recordBackupSuccess(
                     timestampMs = nowMs,
                     sizeBytes = dbCipherInfo.ciphertextSize,
-                    legacyMediaComplete = allLegacyComplete,
+                    legacyMediaComplete = legacyComplete,
                 )
+                preferencesDataStore.clearPendingUploadedLegacyIds()
             }
 
             val summary = RemoteBackupSummary(
                 createdAt = nowMs,
                 dbCipherSizeBytes = dbCipherInfo.ciphertextSize,
-                legacyMediaComplete = allLegacyComplete,
+                legacyMediaComplete = legacyComplete,
             )
-            _backupProgress.value = BackupProgress(stage = BackupStage.COMPLETED, fraction = 1f)
+            _backupProgress.value = BackupProgress(
+                stage = BackupStage.COMPLETED,
+                fraction = 1f,
+                legacyMediaComplete = legacyComplete,
+            )
             Result.success(summary)
         } catch (e: CancellationException) {
             // Never leave singleton _backupProgress wedged on an active stage when
@@ -834,7 +956,13 @@ class BackupManager internal constructor(
 
     private fun sweepStaleTempFiles() {
         context.cacheDir.listFiles()?.forEach { file ->
-            if (file.name.startsWith("backup_snapshot_") || file.name.startsWith("restore_db_")) {
+            if (
+                file.name.startsWith("backup_snapshot_") ||
+                file.name.startsWith("restore_db_") ||
+                file.name.startsWith("legacy_enc_") ||
+                file.name.startsWith("rekey_old_") ||
+                file.name.startsWith("rekey_plain_")
+            ) {
                 file.delete()
             }
         }
@@ -873,5 +1001,6 @@ class BackupManager internal constructor(
         private const val MAX_UNCOMPRESSED_DB_BYTES = 2L * 1024L * 1024L * 1024L // 2 GiB safety cap
         private const val LEGACY_UPLOAD_MAX_ATTEMPTS = 3
         private const val LEGACY_UPLOAD_RETRY_DELAY_MS = 2_000L
+        private const val LEGACY_MEDIA_CONCURRENCY = 3
     }
 }

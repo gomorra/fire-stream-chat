@@ -3,6 +3,7 @@ package com.firestream.chat.domain.repository
 import com.firestream.chat.domain.model.BackupFrequency
 import com.firestream.chat.domain.model.BackupProgress
 import com.firestream.chat.domain.model.LocalBackupStatus
+import com.firestream.chat.domain.model.ManualBackupWorkState
 import com.firestream.chat.domain.model.RemoteBackupSummary
 import com.firestream.chat.domain.model.RestoreProgress
 import kotlinx.coroutines.flow.Flow
@@ -13,10 +14,13 @@ interface BackupRepository {
     val backupProgress: StateFlow<BackupProgress>
     val restoreProgress: StateFlow<RestoreProgress>
     val localStatus: Flow<LocalBackupStatus>
+    val manualBackupWorkState: Flow<ManualBackupWorkState>
 
     suspend fun configurePassphrase(passphrase: String): Result<Unit>
     suspend fun hasConfiguredPassphrase(): Boolean
     suspend fun runBackup(): Result<RemoteBackupSummary>
+    suspend fun enqueueManualBackup()
+    suspend fun cancelBackup()
     suspend fun fetchRemoteBackupSummary(): Result<RemoteBackupSummary?>
     suspend fun hasLocalMessages(): Boolean
     suspend fun isRestorePromptResolved(): Boolean
@@ -30,5 +34,6 @@ interface BackupRepository {
      */
     suspend fun restoreBackup(passphrase: String): Result<Unit>
     suspend fun setBackupFrequency(frequency: BackupFrequency)
+    suspend fun setBackupOverMobileData(allowed: Boolean)
     fun resetProgress()
 }

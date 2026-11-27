@@ -14,6 +14,7 @@ import com.firestream.chat.data.backup.BackupSource
 import com.google.firebase.storage.FirebaseStorage
 import com.google.firebase.storage.StorageException
 import com.google.firebase.storage.StorageMetadata
+import com.google.firebase.storage.StorageTask
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.tasks.await
@@ -46,7 +47,10 @@ class FirebaseBackupSource @Inject constructor(
         val metadata = StorageMetadata.Builder()
             .setContentType("application/json")
             .build()
-        ref.putBytes(json.toByteArray(StandardCharsets.UTF_8), metadata).await()
+        awaitCancellableTask(
+            task = ref.putBytes(json.toByteArray(StandardCharsets.UTF_8), metadata),
+            cancelMessage = "Backup manifest upload canceled",
+        )
     }
 
     override suspend fun uploadDbBlob(
@@ -116,7 +120,10 @@ class FirebaseBackupSource @Inject constructor(
         val metadata = StorageMetadata.Builder()
             .setContentType("application/octet-stream")
             .build()
-        ref.putFile(Uri.fromFile(file), metadata).await()
+        awaitCancellableTask(
+            task = ref.putFile(Uri.fromFile(file), metadata),
+            cancelMessage = "Backup legacy media upload canceled",
+        )
     }
 
     override suspend fun downloadLegacyMediaBlob(
@@ -127,8 +134,14 @@ class FirebaseBackupSource @Inject constructor(
     ): Boolean {
         val ref = storage.reference.child("backups/$uid/$LEGACY_MEDIA_DIR/$keyGen/$messageId.enc")
         return try {
-            ref.getFile(destFile).await()
+            awaitCancellableTask(
+                task = ref.getFile(destFile),
+                cancelMessage = "Backup legacy media download canceled",
+            )
             true
+        } catch (e: CancellationException) {
+            destFile.delete()
+            throw e
         } catch (e: StorageException) {
             if (e.errorCode == StorageException.ERROR_OBJECT_NOT_FOUND) {
                 destFile.delete()
@@ -136,6 +149,20 @@ class FirebaseBackupSource @Inject constructor(
             } else {
                 throw e
             }
+        }
+    }
+
+    private suspend fun awaitCancellableTask(
+        task: StorageTask<*>,
+        cancelMessage: String,
+    ) {
+        suspendCancellableCoroutine { cont ->
+            task.addOnSuccessListener { if (cont.isActive) cont.resume(Unit) }
+                .addOnFailureListener { if (cont.isActive) cont.resumeWithException(it) }
+                .addOnCanceledListener {
+                    if (cont.isActive) cont.resumeWithException(CancellationException(cancelMessage))
+                }
+            cont.invokeOnCancellation { task.cancel() }
         }
     }
 
