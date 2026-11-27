@@ -56,7 +56,9 @@ before(async () => {
   // Every refused write logs a warning, and most tests here expect one.
   setLogLevel('error');
   env = await initializeTestEnvironment({
-    projectId: process.env.GCLOUD_PROJECT ?? 'demo-firestream',
+    // Isolated projectId so parallel node --test runs do not race on clearFirestore()
+    // with storage.test.js (which uses the emulator's default project for firestore.get()).
+    projectId: 'demo-firestream-calls',
     firestore: {
       rules: readFileSync(new URL('../firestore.rules', import.meta.url), 'utf8'),
     },

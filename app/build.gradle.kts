@@ -215,9 +215,10 @@ android {
     }
 
     lint {
+        // `./gradlew lint` is intentionally out of the CI gate due to AGP/AndroidX
+        // detector skew — see docs/GOTCHAS.md before editing.
         checkReleaseBuilds = false
         abortOnError = false
-        disable.add("NonNullableMutableLiveData")
     }
 
     packaging {

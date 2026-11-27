@@ -26,10 +26,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # The functions run on Node 20 (firebase.json).
+      # The functions run on Node 22 (firebase.json).
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
 
       - run: node --check index.js
       - run: npm test

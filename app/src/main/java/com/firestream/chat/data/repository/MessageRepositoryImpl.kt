@@ -41,9 +41,15 @@
 //   (PollRepositoryImpl), list mutations (ListRepositoryImpl), call signalling
 //   (CallRepositoryImpl), the upload / write
 //   / resume steps of a send (OutboxSender), the attempt's error policy
-//   (OutboxWorker). Class is large (~1340 LOC) — Phase 2 plan adds a
-//   section-comment TOC and 1100-LOC ceiling. See docs/PATTERNS.md for the
-//   AppError-wrap convention.
+//   (OutboxWorker). See docs/PATTERNS.md for the AppError-wrap convention.
+// Sections (jump directly before reading):
+//   sendTargetFor / enqueueSend ................ ~340–410
+//   getMessages / reconcileRawMessage .......... ~412–718
+//   sendMessage / delete / edit / media / fwd .. ~720–1140
+//   star / search / receipts / broadcast / list  ~1142–1455
+//   location / timer / call log ................ ~1457–1569
+//   syncAllChatMessages / reconcileFromPush .... ~1570–1710
+//   availability / ensureLocalFile / download .. ~1711–end
 // endregion
 
 package com.firestream.chat.data.repository

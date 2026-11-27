@@ -1,0 +1,33 @@
+name: Host scripts
+
+# Runs Node unit tests for host-side maintenance scripts (e.g. scrub-plaintext.mjs).
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'scripts/**'
+      - '.github/workflows/scripts.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'scripts/**'
+      - '.github/workflows/scripts.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Syntax check and run script tests
+        run: |
+          node --check scripts/scrub-plaintext.mjs
+          node --test scripts/*.test.mjs

@@ -1037,6 +1037,16 @@ not state the flag could leave the stored one as it is.
 
 ---
 
+### `JSONObject.optString` baseline in `app/src/main/`
+
+**The smell.** Four pre-existing files still call `org.json.JSONObject.optString(...)`: `data/local/entity/MessageEntity.kt`, `data/local/entity/ListEntity.kt`, `data/remote/update/UpdateManifestSource.kt`, and `data/sticker/LottieContainer.kt`. On Android AOSP, `optString` coerces JSON `null` to the literal string `"null"`, which JVM unit tests hide (`docs/GOTCHAS.md`).
+
+**Why we haven't fixed it.** `MessageEntity.kt` and `ListEntity.kt` already guard with `.takeIf { it != "null" }`, and the other two parse non-null fields. Rewriting them opportunistically risks regressions with no active bug; `ArchitectureTest` (`JSON_OPT_STRING_BASELINE`) blocks any *new* `app/src/main/` file from calling `optString`.
+
+**When to revisit.** Whenever any of those four files is edited for another reason — migrate it to `opt(key) as? String` and delete its line from `JSON_OPT_STRING_BASELINE` in `ArchitectureTest.kt`.
+
+---
+
 ## How to use this file
 
 - **Add entries** when you consciously decide not to fix something you noticed. Record the file paths, the reason, and the trigger condition.

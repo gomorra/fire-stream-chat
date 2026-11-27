@@ -60,6 +60,7 @@ service firebase.storage {
     match /stickers/{fileName} {
       allow get: if isSignedIn();
       allow create: if isSignedIn()
+        && resource == null
         && fileName.matches('^[0-9a-f]{64}\\.(webp|tgs)$')
         && request.resource.size < 2 * 1024 * 1024
         && request.resource.contentType != null

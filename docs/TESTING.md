@@ -35,21 +35,21 @@ Tests are the primary feedback loop during implementation, not a step appended a
 - End-to-end message flow: send → encrypt → store → receive → decrypt → display
 - Offline → online transitions: queued messages send correctly after reconnect
 
-#### Firestore rules tests
+#### Firestore & Storage rules tests
 
 `firestore-rules-tests/` is a small npm package. It is separate from the Gradle build, and `./gradlew test` does not run it.
 
-- Run it with `cd firestore-rules-tests && npm ci && npm test`. It needs Java 21 or later for the emulator and Node 20 or later. The first run downloads the emulator.
-- `npm test` starts the Firestore emulator for the project `demo-firestream` and runs `node --test` against it. A `demo-` project needs no Firebase login.
-- The tests load `firestore.rules` from the repo root. They check the file on disk, not the rules that are deployed.
-- `.github/workflows/firestore-rules.yml` runs them on Java 21 and Node 22. It runs for each push to main or pull request that changes `firestore.rules`, `firebase.json` or the package.
-- `calls.test.js`, `stickerNames.test.js`, and `keyBundles.test.js` each test allowed app operations and rejected abuse cases.
-- The calls rules list every field a call document may hold. A new field, or a write in a new state, needs the rule changed and a test here. Deploy the rules (`firebase deploy --only firestore:rules`) before the app version that writes it ships, or its writes are refused.
+- Run it with `cd firestore-rules-tests && npm ci && npm test`. The `run-tests.sh` wrapper automatically selects a local JDK 21+ (checking `$JAVA21_HOME`, `/opt/android-studio/jbr`, and `/usr/lib/jvm/*21*`) when default `java` is 17. The first run downloads the emulators.
+- `npm test` starts the Firestore and Storage emulators for the project `demo-firestream` and runs `node --test` against them. A `demo-` project needs no Firebase login.
+- The tests load `firestore.rules` and `storage.rules` from the repo root. They check the files on disk, not the rules that are deployed.
+- `.github/workflows/firestore-rules.yml` runs them on Java 21 and Node 22. It runs for each push to main or pull request that changes `firestore.rules`, `storage.rules`, `firebase.json`, or the package.
+- `calls.test.js`, `stickerNames.test.js`, `keyBundles.test.js`, and `storage.test.js` each test allowed app operations and rejected abuse cases.
+- The calls rules list every field a call document may hold. A new field, or a write in a new state, needs the rule changed and a test here. Deploy the rules (`firebase deploy --only firestore:rules,storage`) before the app version that writes it ships, or its writes are refused.
 
 #### Cloud Functions & host script tests
 
-- **Cloud Functions**: `cd functions && npm test` runs `functions/test/` via Node's built-in test runner (call push logic and `claimPreKeyBundle` transaction/blocked-caller behavior). `.github/workflows/functions.yml` runs it when `functions/` changes.
-- **Plaintext scrub script**: `node --test scripts/scrub-plaintext.test.mjs` tests the safety gate, manifest validation, 1:1 filtering, and idempotency of `scripts/scrub-plaintext.mjs` with no live Firebase credentials.
+- **Cloud Functions**: `cd functions && npm test` runs `functions/test/` via Node's built-in test runner (call push logic and `claimPreKeyBundle` transaction/blocked-caller behavior). `.github/workflows/functions.yml` runs it on Node 22 when `functions/` changes.
+- **Plaintext scrub script**: `node --test scripts/scrub-plaintext.test.mjs` tests the safety gate, manifest validation, permission preflight, 1:1 filtering, and idempotency of `scripts/scrub-plaintext.mjs` with no live Firebase credentials. `.github/workflows/scripts.yml` runs `node --test scripts/*.test.mjs` when `scripts/` changes.
 
 #### Sticker naming service tests
 

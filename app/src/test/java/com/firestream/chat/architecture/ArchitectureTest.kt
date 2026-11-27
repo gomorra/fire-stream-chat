@@ -153,10 +153,24 @@ private const val SEND_ADDRESSING_PATTERN = "docs/PATTERNS.md#the-repository-dec
 private const val SEND_TARGET_FILE = "data/outbox/SendTarget.kt"
 private const val MESSAGE_REPOSITORY_IMPL_FILE = "data/repository/MessageRepositoryImpl.kt"
 private const val BROADCAST_FAN_OUT = "sendBroadcastMessage"
+private const val CHAT_VIEW_MODEL_FILE = "ui/chat/ChatViewModel.kt"
+private const val READABLE_SENT_IMAGE = "readableSentImage"
 
 // `SendTarget.of(` no longer exists; its alternative keeps the name from coming back.
 private val TARGET_BUILD = Regex("""\bPeer\(|\bNoPeer\b|\bSendTarget\.of\(""")
 private val TARGET_FROM_CHAT = Regex("""\bforChat\(""")
+// Raw message URL reads in ui/ (other than null-existence checks `!= null` / `== null`)
+// risk handing encrypted `.enc` Storage URLs to Coil/MediaPlayer/downloaders.
+private val RAW_UI_MEDIA_URL_READ = Regex("""\.(mediaUrl|mediaThumbnailUrl)\b(?!\s*[!=]=\s*null)""")
+// Android's AOSP org.json.JSONObject.optString coerces JSON null to the literal string "null"
+// while JVM unit tests mask it. New code should use `opt(key) as? String` (see MessageEnvelope).
+private val JSON_OPT_STRING = Regex("""\boptString\(""")
+private val JSON_OPT_STRING_BASELINE = setOf(
+    "data/local/entity/MessageEntity.kt",
+    "data/local/entity/ListEntity.kt",
+    "data/remote/update/UpdateManifestSource.kt",
+    "data/sticker/LottieContainer.kt",
+)
 
 /** The file's text without comments: a KDoc link to `SendTarget.NoPeer` builds nothing. */
 private fun String.code() = replace(Regex("""//[^\n]*|/\*[\s\S]*?\*/"""), "")
@@ -319,6 +333,61 @@ class ArchitectureTest {
                 "in ArchitectureTest so the isolation rule keeps covering every slice manager.",
             CHAT_MANAGERS.sorted(),
             discovered,
+        )
+    }
+
+    @Test
+    fun `ui layer uses display helpers instead of reading raw mediaUrl or mediaThumbnailUrl`() {
+        val chatViewModel = production.single { it.isFile(CHAT_VIEW_MODEL_FILE) }
+        val guardedFn = chatViewModel.classes().flatMap { it.functions() }.filter { it.name == READABLE_SENT_IMAGE }
+        assertEquals(
+            "Expected exactly one $READABLE_SENT_IMAGE in $CHAT_VIEW_MODEL_FILE (the allowlisted " +
+                "isEncryptedMedia-guarded fallback).",
+            1,
+            guardedFn.size,
+        )
+        val guardedFnText = guardedFn.single().text
+
+        val offenders = production
+            .filter { it.inLayer("ui") }
+            .filter { file ->
+                val text = if (file.isFile(CHAT_VIEW_MODEL_FILE)) {
+                    assertTrue(
+                        "$READABLE_SENT_IMAGE text not found verbatim in $CHAT_VIEW_MODEL_FILE",
+                        file.text.contains(guardedFnText),
+                    )
+                    file.text.replace(guardedFnText, "")
+                } else {
+                    file.text
+                }
+                RAW_UI_MEDIA_URL_READ.containsMatchIn(text.code())
+            }
+            .map { it.relativePath() }
+
+        assertEquals(
+            "UI code must use Message.displayMediaSource / displayRemoteMediaUrl / displayThumbSource / " +
+                "displayRemoteThumbUrl instead of reading raw mediaUrl/mediaThumbnailUrl (which may hold " +
+                "encrypted .enc URLs).",
+            emptyList<String>(),
+            offenders,
+        )
+    }
+
+    @Test
+    fun `main production code avoids JSONObject optString null coercion`() {
+        // Baselined pre-existing call sites recorded in TECH_DEBT.md ("JSONObject.optString baseline").
+        val offenders = production
+            .filter { it.path.contains("/app/src/main/") }
+            .filterNot { file -> JSON_OPT_STRING_BASELINE.any { file.isFile(it) } }
+            .filter { file -> JSON_OPT_STRING.containsMatchIn(file.text.code()) }
+            .map { it.relativePath() }
+
+        assertEquals(
+            "Do not call JSONObject.optString(...) in new app/src/main code: AOSP coerces JSON null to " +
+                "the literal string \"null\" (hidden by JVM tests). Use `opt(key) as? String` instead " +
+                "(see MessageEnvelope.optStringOrNull and docs/GOTCHAS.md).",
+            emptyList<String>(),
+            offenders,
         )
     }
 }

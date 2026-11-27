@@ -1,6 +1,6 @@
 # Gotchas
 
-<!-- last-verified: 2026-07-18 -->
+<!-- last-verified: 2026-11-27 -->
 
 Hard-won, host-independent traps promoted from local session memory so that **cloud
 agents** (which only see the git checkout, never `~/.claude/`) benefit too. Each entry:
@@ -385,6 +385,18 @@ developer machine, and (c) likely to recur. Named, structural conventions belong
   by themselves. Not a test bug: the fix is `-XX:ReservedCodeCacheSize=256m` on the unit-test
   worker, which is set. If the symptom returns at a larger suite, raise it again rather
   than bisecting tests. Seen 2026-09-12 (offline outbox step 8, two consecutive full runs).
+- **Robolectric 4.14 `ShadowPath` misses pointer clicks on Material 3 `SegmentedButtonDefaults.itemShape` end-caps.**
+  The asymmetric pill shapes on the first and last buttons of a `SingleChoiceSegmentedButtonRow`
+  return false for outline containment under Robolectric's `ShadowPath`, so `performClick()`
+  silently dispatches nothing while the middle segment clicks normally. Use
+  `performSemanticsAction(SemanticsActions.OnClick)` (after `assertIsEnabled()`) to exercise the
+  enabled click handler on segmented button end-caps in Robolectric Compose tests. Seen in
+  `BackupScreensUiTest` (2026-11-26).
+- **AOSP `org.json.JSONObject.optString` returns the literal string `"null"` for JSON `null` values — and JVM unit tests hide it.**
+  Android's `org.json` coerces `JSONObject.NULL` to `"null"` in `optString(key)` /
+  `optString(key, fallback)`, whereas the JVM `org.json` jar used by unit tests behaves differently.
+  Use `opt(key) as? String` (see `MessageEnvelope.optStringOrNull`) instead of `optString`. Enforced
+  on new `app/src/main/` code by `ArchitectureTest` (2026-11-26).
 
 ## Platform / dependencies
 

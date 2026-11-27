@@ -1,12 +1,13 @@
 name: Firestore rules
 
-# Runs firestore.rules in the Firestore emulator (firestore-rules-tests/).
-# See docs/TESTING.md, "Firestore rules tests".
+# Runs firestore.rules and storage.rules in the Firebase emulators (firestore-rules-tests/).
+# See docs/TESTING.md, "Firestore & Storage rules tests".
 on:
   push:
     branches: [main]
     paths:
       - 'firestore.rules'
+      - 'storage.rules'
       - 'firebase.json'
       - 'firestore-rules-tests/**'
       - '.github/workflows/firestore-rules.yml'
@@ -14,6 +15,7 @@ on:
     branches: [main]
     paths:
       - 'firestore.rules'
+      - 'storage.rules'
       - 'firebase.json'
       - 'firestore-rules-tests/**'
       - '.github/workflows/firestore-rules.yml'
