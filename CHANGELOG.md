@@ -2,6 +2,18 @@
 
 All notable changes to FireStream Chat. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); each section is headed by the SemVer `versionName` shipped on that merge day (e.g. `## [1.2.3] — 2026-04-24`). Bump rule: `feat:` → minor, `fix:` → patch, `feat!:` / `BREAKING CHANGE:` → major. `versionCode` is derived from `git rev-list --count HEAD`.
 
+## [UNRELEASED] [2.1.0] — 2026-11-27
+
+### Added
+
+- **Backup schedule picker during initial setup and live backup progress.** The first-time backup passphrase dialog now lets you choose an automatic backup schedule (defaulting to Weekly), and the *Chat Backup* screen keeps schedule controls editable while a backup is running alongside a live percentage indicator. (`0ab79273`)
+- **Plaintext scrub waiver flags and Storage permission preflight.** `scripts/scrub-plaintext.mjs` now supports `--allow-unverified-users` and `--allow-orphaned-chats` for unreachable legacy accounts, and verifies `storage.objects.delete` IAM permission before mutating any Firestore document in `--execute` mode. (`0ab79273`)
+
+### Fixed
+
+- **Transient retry for legacy media backup uploads.** `BackupManager` now retries each legacy media blob upload up to 3 times with linear backoff so brief Wi-Fi drops during long initial backups do not leave legacy media incomplete. (`0ab79273`)
+- **Immutable shared sticker Storage rule.** Added `resource == null` to the `stickers/{fileName}` create rule in `storage.rules` so signed-in clients cannot overwrite existing content-addressed sticker blobs (verified by new Storage rules emulator tests). (`bf8ea31c`)
+
 ## [2.0.1] — 2026-11-26
 
 ### Fixed
