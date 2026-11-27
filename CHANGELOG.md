@@ -2,6 +2,13 @@
 
 All notable changes to FireStream Chat. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); each section is headed by the SemVer `versionName` shipped on that merge day (e.g. `## [1.2.3] — 2026-04-24`). Bump rule: `feat:` → minor, `fix:` → patch, `feat!:` / `BREAKING CHANGE:` → major. `versionCode` is derived from `git rev-list --count HEAD`.
 
+## [UNRELEASED] [2.2.1] — 2026-11-27
+
+### Fixed
+
+- **Missing backup progress notification after resuming from flight mode / background.** When WorkManager restarted `BackupWorker` from the background (e.g., after toggling flight mode off or during a scheduled backup) and Android 12+ rejected foreground-service promotion, the backup continued silently without posting a status bar notification. `BackupWorker` now falls back to posting and updating the progress notification via `NotificationManager` and clears it cleanly once the run finishes or stops.
+- **Continuous legacy-media upload counter across resumes.** Resuming an interrupted backup after an app kill or network drop now continues the upload counter and progress bar from the already-uploaded count out of the full backup total (e.g., `120/200` → `200/200`) instead of resetting to `0/80`.
+
 ## [2.2.0] — 2026-11-27
 
 ### Added

@@ -413,17 +413,21 @@ class BackupManager internal constructor(
                     .filter { msg -> msg.mediaUrl != null && !KlipyUrls.isMedia(msg.mediaUrl) }
             }
             val uploadedLegacyIds = Collections.synchronizedSet(knownUploadedLegacyIds.toMutableSet())
+            val totalForThisBackup = refreshedLegacy.count { it.id !in alreadyBackedUpLegacyIds }
             val toUpload = refreshedLegacy.filter { it.id !in uploadedLegacyIds }
+            val alreadyUploadedThisRun = (totalForThisBackup - toUpload.size).coerceAtLeast(0)
             val allLegacyComplete = AtomicBoolean(true)
             if (toUpload.isNotEmpty()) {
+                val displayTotal = totalForThisBackup.coerceAtLeast(toUpload.size)
+                val initialSub = alreadyUploadedThisRun.toFloat() / displayTotal
                 _backupProgress.value = BackupProgress(
                     stage = BackupStage.UPLOADING_LEGACY_MEDIA,
-                    completedItems = 0,
-                    totalItems = toUpload.size,
-                    fraction = 0.30f,
+                    completedItems = alreadyUploadedThisRun,
+                    totalItems = displayTotal,
+                    fraction = 0.30f + 0.38f * initialSub,
                 )
                 val uploadSemaphore = Semaphore(LEGACY_MEDIA_CONCURRENCY)
-                val completedUploads = AtomicInteger(0)
+                val completedUploads = AtomicInteger(alreadyUploadedThisRun)
                 val currentUid = uid
                 coroutineScope {
                     toUpload.map { msg ->
@@ -481,7 +485,7 @@ class BackupManager internal constructor(
                                     }
                                 }
                                 val done = completedUploads.incrementAndGet()
-                                val sub = done.toFloat() / toUpload.size
+                                val sub = done.toFloat() / displayTotal
                                 _backupProgress.update { prev ->
                                     if (prev.stage == BackupStage.UPLOADING_LEGACY_MEDIA && prev.completedItems > done) {
                                         prev
@@ -489,7 +493,7 @@ class BackupManager internal constructor(
                                         BackupProgress(
                                             stage = BackupStage.UPLOADING_LEGACY_MEDIA,
                                             completedItems = done,
-                                            totalItems = toUpload.size,
+                                            totalItems = displayTotal,
                                             fraction = 0.30f + 0.38f * sub,
                                         )
                                     }

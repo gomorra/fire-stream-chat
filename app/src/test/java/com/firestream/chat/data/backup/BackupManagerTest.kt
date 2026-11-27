@@ -672,14 +672,33 @@ class BackupManagerTest {
         assertEquals(persistedBeforeResume, alreadyUploadedBeforeResume.toSet())
         assertFalse("m-resume-2" in persistedBeforeResume)
 
-        // Resume: previously uploaded IDs must NOT be uploaded again, and ledger clears after commit.
+        // Resume: previously uploaded IDs must NOT be uploaded again, progress continues
+        // from the already-uploaded count out of the full backup total (e.g. 1/3 -> 3/3
+        // rather than resetting to 0/2), and the ledger clears after commit.
         backupSource.cancelOnLegacyUploadMessageId = null
         backupSource.uploadedMessageIds.clear()
+        val observedUploadTotals = java.util.Collections.synchronizedList(mutableListOf<Pair<Int, Int>>())
+        backupSource.onLegacyUpload = {
+            val p = manager.backupProgress.value
+            if (p.stage == BackupStage.UPLOADING_LEGACY_MEDIA) {
+                observedUploadTotals.add(p.completedItems to p.totalItems)
+            }
+        }
         val resumed = manager.runBackup()
+        backupSource.onLegacyUpload = null
         assertTrue("Expected resumed backup success, got ${resumed.exceptionOrNull()}", resumed.isSuccess)
         assertTrue(resumed.getOrThrow().legacyMediaComplete)
         assertTrue(backupSource.uploadedMessageIds.none { it in persistedBeforeResume })
         assertTrue("m-resume-2" in backupSource.uploadedMessageIds)
+        assertTrue(observedUploadTotals.isNotEmpty())
+        assertTrue(
+            "Expected resumed upload totalItems to stay 3 (full uncommitted run), saw $observedUploadTotals",
+            observedUploadTotals.all { it.second == 3 },
+        )
+        assertTrue(
+            "Expected resumed upload completedItems to start >= ${persistedBeforeResume.size}, saw $observedUploadTotals",
+            observedUploadTotals.all { it.first >= persistedBeforeResume.size },
+        )
         assertEquals(
             setOf("$keyGen/m-resume-1", "$keyGen/m-resume-2", "$keyGen/m-resume-3"),
             backupSource.legacyBlobs["uid-alice"]?.keys,

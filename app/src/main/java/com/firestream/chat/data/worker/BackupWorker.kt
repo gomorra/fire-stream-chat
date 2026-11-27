@@ -26,10 +26,13 @@ import com.firestream.chat.domain.repository.BackupRepository
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 @HiltWorker
 class BackupWorker @AssistedInject constructor(
@@ -46,28 +49,33 @@ class BackupWorker @AssistedInject constructor(
 
         val isManual = inputData.getString(KEY_TRIGGER) == TRIGGER_MANUAL
         val initialProgress = BackupProgress(stage = BackupStage.SYNCING_CHATS, fraction = 0f)
+        val initialNotif = buildNotification(initialProgress, isManual)
         val fgsActive = tryPromoteForeground(
             TAG,
-            dataSyncForegroundInfo(NOTIF_ID, buildNotification(initialProgress, isManual)),
+            dataSyncForegroundInfo(NOTIF_ID, initialNotif),
         )
+        val nm = context.getSystemService(NotificationManager::class.java)
+        // On Android 12+, WorkManager resuming a backup from the background (e.g.,
+        // after flight mode ends or on a scheduled run) can have setForeground()
+        // rejected with ForegroundServiceStartNotAllowedException. Posting a normal
+        // notification via NotificationManager is still permitted and keeps status
+        // bar progress visible until doWork() finishes or is stopped.
+        if (!fgsActive) {
+            nm?.notify(NOTIF_ID, initialNotif)
+        }
 
         return try {
             coroutineScope {
-                val progressJob = if (fgsActive) {
-                    launch {
-                        val nm = context.getSystemService(NotificationManager::class.java)
-                        var lastKey: String? = null
-                        backupRepository.backupProgress.collect { progress ->
-                            if (progress.stage in TERMINAL_OR_IDLE_STAGES) return@collect
-                            val percent = (progress.fraction.coerceIn(0f, 1f) * 100).toInt()
-                            val key = "${progress.stage}:${progress.completedItems}/${progress.totalItems}:$percent"
-                            if (key == lastKey) return@collect
-                            lastKey = key
-                            nm?.notify(NOTIF_ID, buildNotification(progress, isManual))
-                        }
+                val progressJob = launch {
+                    var lastKey: String? = null
+                    backupRepository.backupProgress.collect { progress ->
+                        if (progress.stage in TERMINAL_OR_IDLE_STAGES) return@collect
+                        val percent = (progress.fraction.coerceIn(0f, 1f) * 100).toInt()
+                        val key = "${progress.stage}:${progress.completedItems}/${progress.totalItems}:$percent"
+                        if (key == lastKey) return@collect
+                        lastKey = key
+                        nm?.notify(NOTIF_ID, buildNotification(progress, isManual))
                     }
-                } else {
-                    null
                 }
                 try {
                     backupRepository.runBackup().fold(
@@ -81,7 +89,9 @@ class BackupWorker @AssistedInject constructor(
                         },
                     )
                 } finally {
-                    progressJob?.cancel()
+                    withContext(NonCancellable) {
+                        progressJob.cancelAndJoin()
+                    }
                 }
             }
         } catch (e: UserCancelledBackupException) {
@@ -89,6 +99,10 @@ class BackupWorker @AssistedInject constructor(
             Result.success()
         } catch (e: CancellationException) {
             throw e
+        } finally {
+            if (!fgsActive) {
+                nm?.cancel(NOTIF_ID)
+            }
         }
     }
 
