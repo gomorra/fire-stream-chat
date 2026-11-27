@@ -83,15 +83,16 @@ class BackupViewModelTest {
         val vm = BackupViewModel(backupRepository, this)
         advanceUntilIdle()
 
-        // First setup opened via "Set backup passphrase" row -> saves without running backup
+        // First setup opened via "Set backup passphrase" row -> saves key & initial schedule without running backup
         vm.openPassphraseDialog()
-        vm.savePassphrase("first-strong-passphrase", "first-strong-passphrase")
+        vm.savePassphrase("first-strong-passphrase", "first-strong-passphrase", BackupFrequency.WEEKLY)
         advanceUntilIdle()
         assertFalse(vm.uiState.value.showPassphraseDialog)
         coVerify(exactly = 1) { backupRepository.configurePassphrase("first-strong-passphrase") }
+        coVerify(exactly = 1) { backupRepository.setBackupFrequency(BackupFrequency.WEEKLY) }
         coVerify(exactly = 0) { backupRepository.runBackup() }
 
-        // Passphrase change when already backed up -> auto-runs backup to commit rotation
+        // Passphrase change when already backed up -> auto-runs backup to commit rotation without changing schedule
         localStatusFlow.value = LocalBackupStatus(
             isSupported = true,
             isPassphraseConfigured = true,
@@ -101,9 +102,10 @@ class BackupViewModelTest {
         advanceUntilIdle()
 
         vm.openPassphraseDialog()
-        vm.savePassphrase("second-strong-passphrase", "second-strong-passphrase")
+        vm.savePassphrase("second-strong-passphrase", "second-strong-passphrase", BackupFrequency.DAILY)
         advanceUntilIdle()
         coVerify(exactly = 1) { backupRepository.configurePassphrase("second-strong-passphrase") }
+        coVerify(exactly = 0) { backupRepository.setBackupFrequency(BackupFrequency.DAILY) }
         coVerify(exactly = 1) { backupRepository.runBackup() }
     }
 
@@ -121,11 +123,15 @@ class BackupViewModelTest {
         assertTrue(vm.uiState.value.showPassphraseDialog)
         coVerify(exactly = 0) { backupRepository.runBackup() }
 
-        vm.savePassphrase("setup-and-backup-now-123", "setup-and-backup-now-123")
+        vm.savePassphrase("setup-and-backup-now-123", "setup-and-backup-now-123", BackupFrequency.DAILY)
         advanceUntilIdle()
         coVerify(exactly = 1) { backupRepository.configurePassphrase("setup-and-backup-now-123") }
+        coVerify(exactly = 1) { backupRepository.setBackupFrequency(BackupFrequency.DAILY) }
         coVerify(exactly = 1) { backupRepository.runBackup() }
-        assertEquals("Backup saved, but some legacy media could not be downloaded.", vm.uiState.value.snackbarMessage)
+        assertEquals(
+            "Backup saved, but some legacy media could not be backed up. Tap Back up now to retry.",
+            vm.uiState.value.snackbarMessage,
+        )
     }
 
     @Test

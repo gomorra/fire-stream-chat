@@ -106,6 +106,7 @@ class BackupManagerTest {
         minManifestIterations = 1_000,
         databaseName = dbName,
         clock = { nowMs },
+        legacyUploadRetryDelayMs = 0L,
     )
 
     @Test
@@ -391,6 +392,71 @@ class BackupManagerTest {
     }
 
     @Test
+    fun `transient legacy media upload failure succeeds on retry and keeps legacyMediaComplete true`() = runTest {
+        val manager = newManager()
+        manager.configurePassphrase("retry-legacy-passphrase-123")
+
+        val legacyFile = File(context.cacheDir, "retry_${UUID.randomUUID()}.jpg").apply {
+            writeBytes(byteArrayOf(7, 8, 9, 10))
+            tempFiles += this
+        }
+        appDatabase.messageDao().insertOutbox(
+            MessageEntity.fromDomain(
+                Message(
+                    id = "m-retry-1",
+                    chatId = "chat-1",
+                    senderId = "uid-alice",
+                    type = MessageType.IMAGE,
+                    mediaUrl = "https://storage.example/media/chat-1/m-retry-1.jpg",
+                    localUri = legacyFile.absolutePath,
+                    status = MessageStatus.SENT,
+                    timestamp = 1_000L,
+                )
+            )
+        )
+
+        // Fail first 2 attempts (e.g. brief Wi-Fi drop), succeed on attempt 3
+        backupSource.failLegacyUploadsRemaining = 2
+        val result = manager.runBackup()
+        assertTrue(result.isSuccess)
+        assertTrue(result.getOrThrow().legacyMediaComplete)
+        assertEquals(3, backupSource.legacyUploadCount)
+        val keyGen = backupKeyStore.load()!!.keyGeneration
+        assertTrue(backupSource.legacyBlobs["uid-alice"]!!.containsKey("$keyGen/m-retry-1"))
+    }
+
+    @Test
+    fun `persistent legacy media upload failure exhausts retries and sets legacyMediaComplete false`() = runTest {
+        val manager = newManager()
+        manager.configurePassphrase("retry-exhaust-passphrase-123")
+
+        val legacyFile = File(context.cacheDir, "retry_fail_${UUID.randomUUID()}.jpg").apply {
+            writeBytes(byteArrayOf(11, 12, 13, 14))
+            tempFiles += this
+        }
+        appDatabase.messageDao().insertOutbox(
+            MessageEntity.fromDomain(
+                Message(
+                    id = "m-retry-fail",
+                    chatId = "chat-1",
+                    senderId = "uid-alice",
+                    type = MessageType.IMAGE,
+                    mediaUrl = "https://storage.example/media/chat-1/m-retry-fail.jpg",
+                    localUri = legacyFile.absolutePath,
+                    status = MessageStatus.SENT,
+                    timestamp = 1_000L,
+                )
+            )
+        )
+
+        backupSource.failLegacyUploadsRemaining = 10
+        val result = manager.runBackup()
+        assertTrue(result.isSuccess)
+        assertFalse(result.getOrThrow().legacyMediaComplete)
+        assertEquals(3, backupSource.legacyUploadCount)
+    }
+
+    @Test
     fun `passphrase rotation is atomic and re-keys remote-only legacy media after local deletion`() = runTest {
         val manager = newManager()
         assertTrue(manager.configurePassphrase("original-passphrase-111").isSuccess)
@@ -577,6 +643,7 @@ class BackupManagerTest {
         var legacyUploadCount = 0
         var failNextDbUpload = false
         var failNextManifestUpload = false
+        var failLegacyUploadsRemaining = 0
 
         override suspend fun fetchManifest(uid: String): String? = manifests[uid]
 
@@ -621,6 +688,10 @@ class BackupManagerTest {
 
         override suspend fun uploadLegacyMediaBlob(uid: String, keyGen: String, messageId: String, file: File) {
             legacyUploadCount++
+            if (failLegacyUploadsRemaining > 0) {
+                failLegacyUploadsRemaining--
+                throw IOException("The server has terminated the upload session")
+            }
             legacyBlobs.getOrPut(uid) { mutableMapOf() }["$keyGen/$messageId"] = file.readBytes()
         }
 

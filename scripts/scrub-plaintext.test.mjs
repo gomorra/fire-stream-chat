@@ -65,11 +65,34 @@ test('parseArgs rejects conflicting --dry-run and --execute', () => {
 test('parseArgs rejects missing --users, flag-as-value, path-traversal UIDs, and unknown flags', () => {
   assert.throws(() => parseArgs(['--execute']), /--users/);
   assert.throws(() => parseArgs(['--users', '--execute']), /--users requires/);
+  assert.throws(
+    () => parseArgs(['--users', 'uid1', '--allow-unverified-users', '--execute']),
+    /--allow-unverified-users requires/
+  );
+  assert.throws(
+    () => parseArgs(['--users', 'uid1', '--allow-unverified-users', 'uid1']),
+    /cannot appear in both/
+  );
+  assert.throws(
+    () => parseArgs(['--users', 'uid1', '--allow-unverified-users', '../bad']),
+    /Invalid UID/
+  );
   assert.throws(() => parseArgs(['--bucket', '--execute', '--users', 'uid1']), /--bucket requires/);
   assert.throws(() => parseArgs(['--credentials', '--execute', '--users', 'uid1']), /--credentials requires/);
   assert.throws(() => parseArgs(['--users', '../admin']), /Invalid UID/);
   assert.throws(() => parseArgs(['--users', 'uid1/sub']), /Invalid UID/);
   assert.throws(() => parseArgs(['--users', 'uid1', '--bogus']), /Unknown argument/);
+});
+
+test('parseArgs parses --allow-unverified-users and --allow-orphaned-chats', () => {
+  const parsed = parseArgs([
+    '--users', 'uid1,uid2',
+    '--allow-unverified-users=uid3, uid4, uid3',
+    '--allow-orphaned-chats',
+  ]);
+  assert.deepEqual(parsed.users, ['uid1', 'uid2']);
+  assert.deepEqual(parsed.allowUnverifiedUsers, ['uid3', 'uid4']);
+  assert.equal(parsed.allowOrphanedChats, true);
 });
 
 // --- Key generation & manifest validation ---
@@ -424,6 +447,62 @@ test('evaluateSafetyGate fails if a 1:1 chat with plaintext has a participant mi
   assert.match(res.failures.join('\n'), /unverified participant\(s\): uid2/);
 });
 
+test('evaluateSafetyGate honors --allow-unverified-users and --allow-orphaned-chats while still checking verified users', () => {
+  const { chats, messagesByChat, storageObjectsByChat, backupsByUser } = createFixture();
+  chats.push(
+    { id: 'dm_waived', data: { type: 'INDIVIDUAL', participants: ['uid1', 'uid_waived'] } },
+    { id: 'dm_orphan', data: { type: 'INDIVIDUAL', participants: [] } },
+  );
+  messagesByChat.set('dm_waived', [{ id: 'm_w1', data: { type: 'TEXT', content: 'old', timestamp: 1_000_000 } }]);
+  messagesByChat.set('dm_orphan', [{ id: 'm_o1', data: { type: 'TEXT', content: 'orphan', timestamp: 1_000_000 } }]);
+
+  const plan = buildScrubPlan({ chats, messagesByChat, storageObjectsByChat });
+
+  // Without waiver flags, both dm_waived and dm_orphan fail.
+  const strict = evaluateSafetyGate({ users: ['uid1', 'uid2'], plan, backupsByUser });
+  assert.equal(strict.ok, false);
+  assert.match(strict.failures.join('\n'), /uid_waived/);
+  assert.match(strict.failures.join('\n'), /dm_orphan/);
+
+  // With both waiver flags, gate passes and records waived chats in report.
+  const waived = evaluateSafetyGate({
+    users: ['uid1', 'uid2'],
+    plan,
+    backupsByUser,
+    allowUnverifiedUsers: ['uid_waived'],
+    allowOrphanedChats: true,
+  });
+  assert.equal(waived.ok, true);
+  assert.equal(waived.waivedChats.length, 2);
+
+  const report = formatReport({
+    args: {
+      execute: false,
+      users: ['uid1', 'uid2'],
+      allowUnverifiedUsers: ['uid_waived'],
+      allowOrphanedChats: true,
+    },
+    plan,
+    safetyResult: waived,
+    execution: null,
+  });
+  assert.match(report, /Waived unverified users: uid_waived/);
+  assert.match(report, /\[WAIVED\] 1:1 chat dm_waived: waived unverified participants: uid_waived/);
+  assert.match(report, /\[WAIVED\] 1:1 chat dm_orphan: orphaned chat/);
+
+  // Verified user's backup is STILL strictly enforced even when waivers are set.
+  backupsByUser.delete('uid2');
+  const brokenVerified = evaluateSafetyGate({
+    users: ['uid1', 'uid2'],
+    plan,
+    backupsByUser,
+    allowUnverifiedUsers: ['uid_waived'],
+    allowOrphanedChats: true,
+  });
+  assert.equal(brokenVerified.ok, false);
+  assert.match(brokenVerified.failures.join('\n'), /Missing backups\/uid2\/manifest\.json/);
+});
+
 test('evaluateSafetyGate catches plaintext edit newer than backup via editedAt', () => {
   const { chats, messagesByChat, storageObjectsByChat, backupsByUser } = createFixture();
   messagesByChat.get('dm1')[0].data.editedAt = 2_050_000;
@@ -576,4 +655,64 @@ test('executeScrub batches deletes, scrubs previews and 1:1 legacy storage, and 
   assert.match(reportText, /Firestore message docs deleted: 2/);
   assert.equal(formatBytes(0), '0 B');
   assert.equal(formatBytes(1536), '1.5 KB');
+});
+
+test('executeScrub aborts before mutating Firestore if Storage delete permission preflight fails', async () => {
+  const { chats, messagesByChat, storageObjectsByChat, backupsByUser } = createFixture();
+  const plan = buildScrubPlan({ chats, messagesByChat, storageObjectsByChat });
+  const safetyResult = evaluateSafetyGate({ users: ['uid1', 'uid2'], plan, backupsByUser });
+
+  let mutationCalls = 0;
+  let preflightCalls = 0;
+
+  // Dry-run does not invoke the delete-permission preflight
+  await executeScrub({
+    plan,
+    safetyResult,
+    execute: false,
+    verifyStorageDeletePermission: async () => { preflightCalls++; },
+    deleteMessageBatch: async () => { mutationCalls++; },
+    scrubChatPreview: async () => { mutationCalls++; },
+    deleteStorageObject: async () => { mutationCalls++; },
+  });
+  assert.equal(preflightCalls, 0);
+  assert.equal(mutationCalls, 0);
+
+  // Execute fails fast on preflight with zero Firestore or Storage mutations
+  await assert.rejects(
+    () =>
+      executeScrub({
+        plan,
+        safetyResult,
+        execute: true,
+        verifyStorageDeletePermission: async () => {
+          preflightCalls++;
+          throw new Error('Active credentials lack "storage.objects.delete" permission');
+        },
+        deleteMessageBatch: async () => { mutationCalls++; },
+        scrubChatPreview: async () => { mutationCalls++; },
+        deleteStorageObject: async () => { mutationCalls++; },
+      }),
+    /storage\.objects\.delete/
+  );
+  assert.equal(preflightCalls, 1);
+  assert.equal(mutationCalls, 0);
+
+  // When no Storage objects need deletion, preflight is skipped and Firestore scrub succeeds
+  storageObjectsByChat.set('dm1', [{ name: 'media/dm1/m_enc.enc', size: 80_000 }]);
+  const firestoreOnlyPlan = buildScrubPlan({ chats, messagesByChat, storageObjectsByChat });
+  const firestoreOnlyGate = evaluateSafetyGate({ users: ['uid1', 'uid2'], plan: firestoreOnlyPlan, backupsByUser });
+  let skippedPreflightCalls = 0;
+  const res = await executeScrub({
+    plan: firestoreOnlyPlan,
+    safetyResult: firestoreOnlyGate,
+    execute: true,
+    verifyStorageDeletePermission: async () => { skippedPreflightCalls++; },
+    deleteMessageBatch: async () => { mutationCalls++; },
+    scrubChatPreview: async () => { mutationCalls++; },
+    deleteStorageObject: async () => { mutationCalls++; },
+  });
+  assert.equal(skippedPreflightCalls, 0);
+  assert.equal(res.executed, true);
+  assert.ok(mutationCalls > 0);
 });

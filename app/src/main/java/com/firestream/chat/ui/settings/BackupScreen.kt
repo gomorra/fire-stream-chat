@@ -7,7 +7,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -36,8 +35,10 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
@@ -45,6 +46,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -54,6 +56,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -76,7 +79,7 @@ data class BackupScreenCallbacks(
     val onBackupNow: () -> Unit,
     val onOpenPassphraseDialog: () -> Unit,
     val onDismissPassphraseDialog: () -> Unit,
-    val onSavePassphrase: (passphrase: String, confirmation: String) -> Unit,
+    val onSavePassphrase: (passphrase: String, confirmation: String, initialFrequency: BackupFrequency?) -> Unit,
     val onSelectFrequency: (BackupFrequency) -> Unit,
     val onConsumeSnackbar: () -> Unit,
 )
@@ -112,6 +115,17 @@ fun BackupScreenContent(
         val msg = uiState.snackbarMessage ?: return@LaunchedEffect
         snackbarHostState.showSnackbar(msg)
         callbacks.onConsumeSnackbar()
+    }
+
+    val view = LocalView.current
+    DisposableEffect(view, uiState.isBackupRunning) {
+        val previousKeepScreenOn = view.keepScreenOn
+        if (uiState.isBackupRunning) {
+            view.keepScreenOn = true
+        }
+        onDispose {
+            view.keepScreenOn = previousKeepScreenOn
+        }
     }
 
     Scaffold(
@@ -210,7 +224,7 @@ fun BackupScreenContent(
 
             HorizontalDivider()
 
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
                     text = "Automatic Backup",
                     style = MaterialTheme.typography.titleSmall,
@@ -222,27 +236,11 @@ fun BackupScreenContent(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                Spacer(Modifier.height(4.dp))
-                BackupFrequencyOption(
-                    label = "Off",
-                    selected = uiState.status.frequency == BackupFrequency.OFF,
-                    enabled = uiState.status.isPassphraseConfigured && !uiState.isBackupRunning,
-                    tag = "backup_freq_off",
-                    onClick = { callbacks.onSelectFrequency(BackupFrequency.OFF) },
-                )
-                BackupFrequencyOption(
-                    label = "Daily",
-                    selected = uiState.status.frequency == BackupFrequency.DAILY,
-                    enabled = uiState.status.isPassphraseConfigured && !uiState.isBackupRunning,
-                    tag = "backup_freq_daily",
-                    onClick = { callbacks.onSelectFrequency(BackupFrequency.DAILY) },
-                )
-                BackupFrequencyOption(
-                    label = "Weekly",
-                    selected = uiState.status.frequency == BackupFrequency.WEEKLY,
-                    enabled = uiState.status.isPassphraseConfigured && !uiState.isBackupRunning,
-                    tag = "backup_freq_weekly",
-                    onClick = { callbacks.onSelectFrequency(BackupFrequency.WEEKLY) },
+                BackupFrequencySegmentedControl(
+                    selected = uiState.status.frequency,
+                    enabled = uiState.status.isPassphraseConfigured,
+                    tagPrefix = "backup_freq",
+                    onSelect = callbacks.onSelectFrequency,
                 )
             }
         }
@@ -299,12 +297,19 @@ private fun BackupStatusCard(uiState: BackupUiState) {
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
+                if (status.isPassphraseConfigured) {
+                    Text(
+                        text = formatBackupScheduleSummary(status.frequency),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
                 if (status.lastBackupAt != null) {
                     Text(
                         text = if (status.lastBackupLegacyMediaComplete) {
                             "All legacy media backed up ✓"
                         } else {
-                            "Some legacy media could not be backed up"
+                            "Some legacy media could not be backed up — tap Back up now to retry"
                         },
                         style = MaterialTheme.typography.bodySmall,
                         color = if (status.lastBackupLegacyMediaComplete) {
@@ -322,6 +327,8 @@ private fun BackupStatusCard(uiState: BackupUiState) {
 
 @Composable
 private fun BackupProgressCard(progress: BackupProgress) {
+    val clamped = progress.fraction.coerceIn(0f, 1f)
+    val percent = (clamped * 100).toInt()
     Card(
         modifier = Modifier.fillMaxWidth().testTag("backup_progress_card"),
     ) {
@@ -329,42 +336,69 @@ private fun BackupProgressCard(progress: BackupProgress) {
             modifier = Modifier.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Text(
-                text = backupStageLabel(progress),
-                style = MaterialTheme.typography.bodyMedium,
-                fontWeight = FontWeight.Medium,
-            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = backupStageLabel(progress),
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.Medium,
+                    modifier = Modifier.weight(1f),
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    text = "$percent%",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.testTag("backup_progress_percent"),
+                )
+            }
             LinearProgressIndicator(
-                progress = { progress.fraction.coerceIn(0f, 1f) },
+                progress = { clamped },
                 modifier = Modifier.fillMaxWidth().testTag("backup_progress_bar"),
+            )
+            Text(
+                text = "Keep FireStream open on Wi-Fi until complete. You can adjust your automatic backup schedule below.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun BackupFrequencyOption(
-    label: String,
-    selected: Boolean,
+private fun BackupFrequencySegmentedControl(
+    selected: BackupFrequency,
     enabled: Boolean,
-    tag: String,
-    onClick: () -> Unit,
+    tagPrefix: String,
+    onSelect: (BackupFrequency) -> Unit,
 ) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(enabled = enabled, onClick = onClick)
-            .padding(vertical = 4.dp)
-            .testTag(tag),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        RadioButton(selected = selected, onClick = onClick, enabled = enabled)
-        Spacer(Modifier.width(8.dp))
-        Text(
-            text = label,
-            style = MaterialTheme.typography.bodyLarge,
-            color = if (enabled) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+    val options = listOf(
+        Triple(BackupFrequency.OFF, "Off", "${tagPrefix}_off"),
+        Triple(BackupFrequency.DAILY, "Daily", "${tagPrefix}_daily"),
+        Triple(BackupFrequency.WEEKLY, "Weekly", "${tagPrefix}_weekly"),
+    )
+    SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+        options.forEachIndexed { index, (frequency, label, tag) ->
+            SegmentedButton(
+                selected = selected == frequency,
+                onClick = { onSelect(frequency) },
+                enabled = enabled,
+                shape = SegmentedButtonDefaults.itemShape(index = index, count = options.size),
+                modifier = Modifier.testTag(tag),
+                label = {
+                    Text(
+                        text = label,
+                        maxLines = 1,
+                        softWrap = false,
+                    )
+                },
+            )
+        }
     }
 }
 
@@ -374,11 +408,17 @@ private fun PassphraseDialog(
     isSaving: Boolean,
     error: String?,
     onDismiss: () -> Unit,
-    onConfirm: (String, String) -> Unit,
+    onConfirm: (String, String, BackupFrequency?) -> Unit,
 ) {
     var passphrase by remember { mutableStateOf("") }
     var confirmation by remember { mutableStateOf("") }
     var showText by remember { mutableStateOf(false) }
+    var selectedFrequency by remember { mutableStateOf(BackupFrequency.WEEKLY) }
+    val submit = {
+        if (!isSaving) {
+            onConfirm(passphrase, confirmation, if (isChange) null else selectedFrequency)
+        }
+    }
 
     AlertDialog(
         onDismissRequest = { if (!isSaving) onDismiss() },
@@ -436,11 +476,30 @@ private fun PassphraseDialog(
                         autoCorrectEnabled = false,
                         imeAction = ImeAction.Done,
                     ),
-                    keyboardActions = KeyboardActions(
-                        onDone = { if (!isSaving) onConfirm(passphrase, confirmation) }
-                    ),
+                    keyboardActions = KeyboardActions(onDone = { submit() }),
                     modifier = Modifier.fillMaxWidth().testTag("passphrase_confirm_input"),
                 )
+                if (!isChange) {
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text(
+                            text = "Automatic backup",
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.primary,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                        BackupFrequencySegmentedControl(
+                            selected = selectedFrequency,
+                            enabled = !isSaving,
+                            tagPrefix = "setup_freq",
+                            onSelect = { selectedFrequency = it },
+                        )
+                        Text(
+                            text = "Runs automatically on Wi-Fi while charging.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
                 if (error != null) {
                     Text(
                         text = error,
@@ -453,7 +512,7 @@ private fun PassphraseDialog(
         },
         confirmButton = {
             Button(
-                onClick = { onConfirm(passphrase, confirmation) },
+                onClick = submit,
                 enabled = !isSaving,
                 modifier = Modifier.testTag("passphrase_save_button"),
             ) {
@@ -492,6 +551,12 @@ internal fun backupStageLabel(progress: BackupProgress): String = when (progress
 internal fun formatBackupTimestamp(timestampMs: Long): String =
     DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT, Locale.getDefault())
         .format(Date(timestampMs))
+
+internal fun formatBackupScheduleSummary(frequency: BackupFrequency): String = when (frequency) {
+    BackupFrequency.OFF -> "Auto-backup: Off"
+    BackupFrequency.DAILY -> "Auto-backup: Daily · Wi-Fi & charging"
+    BackupFrequency.WEEKLY -> "Auto-backup: Weekly · Wi-Fi & charging"
+}
 
 internal fun formatBackupSize(bytes: Long): String = when {
     bytes >= 1024L * 1024L -> String.format(Locale.US, "%.1f MB", bytes / (1024.0 * 1024.0))

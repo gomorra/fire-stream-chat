@@ -356,6 +356,23 @@ function readOptionValue(argv, index, flag, description) {
   return next;
 }
 
+function parseUidList(raw, flagName) {
+  const seen = new Set();
+  const uids = [];
+  for (const part of raw.split(',')) {
+    const uid = part.trim();
+    if (!uid) continue;
+    if (!isValidUid(uid)) {
+      throw new Error(`Invalid UID in ${flagName}: "${uid}"`);
+    }
+    if (!seen.has(uid)) {
+      seen.add(uid);
+      uids.push(uid);
+    }
+  }
+  return uids;
+}
+
 /**
  * Parses CLI arguments. Defaults to dry-run; rejects conflicting or unknown flags.
  */
@@ -364,6 +381,8 @@ export function parseArgs(argv) {
   let dryRunFlag = false;
   let help = false;
   let usersRaw = null;
+  let allowUnverifiedUsersRaw = null;
+  let allowOrphanedChats = false;
   let bucket = null;
   let credentials = null;
 
@@ -379,6 +398,17 @@ export function parseArgs(argv) {
       usersRaw = readOptionValue(argv, i++, '--users', 'a comma-separated list of UIDs');
     } else if (arg.startsWith('--users=')) {
       usersRaw = arg.slice('--users='.length);
+    } else if (arg === '--allow-unverified-users') {
+      allowUnverifiedUsersRaw = readOptionValue(
+        argv,
+        i++,
+        '--allow-unverified-users',
+        'a comma-separated list of UIDs'
+      );
+    } else if (arg.startsWith('--allow-unverified-users=')) {
+      allowUnverifiedUsersRaw = arg.slice('--allow-unverified-users='.length);
+    } else if (arg === '--allow-orphaned-chats') {
+      allowOrphanedChats = true;
     } else if (arg === '--bucket') {
       bucket = readOptionValue(argv, i++, '--bucket', 'a storage bucket name');
     } else if (arg.startsWith('--bucket=')) {
@@ -393,7 +423,16 @@ export function parseArgs(argv) {
   }
 
   if (help) {
-    return { help: true, execute: false, dryRun: true, users: [], bucket, credentials };
+    return {
+      help: true,
+      execute: false,
+      dryRun: true,
+      users: [],
+      allowUnverifiedUsers: [],
+      allowOrphanedChats: false,
+      bucket,
+      credentials,
+    };
   }
 
   if (execute && dryRunFlag) {
@@ -404,22 +443,25 @@ export function parseArgs(argv) {
     throw new Error('--users <uid1,uid2> is required so every active user backup can be verified');
   }
 
-  const seen = new Set();
-  const users = [];
-  for (const part of usersRaw.split(',')) {
-    const uid = part.trim();
-    if (!uid) continue;
-    if (!isValidUid(uid)) {
-      throw new Error(`Invalid UID in --users: "${uid}"`);
-    }
-    if (!seen.has(uid)) {
-      seen.add(uid);
-      users.push(uid);
-    }
-  }
-
+  const users = parseUidList(usersRaw, '--users');
   if (users.length === 0) {
     throw new Error('--users must contain at least one non-empty UID');
+  }
+
+  const allowUnverifiedUsers =
+    allowUnverifiedUsersRaw !== null
+      ? parseUidList(allowUnverifiedUsersRaw, '--allow-unverified-users')
+      : [];
+  if (allowUnverifiedUsersRaw !== null && allowUnverifiedUsers.length === 0) {
+    throw new Error('--allow-unverified-users must contain at least one non-empty UID');
+  }
+
+  const userSet = new Set(users);
+  const overlap = allowUnverifiedUsers.filter((uid) => userSet.has(uid));
+  if (overlap.length > 0) {
+    throw new Error(
+      `UID(s) cannot appear in both --users and --allow-unverified-users: ${overlap.join(', ')}`
+    );
   }
 
   return {
@@ -427,6 +469,8 @@ export function parseArgs(argv) {
     execute,
     dryRun: !execute,
     users,
+    allowUnverifiedUsers,
+    allowOrphanedChats,
     bucket,
     credentials,
   };
@@ -550,19 +594,28 @@ export function buildScrubPlan({ chats, messagesByChat, storageObjectsByChat }) 
 /**
  * Evaluates the mandatory backup safety gate before any scrub mutation may run.
  */
-export function evaluateSafetyGate({ users, plan, backupsByUser }) {
+export function evaluateSafetyGate({
+  users,
+  plan,
+  backupsByUser,
+  allowUnverifiedUsers = [],
+  allowOrphanedChats = false,
+}) {
   const failures = [];
   const uncoveredChats = [];
+  const waivedChats = [];
   const userReports = [];
 
   if (!Array.isArray(users) || users.length === 0) {
     failures.push('No user UIDs supplied in --users');
-    return { ok: false, failures, userReports, uncoveredChats };
+    return { ok: false, failures, userReports, uncoveredChats, waivedChats };
   }
 
   const userSet = new Set(users);
+  const waivedUserSet = new Set(Array.isArray(allowUnverifiedUsers) ? allowUnverifiedUsers : []);
 
-  // 1. Every 1:1 chat with scrubbable data must have all participants covered by --users.
+  // 1. Every 1:1 chat with scrubbable data must have all participants covered by --users
+  //    (unless explicitly waived via --allow-unverified-users or --allow-orphaned-chats).
   for (const chatPlan of plan.chatPlans) {
     const hasWork =
       chatPlan.plaintextMessages.length > 0 ||
@@ -571,18 +624,29 @@ export function evaluateSafetyGate({ users, plan, backupsByUser }) {
     if (!hasWork) continue;
 
     if (chatPlan.participants.length === 0) {
-      const msg = `1:1 chat ${chatPlan.chatId} has scrubbable data but no valid participants array`;
-      uncoveredChats.push({ chatId: chatPlan.chatId, missingUids: [] });
-      failures.push(msg);
+      if (allowOrphanedChats) {
+        waivedChats.push({ chatId: chatPlan.chatId, waivedUids: [], orphaned: true });
+      } else {
+        const msg = `1:1 chat ${chatPlan.chatId} has scrubbable data but no valid participants array`;
+        uncoveredChats.push({ chatId: chatPlan.chatId, missingUids: [] });
+        failures.push(msg);
+      }
       continue;
     }
 
-    const missingUids = chatPlan.participants.filter((uid) => !userSet.has(uid));
+    const missingUids = chatPlan.participants.filter(
+      (uid) => !userSet.has(uid) && !waivedUserSet.has(uid)
+    );
+    const waivedUids = chatPlan.participants.filter(
+      (uid) => !userSet.has(uid) && waivedUserSet.has(uid)
+    );
     if (missingUids.length > 0) {
       uncoveredChats.push({ chatId: chatPlan.chatId, missingUids });
       failures.push(
         `1:1 chat ${chatPlan.chatId} has scrubbable data for unverified participant(s): ${missingUids.join(', ')} (add them to --users)`
       );
+    } else if (waivedUids.length > 0) {
+      waivedChats.push({ chatId: chatPlan.chatId, waivedUids, orphaned: false });
     }
   }
 
@@ -712,6 +776,7 @@ export function evaluateSafetyGate({ users, plan, backupsByUser }) {
     failures,
     userReports,
     uncoveredChats,
+    waivedChats,
   };
 }
 
@@ -724,6 +789,7 @@ export async function executeScrub({
   safetyResult,
   execute,
   batchSize = DEFAULT_FIRESTORE_BATCH_SIZE,
+  verifyStorageDeletePermission = null,
   deleteMessageBatch,
   scrubChatPreview,
   deleteStorageObject,
@@ -742,6 +808,16 @@ export async function executeScrub({
   if (!safetyResult?.ok) {
     const reason = safetyResult?.failures?.join('; ') || 'Safety gate did not pass';
     throw new Error(`Refusing to execute scrub — safety gate failed: ${reason}`);
+  }
+
+  // Preflight Storage delete permission before mutating any Firestore document so a
+  // Storage-read-only credential (such as the sticker-namer service account) cannot
+  // leave a half-scrubbed state where Firestore docs are deleted and Storage fails 403.
+  if (
+    plan.totals.storageObjectsToDelete > 0 &&
+    typeof verifyStorageDeletePermission === 'function'
+  ) {
+    await verifyStorageDeletePermission();
   }
 
   const effectiveBatchSize = Math.max(1, Math.min(batchSize, 499));
@@ -797,6 +873,12 @@ export function formatReport({ args, plan, safetyResult, execution }) {
   lines.push('=== FireStream Plaintext Scrub ===');
   lines.push(`Mode: ${args.execute ? 'EXECUTE' : 'DRY-RUN (no mutations)'}`);
   lines.push(`Verified users: ${args.users.join(', ')}`);
+  if (Array.isArray(args.allowUnverifiedUsers) && args.allowUnverifiedUsers.length > 0) {
+    lines.push(`Waived unverified users: ${args.allowUnverifiedUsers.join(', ')}`);
+  }
+  if (args.allowOrphanedChats) {
+    lines.push('Waived orphaned 1:1 chats: enabled');
+  }
   lines.push('');
   lines.push('--- Backup Safety Gate ---');
   for (const report of safetyResult.userReports) {
@@ -822,6 +904,12 @@ export function formatReport({ args, plan, safetyResult, execution }) {
     for (const err of report.errors) {
       lines.push(`    ERROR: ${err}`);
     }
+  }
+  for (const waived of safetyResult.waivedChats ?? []) {
+    const detail = waived.orphaned
+      ? 'orphaned chat (missing participants array — waived)'
+      : `waived unverified participants: ${waived.waivedUids.join(', ')}`;
+    lines.push(`  [WAIVED] 1:1 chat ${waived.chatId}: ${detail}`);
   }
   for (const uncovered of safetyResult.uncoveredChats) {
     const detail = uncovered.missingUids.length
@@ -861,15 +949,17 @@ export function formatReport({ args, plan, safetyResult, execution }) {
 
 function printUsage() {
   console.log(`Usage:
-  node scripts/scrub-plaintext.mjs --users <uid1,uid2> [--dry-run | --execute] [--bucket <bucket>] [--credentials <key.json>]
+  node scripts/scrub-plaintext.mjs --users <uid1,uid2> [--allow-unverified-users <uid3,...>] [--allow-orphaned-chats] [--dry-run | --execute] [--bucket <bucket>] [--credentials <key.json>]
 
 Options:
-  --users <uid1,uid2>   Comma-separated Firebase Auth UIDs whose backups must be verified (required).
-  --dry-run             Report safety gate and scrub plan without modifying anything (default).
-  --execute             Execute the scrub (hard-fails if any safety gate check fails).
-  --bucket <name>       Firebase Storage bucket (or set FIREBASE_STORAGE_BUCKET / BUCKET).
-  --credentials <path>  Service account JSON key path (or set GOOGLE_APPLICATION_CREDENTIALS / KEY_FILE).
-  -h, --help            Show this help message.
+  --users <uid1,uid2>               Comma-separated Firebase Auth UIDs whose backups must be verified (required).
+  --allow-unverified-users <uids>   Comma-separated UIDs whose backup check is explicitly waived.
+  --allow-orphaned-chats            Allow scrubbing 1:1 chats with an empty/missing participants array.
+  --dry-run                         Report safety gate and scrub plan without modifying anything (default).
+  --execute                         Execute the scrub (hard-fails if any safety gate check fails).
+  --bucket <name>                   Firebase Storage bucket (or set FIREBASE_STORAGE_BUCKET / BUCKET).
+  --credentials <path>              Service account JSON key path (or set GOOGLE_APPLICATION_CREDENTIALS / KEY_FILE).
+  -h, --help                        Show this help message.
 `);
 }
 
@@ -1044,6 +1134,8 @@ async function main(argv) {
     users: args.users,
     plan,
     backupsByUser,
+    allowUnverifiedUsers: args.allowUnverifiedUsers,
+    allowOrphanedChats: args.allowOrphanedChats,
   });
 
   if (!safetyResult.ok) {
@@ -1060,6 +1152,15 @@ async function main(argv) {
     plan,
     safetyResult,
     execute: args.execute,
+    verifyStorageDeletePermission: async () => {
+      const [perms] = await bucket.iam.testPermissions(['storage.objects.delete']);
+      if (!perms || perms['storage.objects.delete'] !== true) {
+        throw new Error(
+          `Active credentials lack "storage.objects.delete" permission on bucket "${bucketName}". ` +
+            'Aborting before modifying Firestore — pass a full Firebase Admin SDK credential via --credentials.'
+        );
+      }
+    },
     deleteMessageBatch: async (chatId, messageIds) => {
       const batch = db.batch();
       const col = db.collection('chats').doc(chatId).collection('messages');

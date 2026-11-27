@@ -47,6 +47,7 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -80,6 +81,7 @@ class BackupManager internal constructor(
     private val minManifestIterations: Int,
     private val databaseName: String,
     private val clock: () -> Long,
+    private val legacyUploadRetryDelayMs: Long = LEGACY_UPLOAD_RETRY_DELAY_MS,
 ) : BackupRepository {
 
     @Inject
@@ -402,7 +404,7 @@ class BackupManager internal constructor(
                         withContext(Dispatchers.IO) {
                             BackupCrypto.encryptLegacyMediaFile(sourceFile, tempEnc, targetKey.masterKey, msg.id)
                         }
-                        backupSource.uploadLegacyMediaBlob(uid, targetKeyGen, msg.id, tempEnc)
+                        uploadLegacyBlobWithRetry(uid, targetKeyGen, msg.id, tempEnc)
                         uploadedLegacyIds += msg.id
                     } catch (e: Exception) {
                         e.rethrowIfCancellation()
@@ -801,6 +803,35 @@ class BackupManager internal constructor(
         }
     }
 
+    private suspend fun uploadLegacyBlobWithRetry(
+        uid: String,
+        keyGen: String,
+        messageId: String,
+        file: File,
+    ) {
+        var lastError: Exception? = null
+        for (attempt in 1..LEGACY_UPLOAD_MAX_ATTEMPTS) {
+            try {
+                backupSource.uploadLegacyMediaBlob(uid, keyGen, messageId, file)
+                return
+            } catch (e: Exception) {
+                e.rethrowIfCancellation()
+                lastError = e
+                if (attempt < LEGACY_UPLOAD_MAX_ATTEMPTS) {
+                    Log.w(
+                        TAG,
+                        "Legacy media upload attempt $attempt/$LEGACY_UPLOAD_MAX_ATTEMPTS failed for msg=$messageId, retrying",
+                        e,
+                    )
+                    if (legacyUploadRetryDelayMs > 0L) {
+                        delay(legacyUploadRetryDelayMs * attempt)
+                    }
+                }
+            }
+        }
+        throw lastError!!
+    }
+
     private fun sweepStaleTempFiles() {
         context.cacheDir.listFiles()?.forEach { file ->
             if (file.name.startsWith("backup_snapshot_") || file.name.startsWith("restore_db_")) {
@@ -840,5 +871,7 @@ class BackupManager internal constructor(
         private const val DATABASE_NAME = "fire_stream_chat.db"
         private const val BUFFER_SIZE = 64 * 1024
         private const val MAX_UNCOMPRESSED_DB_BYTES = 2L * 1024L * 1024L * 1024L // 2 GiB safety cap
+        private const val LEGACY_UPLOAD_MAX_ATTEMPTS = 3
+        private const val LEGACY_UPLOAD_RETRY_DELAY_MS = 2_000L
     }
 }

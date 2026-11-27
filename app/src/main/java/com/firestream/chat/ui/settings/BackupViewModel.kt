@@ -82,7 +82,11 @@ class BackupViewModel @Inject constructor(
         _uiState.update { it.copy(showPassphraseDialog = false, passphraseError = null) }
     }
 
-    fun savePassphrase(passphrase: String, confirmation: String) {
+    fun savePassphrase(
+        passphrase: String,
+        confirmation: String,
+        initialFrequency: BackupFrequency? = null,
+    ) {
         if (_uiState.value.isSavingPassphrase) return
         if (passphrase.length < MIN_BACKUP_PASSPHRASE_LENGTH) {
             _uiState.update {
@@ -100,6 +104,7 @@ class BackupViewModel @Inject constructor(
             }
             return
         }
+        val wasAlreadyConfigured = _uiState.value.status.isPassphraseConfigured
         val wasAlreadyBackedUp = _uiState.value.status.lastBackupAt != null
         val shouldStartBackup = wasAlreadyBackedUp || pendingBackupAfterPassphrase
         pendingBackupAfterPassphrase = false
@@ -107,6 +112,9 @@ class BackupViewModel @Inject constructor(
         appScope.launch {
             backupRepository.configurePassphrase(passphrase)
                 .onSuccess {
+                    if (!wasAlreadyConfigured && initialFrequency != null) {
+                        backupRepository.setBackupFrequency(initialFrequency)
+                    }
                     _uiState.update {
                         it.copy(
                             isSavingPassphrase = false,
@@ -153,7 +161,7 @@ class BackupViewModel @Inject constructor(
                     val message = if (summary.legacyMediaComplete) {
                         "Encrypted backup complete."
                     } else {
-                        "Backup saved, but some legacy media could not be downloaded."
+                        "Backup saved, but some legacy media could not be backed up. Tap Back up now to retry."
                     }
                     _uiState.update { it.copy(snackbarMessage = message) }
                 }
